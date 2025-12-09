@@ -2336,4 +2336,101 @@
         transform: translateX(-50%) translateY(0);
       }
     }
+
+    /* Mobile Touch Support */
+    .move-mode {
+      opacity: 0.6 !important;
+      transform: scale(0.95);
+      transition: all 0.2s ease;
+    }
+
+    .drop-before {
+      border-top: 3px solid var(--md-sys-color-primary) !important;
+    }
+
+    .drop-after {
+      border-bottom: 3px solid var(--md-sys-color-primary) !important;
+    }
+
+    .drop-into {
+      background: var(--md-sys-color-primary-container) !important;
+      border: 2px solid var(--md-sys-color-primary) !important;
+    }
+
+    /* Mobile Responsive Styles */
+    @media (max-width: 767px) {
+      .header {
+        flex-direction: column;
+        padding: 12px;
+        gap: 12px;
+      }
+
+      .header-left, .header-right {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .bookmark-item, .folder-item {
+        padding: 16px 12px;
+        min-height: 48px; /* Larger touch targets */
+      }
+
+      .preview-image {
+        display: none; /* Hide previews to avoid conflicts */
+      }
+
+      .hamburger-menu {
+        display: flex !important; /* Always visible on mobile */
+        position: relative;
+        z-index: 100;
+      }
+
+      .bookmark-title, .folder-title {
+        font-size: 16px; /* Larger text for readability */
+      }
+
+      .btn {
+        min-height: 44px; /* Larger touch target */
+        min-width: 44px;
+      }
+
+      .modal-content {
+        width: 95%;
+        max-width: 500px;
+        margin: 20px auto;
+      }
+
+      .search-bar {
+        width: 100%;
+      }
+    }
+
+    /* Tablet Responsive Styles */
+    @media (min-width: 768px) and (max-width: 1024px) {
+      .settings-modal {
+        width: 90%;
+        max-width: 600px;
+      }
+
+      .bookmark-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    /* Touch-friendly controls */
+    @media (hover: none) {
+      .bookmark-item:hover,
+      .folder-item:hover {
+        background: var(--md-sys-color-surface-variant);
+      }
+
+      .hamburger-menu {
+        display: flex !important;
+      }
+
+      /* Disable hover previews on touch devices */
+      .preview-image {
+        display: none !important;
+      }
+    }
   </style>

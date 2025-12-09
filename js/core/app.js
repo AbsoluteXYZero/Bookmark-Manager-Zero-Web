@@ -12,6 +12,11 @@ import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
 import uiManager from './ui.js';
 import scannerService from './scanner.js';
+import { exportAsHTML } from '../import-export/html-exporter.js';
+import { exportAsJSON } from '../import-export/json-exporter.js';
+import { importFromHTML } from '../import-export/html-parser.js';
+import { importFromJSON } from '../import-export/json-parser.js';
+import touchHandler from '../mobile/touch-handler.js';
 
 class App {
   constructor() {
@@ -178,6 +183,9 @@ class App {
     // Initialize scanner service
     await scannerService.init();
 
+    // Initialize touch handler for mobile
+    touchHandler.init();
+
     // Render bookmarks
     const tree = bookmarkManager.getTree();
     uiManager.renderBookmarks(tree);
@@ -311,6 +319,22 @@ class App {
       });
     }
 
+    // Import button
+    const importBtn = document.getElementById('importBtn');
+    if (importBtn) {
+      importBtn.addEventListener('click', () => {
+        this.showImportModal();
+      });
+    }
+
+    // Export button
+    const exportBtn = document.getElementById('exportBtn');
+    if (exportBtn) {
+      exportBtn.addEventListener('click', () => {
+        this.showExportModal();
+      });
+    }
+
     // Close modals on background click
     document.querySelectorAll('.modal').forEach(modal => {
       modal.addEventListener('click', (e) => {
@@ -347,6 +371,12 @@ class App {
    * Set up sync event listeners
    */
   setupSyncListeners() {
+    // Touch move event (from mobile touch handler)
+    window.addEventListener('bookmark:move', async (e) => {
+      const { draggedId, targetId, position } = e.detail;
+      await this.handleTouchMove(draggedId, targetId, position);
+    });
+
     window.addEventListener('sync:online', () => {
       this.showToast('Back online', 'success');
       this.hideOfflineBanner();
@@ -404,6 +434,200 @@ class App {
   showSettingsModal() {
     // TODO: Implement settings modal
     console.log('Show settings modal');
+  }
+
+  /**
+   * Show import modal
+   */
+  showImportModal() {
+    // Create a file input for import
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.html,.json';
+
+    input.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        let bookmarkTree;
+        const fileName = file.name.toLowerCase();
+
+        if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
+          this.showToast('Importing HTML bookmarks...', 'info');
+          bookmarkTree = await importFromHTML(file);
+        } else if (fileName.endsWith('.json')) {
+          this.showToast('Importing JSON bookmarks...', 'info');
+          bookmarkTree = await importFromJSON(file);
+        } else {
+          this.showToast('Unsupported file format. Please use HTML or JSON.', 'error');
+          return;
+        }
+
+        // Confirm import with user
+        const confirmMsg = `Import ${this.countBookmarks(bookmarkTree)} bookmarks? This will replace your current bookmarks.`;
+        if (!confirm(confirmMsg)) {
+          this.showToast('Import cancelled', 'info');
+          return;
+        }
+
+        // Load the imported tree
+        await bookmarkManager.loadTree(bookmarkTree);
+
+        // Sync to Gist
+        await syncManager.syncToRemote();
+
+        // Re-render UI
+        const tree = bookmarkManager.getTree();
+        uiManager.renderBookmarks(tree);
+
+        this.showToast('Bookmarks imported successfully!', 'success');
+      } catch (error) {
+        console.error('Import failed:', error);
+        this.showToast(`Import failed: ${error.message}`, 'error');
+      }
+    };
+
+    input.click();
+  }
+
+  /**
+   * Show export modal
+   */
+  showExportModal() {
+    // Create a simple modal to choose export format
+    const modal = document.createElement('div');
+    modal.className = 'modal';
+    modal.style.display = 'flex';
+
+    modal.innerHTML = `
+      <div class="modal-content" style="max-width: 400px;">
+        <h2>Export Bookmarks</h2>
+        <p>Choose export format:</p>
+        <div style="display: flex; gap: 10px; margin-top: 20px;">
+          <button id="exportHTMLBtn" class="btn btn-primary" style="flex: 1;">
+            Export as HTML
+          </button>
+          <button id="exportJSONBtn" class="btn btn-primary" style="flex: 1;">
+            Export as JSON
+          </button>
+        </div>
+        <button id="cancelExportBtn" class="btn" style="margin-top: 10px; width: 100%;">
+          Cancel
+        </button>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    // Export HTML
+    modal.querySelector('#exportHTMLBtn').addEventListener('click', () => {
+      try {
+        const tree = bookmarkManager.getTree();
+        const filename = exportAsHTML(tree);
+        this.showToast(`Exported as ${filename}`, 'success');
+        modal.remove();
+      } catch (error) {
+        console.error('Export failed:', error);
+        this.showToast(`Export failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Export JSON
+    modal.querySelector('#exportJSONBtn').addEventListener('click', () => {
+      try {
+        const tree = bookmarkManager.getTree();
+        const filename = exportAsJSON(tree);
+        this.showToast(`Exported as ${filename}`, 'success');
+        modal.remove();
+      } catch (error) {
+        console.error('Export failed:', error);
+        this.showToast(`Export failed: ${error.message}`, 'error');
+      }
+    });
+
+    // Cancel
+    modal.querySelector('#cancelExportBtn').addEventListener('click', () => {
+      modal.remove();
+    });
+
+    // Close on background click
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) {
+        modal.remove();
+      }
+    });
+  }
+
+  /**
+   * Handle touch move event from mobile
+   */
+  async handleTouchMove(draggedId, targetId, position) {
+    try {
+      console.log(`Moving ${draggedId} ${position} ${targetId}`);
+
+      // Get target bookmark/folder
+      const target = bookmarkManager.getBookmark(targetId);
+      if (!target) {
+        this.showToast('Invalid drop target', 'error');
+        return;
+      }
+
+      // Determine destination based on position
+      let destination = {};
+
+      if (position === 'into' && target.type === 'folder') {
+        // Move into folder
+        destination.parentId = targetId;
+        destination.index = 0; // Add to beginning of folder
+      } else {
+        // Move before or after
+        destination.parentId = target.parentId;
+
+        // Find target's index in parent
+        const parent = bookmarkManager.getBookmark(target.parentId);
+        if (parent && parent.children) {
+          const targetIndex = parent.children.findIndex(child => child.id === targetId);
+          destination.index = position === 'before' ? targetIndex : targetIndex + 1;
+        }
+      }
+
+      // Perform the move
+      await bookmarkManager.move(draggedId, destination);
+
+      // Re-render UI
+      const tree = bookmarkManager.getTree();
+      uiManager.renderBookmarks(tree);
+
+      this.showToast('Bookmark moved', 'success');
+    } catch (error) {
+      console.error('Failed to move bookmark:', error);
+      this.showToast(`Move failed: ${error.message}`, 'error');
+    }
+  }
+
+  /**
+   * Count total bookmarks in tree (for import confirmation)
+   */
+  countBookmarks(tree) {
+    let count = 0;
+
+    const countNode = (node) => {
+      if (node.type === 'bookmark' || node.url) {
+        count++;
+      }
+      if (node.children) {
+        node.children.forEach(countNode);
+      }
+    };
+
+    if (tree.roots) {
+      Object.values(tree.roots).forEach(root => countNode(root));
+    } else {
+      countNode(tree);
+    }
+
+    return count;
   }
 
   /**
