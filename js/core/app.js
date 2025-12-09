@@ -11,6 +11,7 @@ import gistAdapter from '../storage/gist-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
 import uiManager from './ui.js';
+import scannerService from './scanner.js';
 
 class App {
   constructor() {
@@ -174,6 +175,9 @@ class App {
     // Initialize UI manager
     await uiManager.init();
 
+    // Initialize scanner service
+    await scannerService.init();
+
     // Render bookmarks
     const tree = bookmarkManager.getTree();
     uiManager.renderBookmarks(tree);
@@ -296,6 +300,14 @@ class App {
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
         await this.logout();
+      });
+    }
+
+    // Rescan all button
+    const rescanAllBtn = document.getElementById('rescanAllBtn');
+    if (rescanAllBtn) {
+      rescanAllBtn.addEventListener('click', async () => {
+        await scannerService.scanAllBookmarks(true);
       });
     }
 

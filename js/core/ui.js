@@ -5,6 +5,7 @@
  */
 
 import bookmarkManager from './bookmarks.js';
+import scannerService from './scanner.js';
 
 class UIManager {
   constructor() {
@@ -659,8 +660,7 @@ class UIManager {
         console.log('Add subfolder to:', folder.id);
         break;
       case 'rescan-folder':
-        // TODO: Trigger scan for folder
-        console.log('Rescan folder:', folder.id);
+        await scannerService.scanFolder(folder, true);
         break;
     }
   }
@@ -696,8 +696,8 @@ class UIManager {
         }
         break;
       case 'recheck':
-        // TODO: Trigger security recheck
-        console.log('Recheck security for:', bookmark.url);
+        await scannerService.scanBookmark(bookmark, true);
+        this.showToast('Rescanning bookmark...');
         break;
     }
   }
