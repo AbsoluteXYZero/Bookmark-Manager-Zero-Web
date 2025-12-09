@@ -231,3 +231,4 @@ Contributions are welcome! Please:
 ## Acknowledgments
 
 Built with love by AbsoluteXYZero. Powered by GitHub Gists and vanilla JavaScript.
+# Trigger workflow
