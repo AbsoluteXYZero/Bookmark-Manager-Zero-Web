@@ -7,7 +7,7 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 - **GitHub Gist Storage**: Your bookmarks are stored in a private Gist in your GitHub account
 - **Bidirectional Sync**: Changes sync automatically between devices
 - **Offline Support**: Work offline with IndexedDB caching
-- **Dual OAuth**: Choose between standard OAuth or device code flow
+- **Device Code OAuth**: Secure authentication without exposing secrets
 - **Import/Export**: Support for HTML (Netscape format) and JSON bookmark files
 - **Link Scanning**: Detect dead links and parked domains
 - **Safety Checking**: Multi-layer security scanning with local blocklists
@@ -24,7 +24,7 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 
 - **Frontend**: Vanilla JavaScript (no frameworks)
 - **Storage**: GitHub Gists API + IndexedDB
-- **Authentication**: GitHub OAuth (Web Flow + Device Flow)
+- **Authentication**: GitHub OAuth Device Code Flow (100% static-friendly)
 - **Hosting**: GitHub Pages
 - **Security**: AES-256-GCM encryption for tokens and API keys
 
@@ -33,11 +33,13 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 ### For Users
 
 1. Visit the website
-2. Choose your preferred login method:
-   - **Standard Login**: Redirects to GitHub for authorization
-   - **Device Code Login**: Enter a code on GitHub (works on any device)
-3. Grant `gist` permission
-4. Start managing your bookmarks!
+2. Click "Login with GitHub"
+3. You'll receive a code like `ABCD-1234`
+4. Open GitHub in a new tab and paste the code
+5. Grant `gist` permission
+6. Start managing your bookmarks!
+
+**Note**: Your bookmarks are stored in YOUR private Gist. The website owner cannot access your data.
 
 ### For Developers
 
@@ -54,6 +56,22 @@ npx serve .
 # Open in browser
 open http://localhost:8000
 ```
+
+#### Setting Up OAuth (Website Owner Only)
+
+If you're deploying your own instance:
+
+1. Go to https://github.com/settings/developers
+2. Click "New OAuth App"
+3. Fill in:
+   - **Application name**: Bookmark Manager Zero Web
+   - **Homepage URL**: Your website URL
+   - **Authorization callback URL**: (leave blank - not used for device flow)
+4. Click "Register application"
+5. Copy the **Client ID**
+6. Open `config/github-oauth.js` and replace `YOUR_CLIENT_ID_HERE`
+
+**Important**: You do NOT need the Client Secret for device flow!
 
 ## Project Structure
 
@@ -74,9 +92,8 @@ Bookmark-Manager-Zero-Website/
 │   │   ├── sync-manager.js     # Sync + edit locking
 │   │   └── storage-adapter.js  # Unified storage interface
 │   ├── auth/
-│   │   ├── oauth-web.js        # Standard OAuth flow
-│   │   ├── oauth-device.js     # Device flow
-│   │   └── auth-manager.js     # Token management
+│   │   ├── oauth-device.js     # Device code OAuth flow
+│   │   └── auth-manager.js     # Token encryption & management
 │   ├── import-export/
 │   │   ├── html-parser.js      # HTML bookmark parser
 │   │   ├── json-parser.js      # JSON parser
