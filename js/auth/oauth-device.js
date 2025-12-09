@@ -22,8 +22,6 @@ class OAuthDevice {
    * Request device and user codes from GitHub
    */
   async requestDeviceCode() {
-    const config = GITHUB_OAUTH.active;
-
     try {
       const response = await fetch(GITHUB_OAUTH.endpoints.deviceCode, {
         method: 'POST',
@@ -32,8 +30,8 @@ class OAuthDevice {
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          client_id: config.clientId,
-          scope: config.scope
+          client_id: GITHUB_OAUTH.clientId,
+          scope: GITHUB_OAUTH.scope
         })
       });
 
@@ -85,7 +83,6 @@ class OAuthDevice {
     }
 
     this.isPolling = true;
-    const config = GITHUB_OAUTH.active;
     const startTime = Date.now();
     const expiresAt = startTime + (this.expiresIn * 1000);
 
@@ -106,7 +103,7 @@ class OAuthDevice {
               'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-              client_id: config.clientId,
+              client_id: GITHUB_OAUTH.clientId,
               device_code: this.deviceCode,
               grant_type: 'urn:ietf:params:oauth:grant-type:device_code'
             })

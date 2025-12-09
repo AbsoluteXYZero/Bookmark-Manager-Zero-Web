@@ -7,7 +7,6 @@
 import dbManager from '../storage/indexeddb.js';
 import authManager from '../auth/auth-manager.js';
 import oauthDevice from '../auth/oauth-device.js';
-import oauthWeb from '../auth/oauth-web.js';
 import gistAdapter from '../storage/gist-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
@@ -81,19 +80,6 @@ class App {
         this.showLoginScreen();
       }
     } else {
-      // Handle OAuth callback if present
-      if (oauthWeb.isCallback()) {
-        try {
-          await oauthWeb.handleCallback();
-          // Reload to clear URL params
-          window.location.href = window.location.origin + window.location.pathname;
-          return;
-        } catch (error) {
-          console.error('OAuth callback failed:', error);
-          this.showError('Authentication failed', error);
-        }
-      }
-
       this.showLoginScreen();
     }
   }
@@ -105,14 +91,13 @@ class App {
     document.getElementById('loginScreen').classList.remove('hidden');
     document.getElementById('mainApp').classList.add('hidden');
 
-    // Set up login button handlers
-    document.getElementById('standardLoginBtn').onclick = () => {
-      oauthWeb.initiateLogin();
-    };
-
-    document.getElementById('deviceLoginBtn').onclick = async () => {
-      await this.startDeviceFlow();
-    };
+    // Set up login button handler (device flow only)
+    const loginBtn = document.getElementById('deviceLoginBtn');
+    if (loginBtn) {
+      loginBtn.onclick = async () => {
+        await this.startDeviceFlow();
+      };
+    }
   }
 
   /**
