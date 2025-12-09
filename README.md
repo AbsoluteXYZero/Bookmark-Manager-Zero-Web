@@ -2,6 +2,9 @@
 
 A fully static web application for managing bookmarks with GitHub Gist synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension.
 
+**Live Website**: https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/
+**Custom Domain**: https://bmzweb.absolutezero.fyi (once DNS is configured)
+
 ## Features
 
 - **GitHub Gist Storage**: Your bookmarks are stored in a private Gist in your GitHub account
