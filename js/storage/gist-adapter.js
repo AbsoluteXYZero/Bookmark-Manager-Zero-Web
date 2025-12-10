@@ -7,7 +7,22 @@ import authManager from '../auth/auth-manager.js';
 
 class GistAdapter {
   constructor() {
-    this.apiBase = 'https://api.github.com';
+    // Check if we should use a proxy (for networks that block GitHub)
+    const useProxy = localStorage.getItem('bmz_use_proxy') === 'true';
+    // Default to Cloudflare Worker proxy on absolutezero.fyi domain
+    const proxyUrl = localStorage.getItem('bmz_proxy_url') || 'https://github-api.absolutezero.fyi';
+
+    if (useProxy) {
+      // For Cloudflare Worker proxy, we just use the proxy URL directly
+      // The worker handles the path forwarding to api.github.com
+      this.apiBase = proxyUrl;
+      console.log('[GistAdapter] Using Cloudflare Worker proxy:', proxyUrl);
+    } else {
+      this.apiBase = 'https://api.github.com';
+    }
+
+    this.useProxy = useProxy;
+    this.proxyUrl = proxyUrl;
     this.gistId = null;
   }
 
@@ -28,16 +43,69 @@ class GistAdapter {
   }
 
   /**
+   * Make a fetch request with automatic proxy fallback
+   * If direct connection fails, automatically retry with Cloudflare Worker proxy
+   */
+  async fetchWithFallback(url, options = {}) {
+    try {
+      // Try direct connection first
+      console.log('[GistAdapter] Attempting direct connection...');
+      const response = await fetch(url, options);
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      console.log('[GistAdapter] Direct connection successful');
+      return response;
+    } catch (error) {
+      console.warn('[GistAdapter] Direct connection failed:', error.message);
+
+      // If direct connection failed and we're not already using proxy, try with proxy
+      if (!this.useProxy) {
+        console.log('[GistAdapter] Retrying with Cloudflare Worker proxy...');
+
+        // Temporarily enable proxy
+        const originalApiBase = this.apiBase;
+        this.apiBase = this.proxyUrl;
+
+        // Replace URL with proxied version
+        // For Cloudflare Worker: https://api.github.com/gists -> https://github-api.absolutezero.fyi/gists
+        const proxiedUrl = url.replace('https://api.github.com', this.apiBase);
+
+        try {
+          const proxyResponse = await fetch(proxiedUrl, options);
+
+          if (!proxyResponse.ok) {
+            throw new Error(`HTTP ${proxyResponse.status}`);
+          }
+
+          console.log('[GistAdapter] Cloudflare Worker proxy connection successful - permanently enabling proxy');
+          // If proxy works, keep it enabled
+          this.useProxy = true;
+          localStorage.setItem('bmz_use_proxy', 'true');
+
+          return proxyResponse;
+        } catch (proxyError) {
+          // Restore original apiBase
+          this.apiBase = originalApiBase;
+          console.error('[GistAdapter] Both direct and proxy connections failed');
+          throw new Error(`Connection failed: ${error.message}. Proxy also failed: ${proxyError.message}`);
+        }
+      }
+
+      // If we were already using proxy and it failed, just throw
+      throw error;
+    }
+  }
+
+  /**
    * Get all user's gists
    */
   async getAllGists() {
     try {
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/gists`, { headers });
-
-      if (!response.ok) {
-        throw new Error(`Failed to fetch gists: ${response.status}`);
-      }
+      const response = await this.fetchWithFallback(`${this.apiBase}/gists`, { headers });
 
       return await response.json();
     } catch (error) {
@@ -162,7 +230,7 @@ class GistAdapter {
       const tree = bookmarkTree || defaultTree;
       tree.checksum = await this.calculateChecksum(tree);
 
-      const response = await fetch(`${this.apiBase}/gists`, {
+      const response = await this.fetchWithFallback(`${this.apiBase}/gists`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -175,10 +243,6 @@ class GistAdapter {
           }
         })
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to create Gist: ${response.status}`);
-      }
 
       const gist = await response.json();
       this.gistId = gist.id;
@@ -202,14 +266,7 @@ class GistAdapter {
 
     try {
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/gists/${id}`, { headers });
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          throw new Error('Bookmark Gist not found');
-        }
-        throw new Error(`Failed to read Gist: ${response.status}`);
-      }
+      const response = await this.fetchWithFallback(`${this.apiBase}/gists/${id}`, { headers });
 
       const gist = await response.json();
 
@@ -247,7 +304,7 @@ class GistAdapter {
       };
 
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/gists/${id}`, {
+      const response = await this.fetchWithFallback(`${this.apiBase}/gists/${id}`, {
         method: 'PATCH',
         headers,
         body: JSON.stringify({
@@ -258,10 +315,6 @@ class GistAdapter {
           }
         })
       });
-
-      if (!response.ok) {
-        throw new Error(`Failed to update Gist: ${response.status}`);
-      }
 
       const gist = await response.json();
       console.log('Updated bookmarks in Gist:', id);
@@ -299,14 +352,10 @@ class GistAdapter {
 
     try {
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/gists/${id}`, {
+      const response = await this.fetchWithFallback(`${this.apiBase}/gists/${id}`, {
         method: 'DELETE',
         headers
       });
-
-      if (!response.ok && response.status !== 204) {
-        throw new Error(`Failed to delete Gist: ${response.status}`);
-      }
 
       console.log('Deleted Gist:', id);
       if (this.gistId === id) {
@@ -342,6 +391,49 @@ class GistAdapter {
    */
   getGistId() {
     return this.gistId;
+  }
+
+  /**
+   * Enable proxy for GitHub API requests
+   * @param {string} proxyUrl - Proxy URL (defaults to Cloudflare Worker on absolutezero.fyi)
+   */
+  enableProxy(proxyUrl = 'https://github-api.absolutezero.fyi') {
+    this.useProxy = true;
+    this.proxyUrl = proxyUrl;
+    this.apiBase = proxyUrl;
+
+    localStorage.setItem('bmz_use_proxy', 'true');
+    localStorage.setItem('bmz_proxy_url', proxyUrl);
+
+    console.log('[GistAdapter] Cloudflare Worker proxy enabled:', proxyUrl);
+  }
+
+  /**
+   * Disable proxy and use direct GitHub API access
+   */
+  disableProxy() {
+    this.useProxy = false;
+    this.apiBase = 'https://api.github.com';
+
+    localStorage.setItem('bmz_use_proxy', 'false');
+
+    console.log('[GistAdapter] Proxy disabled');
+  }
+
+  /**
+   * Check if proxy is currently enabled
+   * @returns {boolean}
+   */
+  isProxyEnabled() {
+    return this.useProxy;
+  }
+
+  /**
+   * Get current proxy URL
+   * @returns {string|null}
+   */
+  getProxyUrl() {
+    return this.useProxy ? this.proxyUrl : null;
   }
 
 }
