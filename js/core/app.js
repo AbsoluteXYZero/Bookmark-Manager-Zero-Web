@@ -6,10 +6,11 @@
 
 import dbManager from '../storage/indexeddb.js';
 import authManager from '../auth/auth-manager.js';
-import oauthDevice from '../auth/oauth-device.js';
+import oauthPAT from '../auth/oauth-pat.js';
 import gistAdapter from '../storage/gist-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
+import blocklistService from './blocklist-service.js';
 import uiManager from './ui.js';
 import scannerService from './scanner.js';
 import { exportAsHTML } from '../import-export/html-exporter.js';
@@ -36,6 +37,21 @@ class App {
       // Initialize IndexedDB
       await dbManager.init();
 
+      // Initialize bookmark manager
+      await bookmarkManager.init();
+      console.log('Bookmark manager initialized');
+
+      // Initialize sync manager
+      await syncManager.init();
+      console.log('Sync manager initialized');
+
+      // Initialize blocklist service
+      await blocklistService.init();
+      console.log('Blocklist service initialized');
+
+      // Clean up any corrupted localStorage and IndexedDB data
+      await this.cleanupLocalStorage();
+
       // Load theme
       await this.loadTheme();
 
@@ -53,6 +69,36 @@ class App {
     } catch (error) {
       console.error('Failed to initialize app:', error);
       this.showError('Failed to initialize application', error);
+    }
+  }
+
+  /**
+   * Clean up corrupted localStorage and IndexedDB data
+   */
+  async cleanupLocalStorage() {
+    try {
+      // Clean localStorage
+      const savedGistId = localStorage.getItem('bmz_gist_id');
+      if (savedGistId) {
+        // Check if it's an object instead of a string
+        if (savedGistId.startsWith('{') || savedGistId.startsWith('[')) {
+          console.warn('Found corrupted gist ID in localStorage, clearing...');
+          localStorage.removeItem('bmz_gist_id');
+        }
+      }
+
+      // Clean IndexedDB
+      const gistIdRecord = await dbManager.get('metadata', 'gistId');
+      if (gistIdRecord && gistIdRecord.value) {
+        const value = gistIdRecord.value;
+        // Check if it's an object instead of a string
+        if (typeof value === 'object') {
+          console.warn('Found corrupted gist ID in IndexedDB, clearing...');
+          await dbManager.delete('metadata', 'gistId');
+        }
+      }
+    } catch (error) {
+      console.error('Error cleaning storage:', error);
     }
   }
 
@@ -94,65 +140,94 @@ class App {
    * Show login screen
    */
   showLoginScreen() {
-    document.getElementById('loginScreen').classList.remove('hidden');
-    document.getElementById('mainApp').classList.add('hidden');
+    const loginScreen = document.getElementById('loginScreen');
+    if (loginScreen) {
+      loginScreen.classList.remove('hidden');
+    }
 
-    // Set up login button handler (device flow only)
-    const loginBtn = document.getElementById('deviceLoginBtn');
-    if (loginBtn) {
+    // Set up login button handler (Personal Access Token)
+    const loginBtn = document.getElementById('loginBtn');
+    const tokenInput = document.getElementById('tokenInput');
+    const loginError = document.getElementById('loginError');
+
+    if (loginBtn && tokenInput) {
+      // Handle Enter key in token input
+      tokenInput.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          loginBtn.click();
+        }
+      });
+
       loginBtn.onclick = async () => {
-        await this.startDeviceFlow();
+        const token = tokenInput.value.trim();
+
+        if (!token) {
+          this.showLoginError('Please enter your Personal Access Token');
+          return;
+        }
+
+        // Show loading state
+        loginBtn.disabled = true;
+        loginBtn.textContent = 'Authenticating...';
+        if (loginError) loginError.style.display = 'none';
+
+        try {
+          // Authenticate with token
+          const authResult = await oauthPAT.authenticate(token);
+
+          // Store token securely (just the token string, not the object)
+          await authManager.storeToken(authResult.access_token);
+
+          // Show success and load main app
+          await this.showMainApp();
+
+        } catch (error) {
+          console.error('Login failed:', error);
+          this.showLoginError(error.message || 'Authentication failed. Please check your token and try again.');
+
+          // Reset button
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Login';
+        }
       };
     }
   }
 
   /**
-   * Start device code flow
+   * Show login error message
    */
-  async startDeviceFlow() {
+  showLoginError(message) {
+    const loginError = document.getElementById('loginError');
+    if (loginError) {
+      loginError.textContent = message;
+      loginError.style.display = 'block';
+    }
+  }
+
+  /**
+   * Logout user and return to login screen
+   */
+  async logout() {
     try {
-      // Request device code
-      const codeInfo = await oauthDevice.initiateDeviceFlow();
+      // Clear authentication
+      await authManager.clearToken();
+      oauthPAT.clear();
 
-      // Show device code modal
-      const modal = document.getElementById('deviceCodeModal');
-      const verificationUrl = document.getElementById('verificationUrl');
-      const deviceCodeDisplay = document.getElementById('deviceCodeDisplay');
-      const copyCodeBtn = document.getElementById('copyCodeBtn');
-      const openGitHubBtn = document.getElementById('openGitHubBtn');
+      // Clear gist ID from localStorage and adapter
+      localStorage.removeItem('bmz_gist_id');
+      gistAdapter.gistId = null;
 
-      verificationUrl.textContent = codeInfo.verificationUri;
-      deviceCodeDisplay.textContent = codeInfo.userCode;
-
-      copyCodeBtn.onclick = async () => {
-        await navigator.clipboard.writeText(codeInfo.userCode);
-        copyCodeBtn.textContent = 'Copied!';
-        setTimeout(() => {
-          copyCodeBtn.textContent = 'Copy Code';
-        }, 2000);
-      };
-
-      openGitHubBtn.onclick = () => {
-        window.open(codeInfo.verificationUri, '_blank');
-      };
-
-      modal.classList.remove('hidden');
-
-      // Start polling
-      try {
-        await oauthDevice.pollForToken();
-
-        // Success! Hide modal and show main app
-        modal.classList.add('hidden');
-        await this.showMainApp();
-      } catch (error) {
-        console.error('Device flow failed:', error);
-        modal.classList.add('hidden');
-        this.showError('Authentication failed', error);
+      // Clear sync manager state
+      if (syncManager.gistId) {
+        syncManager.gistId = null;
       }
+
+      // Reload the page to reset everything
+      window.location.reload();
     } catch (error) {
-      console.error('Failed to start device flow:', error);
-      this.showError('Failed to start authentication', error);
+      console.error('Logout failed:', error);
+      // Even if there's an error, try to reload
+      window.location.reload();
     }
   }
 
@@ -160,37 +235,250 @@ class App {
    * Show main app after authentication
    */
   async showMainApp() {
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('mainApp').classList.remove('hidden');
-
-    // Update user info in header
-    if (this.currentUser) {
-      const userInfo = document.getElementById('userInfo');
-      if (userInfo) {
-        userInfo.textContent = `@${this.currentUser.login}`;
+    try {
+      // Hide login screen
+      const loginScreen = document.getElementById('loginScreen');
+      if (loginScreen) {
+        loginScreen.classList.add('hidden');
       }
+
+      // Check if we have a gist set up
+      const hasGist = await this.checkGistSetup();
+
+      if (!hasGist) {
+        // Show gist setup modal (buttons should already work from initUI)
+        await this.showGistSetup();
+        return;
+      }
+
+      // Initialize sync manager
+      await syncManager.init();
+
+      // Load or create bookmarks
+      await this.loadBookmarks();
+
+      // Initialize sidebar (this loads bookmarks and renders UI)
+      if (window.initSidebar) {
+        await window.initSidebar();
+      }
+
+      console.log('Main app loaded successfully');
+    } catch (error) {
+      console.error('Error in showMainApp:', error);
+      this.showError('Failed to load main app', error);
+    }
+  }
+
+  /**
+   * Check if gist is set up
+   * Always returns false to force gist selection modal
+   */
+  async checkGistSetup() {
+    // Clear any saved gist ID so user can choose
+    const savedGistId = gistAdapter.loadSavedGistId();
+    if (savedGistId) {
+      console.log('Found saved gist, but clearing to let user choose:', savedGistId);
+      localStorage.removeItem('bmz_gist_id');
+      await dbManager.delete('metadata', 'gistId');
+      gistAdapter.gistId = null;
     }
 
-    // Initialize sync manager
-    await syncManager.init();
+    // Always show gist selection modal
+    return false;
+  }
 
-    // Load or create bookmarks
-    await this.loadBookmarks();
+  /**
+   * Show gist setup modal
+   */
+  async showGistSetup() {
+    const modal = document.getElementById('gistSetupModal');
+    const noGistsSection = document.getElementById('noGistsSection');
+    const existingGistSection = document.getElementById('existingGistSection');
+    const multipleGistsSection = document.getElementById('multipleGistsSection');
+    const existingGistInfo = document.getElementById('existingGistInfo');
+    const gistList = document.getElementById('gistList');
 
-    // Initialize UI manager
-    await uiManager.init();
+    // Hide all sections first
+    noGistsSection.style.display = 'none';
+    existingGistSection.style.display = 'none';
+    multipleGistsSection.style.display = 'none';
 
-    // Initialize scanner service
-    await scannerService.init();
+    try {
+      // Get all gists
+      const gists = await gistAdapter.getAllGists();
 
-    // Initialize touch handler for mobile
-    touchHandler.init();
+      // Filter for bookmark-like gists
+      const bookmarkGists = gists.filter(g =>
+        g.files['bookmarks.json'] ||
+        g.description?.includes('BMZ') ||
+        g.description?.includes('Bookmark Manager Zero') ||
+        g.description?.includes('bookmark')
+      );
 
-    // Render bookmarks
-    const tree = bookmarkManager.getTree();
-    uiManager.renderBookmarks(tree);
+      if (bookmarkGists.length === 0) {
+        // No gists found - show create option
+        noGistsSection.style.display = 'block';
+      } else if (bookmarkGists.length === 1) {
+        // One gist found - show use or create new
+        existingGistSection.style.display = 'block';
+        const gist = bookmarkGists[0];
+        const fileCount = Object.keys(gist.files).length;
+        const lastUpdated = new Date(gist.updated_at).toLocaleDateString();
+        existingGistInfo.textContent = `${gist.description || 'Untitled Gist'} • ${fileCount} files • Updated ${lastUpdated}`;
 
-    console.log('Main app loaded successfully');
+        // Store gist for use button
+        document.getElementById('useExistingGistBtn').onclick = async () => {
+          await this.useGist(gist.id);
+        };
+      } else {
+        // Multiple gists - show selection
+        multipleGistsSection.style.display = 'block';
+        gistList.innerHTML = '';
+
+        bookmarkGists.forEach(gist => {
+          const fileCount = Object.keys(gist.files).length;
+          const lastUpdated = new Date(gist.updated_at).toLocaleDateString();
+
+          const gistItem = document.createElement('div');
+          gistItem.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
+          gistItem.innerHTML = `
+            <div style="font-weight: 500; margin-bottom: 4px;">${gist.description || 'Untitled Gist'}</div>
+            <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant);">${fileCount} files • Updated ${lastUpdated}</div>
+          `;
+
+          gistItem.onclick = async () => {
+            await this.useGist(gist.id);
+          };
+
+          gistItem.onmouseover = () => {
+            gistItem.style.borderColor = 'var(--md-sys-color-primary)';
+          };
+          gistItem.onmouseout = () => {
+            gistItem.style.borderColor = 'transparent';
+          };
+
+          gistList.appendChild(gistItem);
+        });
+      }
+
+      // Setup create new gist buttons
+      const createButtons = [
+        document.getElementById('createNewGistBtn'),
+        document.getElementById('createNewGistBtn2'),
+        document.getElementById('createNewGistBtn3')
+      ];
+
+      createButtons.forEach(btn => {
+        if (btn) {
+          btn.onclick = async () => {
+            await this.createNewGist();
+          };
+        }
+      });
+
+      // Show modal
+      modal.style.display = 'flex';
+      modal.classList.remove('hidden');
+
+    } catch (error) {
+      console.error('Failed to load gists:', error);
+      this.showGistSetupError('Failed to load gists: ' + error.message);
+    }
+  }
+
+  /**
+   * Use existing gist
+   */
+  async useGist(gistId) {
+    try {
+      gistAdapter.setGistId(gistId);
+
+      // Hide modal
+      const modal = document.getElementById('gistSetupModal');
+      modal.style.display = 'none';
+      modal.classList.add('hidden');
+
+      // Continue with app initialization
+      await syncManager.init();
+
+      if (window.initSidebar) {
+        await window.initSidebar();
+      }
+
+      console.log('Using gist:', gistId);
+    } catch (error) {
+      console.error('Failed to use gist:', error);
+      this.showGistSetupError('Failed to use gist: ' + error.message);
+    }
+  }
+
+  /**
+   * Create new gist
+   */
+  async createNewGist() {
+    try {
+      console.log('[CreateGist] Step 1: Creating gist via adapter...');
+      const gistId = await gistAdapter.createBookmarkGist();
+      console.log('[CreateGist] Step 1 Complete: Gist created with ID:', gistId);
+
+      console.log('[CreateGist] Step 2: Setting gist ID in adapter...');
+      gistAdapter.setGistId(gistId);
+
+      // Hide modal
+      console.log('[CreateGist] Step 3: Hiding modal...');
+      const modal = document.getElementById('gistSetupModal');
+      modal.style.display = 'none';
+      modal.classList.add('hidden');
+
+      // Save gist ID to sync manager
+      console.log('[CreateGist] Step 4: Saving gist ID to sync manager...');
+      await syncManager.setGistId(gistId);
+
+      // Clear local version to force sync
+      console.log('[CreateGist] Step 4.5: Clearing local version to force sync...');
+      await syncManager.setLocalVersion(0);
+
+      // Sync the new gist data from remote to local
+      console.log('[CreateGist] Step 5: Syncing from remote...');
+      await syncManager.syncFromRemote();
+
+      // Reload bookmarks from local storage
+      console.log('[CreateGist] Step 6: Reloading bookmarks from local...');
+      const tree = await bookmarkManager.reload();
+      console.log('[CreateGist] Step 6 Complete: Tree loaded:', {
+        hasRoots: !!tree?.roots,
+        rootKeys: tree?.roots ? Object.keys(tree.roots) : [],
+        bookmark_bar: tree?.roots?.bookmark_bar,
+        menu: tree?.roots?.menu,
+        other: tree?.roots?.other,
+        mobile: tree?.roots?.mobile
+      });
+
+      // Initialize sidebar to render the UI
+      console.log('[CreateGist] Step 7: Initializing sidebar...');
+      if (window.initSidebar) {
+        await window.initSidebar();
+        console.log('[CreateGist] Step 7 Complete: Sidebar initialized');
+      } else {
+        console.warn('[CreateGist] window.initSidebar not found!');
+      }
+
+      console.log('[CreateGist] All steps complete. Gist ID:', gistId);
+    } catch (error) {
+      console.error('[CreateGist] Failed:', error);
+      this.showGistSetupError('Failed to create gist: ' + error.message);
+    }
+  }
+
+  /**
+   * Show gist setup error
+   */
+  showGistSetupError(message) {
+    const errorDiv = document.getElementById('gistSetupError');
+    if (errorDiv) {
+      errorDiv.textContent = message;
+      errorDiv.style.display = 'block';
+    }
   }
 
   /**
@@ -201,40 +489,16 @@ class App {
       // First, try to sync from remote
       const updated = await syncManager.syncFromRemote();
 
-      // Initialize bookmark manager
-      await bookmarkManager.init();
-
-      // If no bookmarks exist, show first-time setup
-      const stats = bookmarkManager.getStats();
-      if (stats.totalBookmarks === 0) {
-        await this.showFirstTimeSetup();
-      }
+      // Reload bookmark manager to get latest data
+      await bookmarkManager.reload();
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
-      // Try to initialize with local data anyway
-      await bookmarkManager.init();
-    }
-  }
-
-  /**
-   * Show first-time setup options
-   */
-  async showFirstTimeSetup() {
-    // Check if user already has a Gist
-    const gistId = await gistAdapter.findBookmarkGist();
-
-    if (gistId) {
-      // Found existing Gist, load it
-      await syncManager.setGistId(gistId);
-      await syncManager.syncFromRemote();
-      await bookmarkManager.reload();
-    } else {
-      // No Gist found, show options
-      // For now, just create an empty Gist
-      const emptyTree = syncManager.getEmptyBookmarkTree();
-      const newGistId = await gistAdapter.createBookmarkGist(emptyTree);
-      await syncManager.setGistId(newGistId);
-      console.log('Created new bookmark Gist:', newGistId);
+      // Try to reload with local data anyway
+      try {
+        await bookmarkManager.reload();
+      } catch (reloadError) {
+        console.error('Failed to reload bookmarks:', reloadError);
+      }
     }
   }
 
@@ -704,6 +968,9 @@ if (document.readyState === 'loading') {
   app.init();
 }
 
-// Export for debugging
+// Export for debugging and global access
 window.app = app;
+window.bookmarkManager = bookmarkManager;
+window.syncManager = syncManager;
+window.blocklistService = blocklistService;
 export default app;

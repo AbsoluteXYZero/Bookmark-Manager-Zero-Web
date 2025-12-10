@@ -21,17 +21,16 @@ class GistAdapter {
     }
 
     return {
-      'Authorization': `Bearer ${token}`,
-      'Accept': 'application/vnd.github+json',
+      'Authorization': `token ${token}`,
+      'Accept': 'application/vnd.github.v3+json',
       'Content-Type': 'application/json'
     };
   }
 
   /**
-   * Find user's bookmark Gist
-   * Looks for Gist with "bookmarks.json" file or "BMZ" in description
+   * Get all user's gists
    */
-  async findBookmarkGist() {
+  async getAllGists() {
     try {
       const headers = await this.getHeaders();
       const response = await fetch(`${this.apiBase}/gists`, { headers });
@@ -40,7 +39,20 @@ class GistAdapter {
         throw new Error(`Failed to fetch gists: ${response.status}`);
       }
 
-      const gists = await response.json();
+      return await response.json();
+    } catch (error) {
+      console.error('Failed to fetch gists:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Find user's bookmark Gist
+   * Looks for Gist with "bookmarks.json" file or "BMZ" in description
+   */
+  async findBookmarkGist() {
+    try {
+      const gists = await this.getAllGists();
 
       // Look for Gist with bookmarks.json file
       const bookmarkGist = gists.find(g =>
@@ -50,15 +62,52 @@ class GistAdapter {
       );
 
       if (bookmarkGist) {
-        this.gistId = bookmarkGist.id;
-        console.log('Found bookmark Gist:', this.gistId);
+        // Validate that we can actually read from this gist
+        try {
+          await this.readBookmarks(bookmarkGist.id);
+          this.gistId = bookmarkGist.id;
+          console.log('Found and validated bookmark Gist:', this.gistId);
+          return bookmarkGist.id;
+        } catch (error) {
+          console.warn('Found bookmark gist but cannot read from it:', bookmarkGist.id, error);
+          return null;
+        }
       }
 
-      return bookmarkGist;
+      return null;
     } catch (error) {
       console.error('Failed to find bookmark Gist:', error);
       throw error;
     }
+  }
+
+  /**
+   * Set gist ID to use
+   */
+  setGistId(gistId) {
+    this.gistId = gistId;
+    // Store in localStorage so we remember it
+    localStorage.setItem('bmz_gist_id', gistId);
+    console.log('Set bookmark Gist ID:', gistId);
+  }
+
+  /**
+   * Load saved gist ID from storage
+   */
+  loadSavedGistId() {
+    const savedId = localStorage.getItem('bmz_gist_id');
+    if (savedId) {
+      // Validate that it's a string and not an object
+      if (typeof savedId === 'string' && !savedId.startsWith('{') && !savedId.startsWith('[')) {
+        this.gistId = savedId;
+        console.log('Loaded saved Gist ID:', savedId);
+        return savedId;
+      } else {
+        console.warn('Invalid gist ID in localStorage:', savedId);
+        localStorage.removeItem('bmz_gist_id');
+      }
+    }
+    return null;
   }
 
   /**
@@ -68,7 +117,8 @@ class GistAdapter {
     try {
       const headers = await this.getHeaders();
 
-      // Default empty bookmark structure
+      // Default bookmark structure with standard root folders
+      // Compatible with Firefox and Chrome bookmark exports
       const defaultTree = {
         version: 1,
         checksum: '',
@@ -76,20 +126,34 @@ class GistAdapter {
         roots: {
           bookmark_bar: {
             id: '1',
-            name: 'Bookmarks Bar',
+            title: 'Bookmarks Toolbar',
+            name: 'Bookmarks Toolbar',
             type: 'folder',
+            dateAdded: Date.now(),
+            children: []
+          },
+          menu: {
+            id: '2',
+            title: 'Bookmarks Menu',
+            name: 'Bookmarks Menu',
+            type: 'folder',
+            dateAdded: Date.now(),
             children: []
           },
           other: {
-            id: '2',
+            id: '3',
+            title: 'Other Bookmarks',
             name: 'Other Bookmarks',
             type: 'folder',
+            dateAdded: Date.now(),
             children: []
           },
           mobile: {
-            id: '3',
+            id: '4',
+            title: 'Mobile Bookmarks',
             name: 'Mobile Bookmarks',
             type: 'folder',
+            dateAdded: Date.now(),
             children: []
           }
         }
@@ -120,7 +184,7 @@ class GistAdapter {
       this.gistId = gist.id;
 
       console.log('Created bookmark Gist:', this.gistId);
-      return gist;
+      return gist.id;
     } catch (error) {
       console.error('Failed to create bookmark Gist:', error);
       throw error;
@@ -280,12 +344,6 @@ class GistAdapter {
     return this.gistId;
   }
 
-  /**
-   * Set Gist ID manually
-   */
-  setGistId(gistId) {
-    this.gistId = gistId;
-  }
 }
 
 // Export singleton instance

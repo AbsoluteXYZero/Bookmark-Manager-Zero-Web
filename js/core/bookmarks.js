@@ -76,6 +76,24 @@ class BookmarkManager {
   }
 
   /**
+   * Get children of a folder
+   * @param {string} folderId - Folder ID (or null/undefined for roots)
+   * @returns {Array} Array of children nodes
+   */
+  getChildren(folderId) {
+    if (!this.tree) return [];
+
+    // If no ID provided, return root folders as array
+    if (!folderId || folderId === '0' || folderId === 'root____') {
+      return Object.values(this.tree.roots);
+    }
+
+    // Find the folder and return its children
+    const folder = this.getFolder(folderId);
+    return folder?.children || [];
+  }
+
+  /**
    * Recursively find a node by ID
    */
   findNode(node, targetId) {
@@ -450,11 +468,18 @@ class BookmarkManager {
    */
   async reload() {
     try {
+      console.log('[BookmarkManager.reload] Loading from storage...');
       this.tree = await syncManager.loadLocalBookmarks();
-      console.log('Bookmarks reloaded from storage');
+      console.log('[BookmarkManager.reload] Loaded tree:', {
+        hasTree: !!this.tree,
+        hasRoots: !!this.tree?.roots,
+        rootKeys: this.tree?.roots ? Object.keys(this.tree.roots) : [],
+        bookmarkCount: this.countBookmarks(),
+        folderCount: this.getAllFolders().length
+      });
       return this.tree;
     } catch (error) {
-      console.error('Failed to reload bookmarks:', error);
+      console.error('[BookmarkManager.reload] Failed:', error);
       throw error;
     }
   }

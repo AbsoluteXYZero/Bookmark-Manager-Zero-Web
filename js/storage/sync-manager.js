@@ -212,43 +212,56 @@ class SyncManager {
    */
   async syncFromRemote() {
     if (this.isSyncing) {
+      console.log('[SyncFromRemote] Already syncing, skipping...');
       return;
     }
 
     if (!navigator.onLine) {
+      console.log('[SyncFromRemote] Offline, skipping...');
       return;
     }
 
     if (!this.gistId) {
+      console.log('[SyncFromRemote] No gist ID, skipping...');
       return;
     }
 
     this.isSyncing = true;
 
     try {
-      console.log('Syncing remote changes to local...');
+      console.log('[SyncFromRemote] Starting sync for gist:', this.gistId);
 
       const remoteData = await gistAdapter.readBookmarks(this.gistId);
+      console.log('[SyncFromRemote] Remote data fetched:', {
+        hasRoots: !!remoteData?.roots,
+        rootKeys: remoteData?.roots ? Object.keys(remoteData.roots) : [],
+        version: remoteData?.version
+      });
+
       const localVersion = await this.getLocalVersion();
+      console.log('[SyncFromRemote] Local version:', localVersion);
 
       if (remoteData.version > localVersion) {
-        console.log(`Remote version (${remoteData.version}) > Local version (${localVersion}), pulling changes...`);
+        console.log(`[SyncFromRemote] Remote version (${remoteData.version}) > Local version (${localVersion}), pulling changes...`);
 
         // Save remote data to local
         await this.saveLocalBookmarks(remoteData);
+        console.log('[SyncFromRemote] Saved remote data to IndexedDB');
+
         await this.setLocalVersion(remoteData.version);
+        console.log('[SyncFromRemote] Updated local version to:', remoteData.version);
 
         this.lastSyncTime = Date.now();
         await dbManager.put('metadata', { key: 'lastSync', value: this.lastSyncTime });
 
-        console.log('Pulled remote changes, version:', remoteData.version);
+        console.log('[SyncFromRemote] Sync complete, version:', remoteData.version);
         return true; // Indicate that data was updated
       } else {
-        console.log('Local is up to date');
+        console.log('[SyncFromRemote] Local is up to date (local:', localVersion, ', remote:', remoteData.version, ')');
         return false;
       }
     } catch (error) {
-      console.error('Sync from remote failed:', error);
+      console.error('[SyncFromRemote] Sync failed:', error);
       return false;
     } finally {
       this.isSyncing = false;
@@ -321,20 +334,34 @@ class SyncManager {
       roots: {
         bookmark_bar: {
           id: '1',
-          name: 'Bookmarks Bar',
+          title: 'Bookmarks Toolbar',
+          name: 'Bookmarks Toolbar',
           type: 'folder',
+          dateAdded: Date.now(),
+          children: []
+        },
+        menu: {
+          id: '2',
+          title: 'Bookmarks Menu',
+          name: 'Bookmarks Menu',
+          type: 'folder',
+          dateAdded: Date.now(),
           children: []
         },
         other: {
-          id: '2',
+          id: '3',
+          title: 'Other Bookmarks',
           name: 'Other Bookmarks',
           type: 'folder',
+          dateAdded: Date.now(),
           children: []
         },
         mobile: {
-          id: '3',
+          id: '4',
+          title: 'Mobile Bookmarks',
           name: 'Mobile Bookmarks',
           type: 'folder',
+          dateAdded: Date.now(),
           children: []
         }
       }
