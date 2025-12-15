@@ -18,8 +18,9 @@ class AuthManager {
    * Uses same method as browser extensions for consistency
    */
   async getDerivedKey(userPassword = null) {
-    // Browser fingerprint for key derivation
-    const browserInfo = `${navigator.userAgent}-${navigator.language}-${screen.width}x${screen.height}`;
+    // Browser fingerprint for key derivation (using origin instead of screen dimensions)
+    const appId = window.location.origin;
+    const browserInfo = `${navigator.userAgent}-${navigator.language}-${appId}`;
 
     // Optionally add user password for additional security
     const material = userPassword ? `${browserInfo}-${userPassword}` : browserInfo;

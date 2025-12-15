@@ -49,6 +49,10 @@ class App {
       await blocklistService.init();
       console.log('Blocklist service initialized');
 
+      // Initialize scanner service
+      await scannerService.init();
+      console.log('Scanner service initialized');
+
       // Clean up any corrupted localStorage and IndexedDB data
       await this.cleanupLocalStorage();
 
@@ -63,6 +67,10 @@ class App {
 
       // Set up sync event listeners
       this.setupSyncListeners();
+
+      // Initialize touch handler for mobile devices
+      touchHandler.init();
+      console.log('Touch handler initialized');
 
       this.isInitialized = true;
       console.log('App initialized successfully');
@@ -662,6 +670,18 @@ class App {
         this.showToast(e.detail, 'error');
       }
     });
+
+    // Handle sync changes (additions/modifications only - auto-apply)
+    window.addEventListener('sync:syncChanges', (e) => {
+      const { diff, message } = e.detail;
+      this.showSyncChangesNotification(diff, message);
+    });
+
+    // Handle sync conflicts (deletions present - require confirmation)
+    window.addEventListener('sync:syncConflict', async (e) => {
+      const { diff, remoteData, message } = e.detail;
+      await this.showSyncConflictDialog(diff, remoteData, message);
+    });
   }
 
   /**
@@ -926,6 +946,285 @@ class App {
         toast.remove();
       }, 300);
     }, 3000);
+  }
+
+  /**
+   * Show sync changes notification (for additions/modifications)
+   */
+  showSyncChangesNotification(diff, message) {
+    const totalChanges = diff.added.length + diff.moved.length + diff.modified.length;
+
+    // Create enhanced toast with "View Changes" button
+    const toast = document.createElement('div');
+    toast.className = 'toast toast-sync';
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 16px 20px;
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      z-index: 10000;
+      min-width: 300px;
+      animation: slideIn 0.3s ease;
+    `;
+
+    toast.innerHTML = `
+      <div style="margin-bottom: 8px; font-weight: 500;">
+        Bookmarks Updated from Gist
+      </div>
+      <div style="font-size: 0.9em; margin-bottom: 12px; opacity: 0.9;">
+        ${diff.added.length} added, ${diff.moved.length} moved, ${diff.modified.length} modified
+      </div>
+      <button id="viewSyncChanges" style="
+        background: var(--md-sys-color-primary);
+        color: var(--md-sys-color-on-primary);
+        border: none;
+        padding: 6px 12px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 0.9em;
+      ">View Changes</button>
+    `;
+
+    document.body.appendChild(toast);
+
+    // Add click handler for view changes button
+    document.getElementById('viewSyncChanges')?.addEventListener('click', () => {
+      this.showSyncDiffModal(diff);
+      toast.remove();
+    });
+
+    // Auto-remove after 5 seconds
+    setTimeout(() => {
+      toast.style.animation = 'slideOut 0.3s ease';
+      setTimeout(() => {
+        toast.remove();
+      }, 300);
+    }, 5000);
+  }
+
+  /**
+   * Show sync conflict dialog (for deletions - requires confirmation)
+   */
+  async showSyncConflictDialog(diff, remoteData, message) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10001;
+    `;
+
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: var(--md-sys-color-surface);
+      color: var(--md-sys-color-on-surface);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 600px;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    `;
+
+    dialog.innerHTML = `
+      <h2 style="margin: 0 0 16px 0; color: var(--md-sys-color-error);">
+        ⚠️ Sync Conflict Detected
+      </h2>
+      <p style="margin-bottom: 16px;">
+        The remote Gist has <strong>${diff.removed.length} deletion(s)</strong> that will remove bookmarks from your local collection.
+      </p>
+      <p style="margin-bottom: 16px; opacity: 0.8;">
+        Review the changes below before deciding to sync:
+      </p>
+      <div id="diffContainer" style="
+        background: var(--md-sys-color-surface-variant);
+        padding: 16px;
+        border-radius: 8px;
+        max-height: 300px;
+        overflow-y: auto;
+        margin-bottom: 20px;
+      "></div>
+      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+        <button id="cancelSync" style="
+          background: var(--md-sys-color-surface-variant);
+          color: var(--md-sys-color-on-surface-variant);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+        ">Cancel</button>
+        <button id="viewFullDiff" style="
+          background: var(--md-sys-color-secondary-container);
+          color: var(--md-sys-color-on-secondary-container);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+        ">View Full Changes</button>
+        <button id="acceptSync" style="
+          background: var(--md-sys-color-error);
+          color: var(--md-sys-color-on-error);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+          font-weight: 500;
+        ">Accept & Sync</button>
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    // Populate diff summary (show deletions prominently)
+    const diffContainer = dialog.querySelector('#diffContainer');
+    this.renderDiffSummary(diffContainer, diff, true); // true = show deletions first
+
+    // Button handlers
+    dialog.querySelector('#cancelSync').addEventListener('click', () => {
+      modal.remove();
+    });
+
+    dialog.querySelector('#viewFullDiff').addEventListener('click', () => {
+      this.showSyncDiffModal(diff);
+    });
+
+    dialog.querySelector('#acceptSync').addEventListener('click', async () => {
+      modal.remove();
+      // Apply the sync
+      const success = await syncManager.applyRemoteSync(remoteData);
+      if (success) {
+        // Reload bookmarks in UI
+        window.location.reload();
+      }
+    });
+  }
+
+  /**
+   * Show full sync diff modal
+   */
+  showSyncDiffModal(diff) {
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 10001;
+    `;
+
+    const dialog = document.createElement('div');
+    dialog.style.cssText = `
+      background: var(--md-sys-color-surface);
+      color: var(--md-sys-color-on-surface);
+      border-radius: 12px;
+      padding: 24px;
+      max-width: 800px;
+      width: 90%;
+      max-height: 80vh;
+      overflow-y: auto;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+    `;
+
+    dialog.innerHTML = `
+      <h2 style="margin: 0 0 16px 0;">Sync Changes</h2>
+      <div id="fullDiffContainer"></div>
+      <div style="margin-top: 20px; text-align: right;">
+        <button id="closeDiff" style="
+          background: var(--md-sys-color-primary);
+          color: var(--md-sys-color-on-primary);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+        ">Close</button>
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    // Populate full diff
+    const diffContainer = dialog.querySelector('#fullDiffContainer');
+    this.renderFullDiff(diffContainer, diff);
+
+    // Close button
+    dialog.querySelector('#closeDiff').addEventListener('click', () => {
+      modal.remove();
+    });
+  }
+
+  /**
+   * Render diff summary (brief overview)
+   */
+  renderDiffSummary(container, diff, showDeletionsFirst = false) {
+    let html = '';
+
+    const sections = showDeletionsFirst
+      ? [
+          { title: '🗑️ Removed', items: diff.removed, color: 'var(--md-sys-color-error)' },
+          { title: '➕ Added', items: diff.added, color: 'var(--md-sys-color-tertiary)' },
+          { title: '📦 Moved', items: diff.moved, color: 'var(--md-sys-color-secondary)' },
+          { title: '✏️ Modified', items: diff.modified, color: 'var(--md-sys-color-primary)' }
+        ]
+      : [
+          { title: '➕ Added', items: diff.added, color: 'var(--md-sys-color-tertiary)' },
+          { title: '🗑️ Removed', items: diff.removed, color: 'var(--md-sys-color-error)' },
+          { title: '📦 Moved', items: diff.moved, color: 'var(--md-sys-color-secondary)' },
+          { title: '✏️ Modified', items: diff.modified, color: 'var(--md-sys-color-primary)' }
+        ];
+
+    sections.forEach(section => {
+      if (section.items.length > 0) {
+        html += `
+          <div style="margin-bottom: 16px;">
+            <h4 style="margin: 0 0 8px 0; color: ${section.color};">
+              ${section.title} (${section.items.length})
+            </h4>
+            <ul style="margin: 0; padding-left: 20px; font-size: 0.9em;">
+              ${section.items.slice(0, 5).map(item => `
+                <li style="margin-bottom: 4px;">
+                  ${item.title}${item.url ? ` <span style="opacity: 0.6;">(${item.url})</span>` : ''}
+                  ${item.path ? `<br><span style="opacity: 0.6; font-size: 0.85em;">📁 ${item.path}</span>` : ''}
+                </li>
+              `).join('')}
+              ${section.items.length > 5 ? `<li style="opacity: 0.6;">... and ${section.items.length - 5} more</li>` : ''}
+            </ul>
+          </div>
+        `;
+      }
+    });
+
+    container.innerHTML = html || '<p style="opacity: 0.6;">No changes to display</p>';
+  }
+
+  /**
+   * Render full diff (detailed view)
+   */
+  renderFullDiff(container, diff) {
+    this.renderDiffSummary(container, diff, false);
+    // The summary already shows first 5 of each type, full diff just doesn't limit
   }
 
   /**

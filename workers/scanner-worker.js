@@ -264,29 +264,421 @@ async function checkLinkStatus(url) {
 }
 
 /**
- * Check safety status (basic implementation)
+ * Get API keys from localStorage (encrypted keys are stored there)
  */
-async function checkSafetyStatus(url) {
-  // TODO: Implement full safety checking with blocklists
-  // For now, return safe for all non-suspicious patterns
-
+function getApiKey(keyName) {
   try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
+    // In Web Worker, we can't access localStorage directly
+    // Keys need to be passed from main thread
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
 
-    // Check for suspicious patterns
-    const suspiciousPatterns = [
-      /\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}/, // IP address
-      /[a-z0-9]{32,}/, // Very long random strings
-      /-free-/, /-download-/, /-crack-/, /-keygen-/
-    ];
+// Store API keys passed from main thread
+let apiKeys = {
+  googleSafeBrowsingApiKey: null,
+  yandexApiKey: null,
+  virusTotalApiKey: null
+};
 
-    if (suspiciousPatterns.some(pattern => pattern.test(hostname))) {
-      return { status: 'warning', sources: ['Suspicious pattern detected'] };
+// Store blocklist data passed from main thread
+let blocklist = new Set();
+let domainSourceMap = new Map();
+let domainOnlyMap = new Map();
+let trustedDomains = [];
+
+/**
+ * Check URL using Google Safe Browsing API
+ */
+async function checkGoogleSafeBrowsing(url) {
+  try {
+    const apiKey = apiKeys.googleSafeBrowsingApiKey;
+
+    if (!apiKey || apiKey.trim() === '') {
+      console.log(`[Google SB] No API key configured, skipping check`);
+      return 'unknown';
     }
 
-    return { status: 'safe', sources: [] };
+    console.log(`[Google SB] Starting check for ${url}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(
+      `https://safebrowsing.googleapis.com/v4/threatMatches:find?key=${apiKey}`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          client: {
+            clientId: 'bookmark-manager-zero-web',
+            clientVersion: '1.0.0'
+          },
+          threatInfo: {
+            threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE', 'POTENTIALLY_HARMFUL_APPLICATION'],
+            platformTypes: ['ANY_PLATFORM'],
+            threatEntryTypes: ['URL'],
+            threatEntries: [{ url }]
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.error(`[Google SB] API error: ${response.status}`);
+      return 'unknown';
+    }
+
+    const data = await response.json();
+
+    if (data.matches && data.matches.length > 0) {
+      console.log(`[Google SB] Result: UNSAFE (${data.matches.length} threats found)`);
+      return 'unsafe';
+    }
+
+    console.log(`[Google SB] Result: SAFE`);
+    return 'safe';
+
+  } catch (error) {
+    console.error(`[Google SB] Error:`, error.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * Check URL using Yandex Safe Browsing API
+ */
+async function checkYandexSafeBrowsing(url) {
+  try {
+    const apiKey = apiKeys.yandexApiKey;
+
+    if (!apiKey || apiKey.trim() === '') {
+      console.log(`[Yandex SB] No API key configured, skipping check`);
+      return 'unknown';
+    }
+
+    console.log(`[Yandex SB] Starting check for ${url}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+
+    const response = await fetch(
+      `https://sba.yandex.net/v4/threatMatches:find?key=${apiKey}`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          threatInfo: {
+            threatTypes: ['MALWARE', 'SOCIAL_ENGINEERING', 'UNWANTED_SOFTWARE'],
+            platformTypes: ['ANY_PLATFORM'],
+            threatEntryTypes: ['URL'],
+            threatEntries: [{ url }]
+          }
+        })
+      }
+    );
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.error(`[Yandex SB] API error: ${response.status}`);
+      return 'unknown';
+    }
+
+    const data = await response.json();
+
+    if (data.matches && data.matches.length > 0) {
+      console.log(`[Yandex SB] Result: UNSAFE (${data.matches.length} threats found)`);
+      return 'unsafe';
+    }
+
+    console.log(`[Yandex SB] Result: SAFE`);
+    return 'safe';
+
+  } catch (error) {
+    console.error(`[Yandex SB] Error:`, error.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * Check URL using VirusTotal API
+ */
+async function checkVirusTotal(url) {
+  try {
+    const apiKey = apiKeys.virusTotalApiKey;
+
+    if (!apiKey || apiKey.trim() === '') {
+      console.log(`[VirusTotal] No API key configured, skipping check`);
+      return 'unknown';
+    }
+
+    console.log(`[VirusTotal] Starting check for ${url}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+
+    const response = await fetch(
+      `https://www.virustotal.com/api/v3/urls`,
+      {
+        method: 'POST',
+        signal: controller.signal,
+        headers: {
+          'x-apikey': apiKey,
+          'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: `url=${encodeURIComponent(url)}`
+      }
+    );
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.error(`[VirusTotal] API error: ${response.status}`);
+      return 'unknown';
+    }
+
+    console.log(`[VirusTotal] Submission successful, waiting for analysis...`);
+
+    const data = await response.json();
+    const analysisId = data.data?.id;
+
+    if (!analysisId) {
+      console.error(`[VirusTotal] No analysis ID returned`);
+      return 'unknown';
+    }
+
+    // Poll for analysis results with retries
+    let analysisData;
+    let attempts = 0;
+    const maxAttempts = 5;
+
+    while (attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      attempts++;
+
+      const analysisController = new AbortController();
+      const analysisTimeout = setTimeout(() => analysisController.abort(), 10000);
+
+      const analysisResponse = await fetch(
+        `https://www.virustotal.com/api/v3/analyses/${analysisId}`,
+        {
+          method: 'GET',
+          signal: analysisController.signal,
+          headers: {
+            'x-apikey': apiKey
+          }
+        }
+      );
+
+      clearTimeout(analysisTimeout);
+
+      if (!analysisResponse.ok) {
+        console.error(`[VirusTotal] Analysis fetch error: ${analysisResponse.status}`);
+        return 'unknown';
+      }
+
+      analysisData = await analysisResponse.json();
+      const status = analysisData.data?.attributes?.status;
+
+      console.log(`[VirusTotal] Analysis status (attempt ${attempts}): ${status}`);
+
+      if (status === 'completed') {
+        break;
+      }
+
+      if (attempts === maxAttempts) {
+        console.warn(`[VirusTotal] Analysis still not complete after ${maxAttempts} attempts, using partial results`);
+      }
+    }
+
+    const stats = analysisData.data?.attributes?.stats;
+
+    console.log(`[VirusTotal] Full stats:`, stats);
+
+    if (!stats) {
+      console.error(`[VirusTotal] No stats in analysis results`);
+      return 'unknown';
+    }
+
+    const malicious = stats.malicious || 0;
+    const suspicious = stats.suspicious || 0;
+
+    console.log(`[VirusTotal] Analysis complete - Malicious: ${malicious}, Suspicious: ${suspicious}`);
+
+    if (malicious >= 2) {
+      console.log(`[VirusTotal] Result: UNSAFE`);
+      return 'unsafe';
+    }
+
+    if (malicious >= 1 || suspicious >= 2) {
+      console.log(`[VirusTotal] Result: WARNING`);
+      return 'warning';
+    }
+
+    console.log(`[VirusTotal] Result: SAFE`);
+    return 'safe';
+
+  } catch (error) {
+    console.error(`[VirusTotal] Error:`, error.message);
+    return 'unknown';
+  }
+}
+
+/**
+ * Check for suspicious URL patterns
+ */
+function checkSuspiciousPatterns(url, domain) {
+  const patterns = [];
+
+  // Check for HTTP-only (no encryption)
+  if (url.toLowerCase().startsWith('http://')) {
+    patterns.push('HTTP Only (Unencrypted)');
+  }
+
+  // Check for known URL shorteners
+  const urlShorteners = [
+    'bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 'is.gd', 'buff.ly',
+    'adf.ly', 'bl.ink', 'lnkd.in', 'short.link', 'cutt.ly', 'rebrand.ly'
+  ];
+
+  const domainWithoutPort = domain.split(':')[0];
+  if (urlShorteners.includes(domainWithoutPort)) {
+    patterns.push('URL Shortener');
+  }
+
+  // Check for suspicious TLDs
+  const suspiciousTlds = [
+    '.xyz', '.top', '.tk', '.ml', '.ga', '.cf', '.gq', '.pw', '.cc', '.ws',
+    '.click', '.link', '.download', '.stream', '.loan', '.win', '.bid'
+  ];
+
+  for (const tld of suspiciousTlds) {
+    if (domainWithoutPort.endsWith(tld)) {
+      patterns.push('Suspicious TLD');
+      break;
+    }
+  }
+
+  // Check for IP addresses
+  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}(:\d+)?$/;
+  if (ipv4Pattern.test(domainWithoutPort)) {
+    patterns.push('IP Address');
+  }
+
+  return patterns;
+}
+
+/**
+ * Check safety status (full implementation)
+ */
+async function checkSafetyStatus(url) {
+  console.log(`[Safety Check] Starting safety check for ${url}`);
+
+  try {
+    // Normalize URL for lookup
+    const normalizedUrl = url.toLowerCase()
+      .replace(/^https?:\/\//, '')
+      .replace(/\/$/, '');
+
+    const domain = normalizedUrl.split('/')[0];
+    const hostname = domain.split(':')[0];
+
+    // Check if domain is trusted (bypass blocklist)
+    let isTrusted = false;
+    if (trustedDomains && trustedDomains.length > 0) {
+      for (const trustedDomain of trustedDomains) {
+        if (hostname === trustedDomain || hostname.endsWith('.' + trustedDomain)) {
+          isTrusted = true;
+          console.log(`[Blocklist] Trusted domain, skipping blocklist check`);
+          break;
+        }
+      }
+    }
+
+    // Check blocklist if not trusted
+    if (!isTrusted) {
+      let blocklistSources = [];
+
+      // Check full URL
+      if (blocklist.has(normalizedUrl)) {
+        blocklistSources = domainSourceMap.get(normalizedUrl) || ['Blocklist'];
+      }
+      // Check domain only
+      else if (blocklist.has(domain)) {
+        blocklistSources = domainSourceMap.get(domain) || ['Blocklist'];
+      }
+      // Check domain-only map
+      else if (domainOnlyMap.has(domain)) {
+        blocklistSources = domainOnlyMap.get(domain) || ['Blocklist'];
+      }
+
+      if (blocklistSources.length > 0) {
+        console.log(`[Blocklist] URL found in malicious database (sources: ${blocklistSources.join(', ')})`);
+        return { status: 'unsafe', sources: blocklistSources };
+      }
+
+      console.log(`[Blocklist] URL not in malicious database`);
+    }
+
+    let finalStatus = 'safe';
+    let allSources = [];
+
+    // Check Google Safe Browsing
+    if (apiKeys.googleSafeBrowsingApiKey) {
+      console.log(`[Safety Check] Checking Google Safe Browsing...`);
+      const googleResult = await checkGoogleSafeBrowsing(url);
+      if (googleResult === 'unsafe') {
+        finalStatus = 'unsafe';
+        allSources.push('Google Safe Browsing');
+      }
+    }
+
+    // Check Yandex Safe Browsing
+    if (apiKeys.yandexApiKey) {
+      console.log(`[Safety Check] Checking Yandex Safe Browsing...`);
+      const yandexResult = await checkYandexSafeBrowsing(url);
+      if (yandexResult === 'unsafe') {
+        finalStatus = 'unsafe';
+        allSources.push('Yandex Safe Browsing');
+      }
+    }
+
+    // Check VirusTotal
+    if (apiKeys.virusTotalApiKey) {
+      console.log(`[Safety Check] Checking VirusTotal...`);
+      const vtResult = await checkVirusTotal(url);
+      if (vtResult === 'unsafe') {
+        finalStatus = 'unsafe';
+        allSources.push('VirusTotal');
+      } else if (vtResult === 'warning' && finalStatus !== 'unsafe') {
+        finalStatus = 'warning';
+        allSources.push('VirusTotal');
+      }
+    }
+
+    // Check for suspicious patterns
+    const suspiciousPatterns = checkSuspiciousPatterns(url, domain);
+    if (suspiciousPatterns.length > 0 && finalStatus !== 'unsafe') {
+      finalStatus = 'warning';
+      allSources.push(...suspiciousPatterns);
+    }
+
+    console.log(`[Safety Check] Final result: ${finalStatus} (sources: ${allSources.join(', ')})`);
+    return { status: finalStatus, sources: allSources };
+
   } catch (e) {
+    console.error(`[Safety Check] Error:`, e);
     return { status: 'unknown', sources: [] };
   }
 }
@@ -298,6 +690,39 @@ self.addEventListener('message', async (e) => {
   const { action, data } = e.data;
 
   switch (action) {
+    case 'init':
+      // Initialize with API keys and blocklist data
+      if (data.apiKeys) {
+        apiKeys = data.apiKeys;
+        console.log('[Worker] API keys initialized:', {
+          google: !!apiKeys.googleSafeBrowsingApiKey,
+          yandex: !!apiKeys.yandexApiKey,
+          virustotal: !!apiKeys.virusTotalApiKey
+        });
+      }
+      if (data.blocklist) {
+        blocklist = new Set(data.blocklist);
+        console.log(`[Worker] Blocklist initialized with ${blocklist.size} domains`);
+      }
+      if (data.domainSourceMap) {
+        domainSourceMap = new Map(data.domainSourceMap);
+        console.log(`[Worker] Domain source map initialized with ${domainSourceMap.size} entries`);
+      }
+      if (data.domainOnlyMap) {
+        domainOnlyMap = new Map(data.domainOnlyMap);
+        console.log(`[Worker] Domain-only map initialized with ${domainOnlyMap.size} entries`);
+      }
+      if (data.trustedDomains) {
+        trustedDomains = data.trustedDomains;
+        console.log(`[Worker] Trusted domains list initialized with ${trustedDomains.length} domains`);
+      }
+
+      self.postMessage({
+        action: 'initComplete',
+        data: { success: true }
+      });
+      break;
+
     case 'checkLink':
       try {
         const status = await checkLinkStatus(data.url);

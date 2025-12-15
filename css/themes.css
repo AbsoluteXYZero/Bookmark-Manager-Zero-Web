@@ -2432,5 +2432,17 @@
       .preview-image {
         display: none !important;
       }
+
+      /* Enable custom touch handling */
+      .bookmark-item, .folder-item {
+        touch-action: manipulation;
+        -webkit-user-select: none;
+        user-select: none;
+      }
+
+      /* Prevent callout on long-press */
+      * {
+        -webkit-touch-callout: none;
+      }
     }
   </style>

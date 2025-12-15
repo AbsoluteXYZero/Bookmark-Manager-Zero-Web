@@ -79,17 +79,10 @@ class SyncManager {
 
       // Check if locked by another device
       if (currentLock && currentLock.deviceId !== this.deviceId) {
-        const lockAge = Date.now() - currentLock.timestamp;
-        const thirtyMinutes = 30 * 60 * 1000;
-
-        // Auto-release locks older than 30 minutes
-        if (lockAge < thirtyMinutes) {
-          const remainingMinutes = Math.ceil((thirtyMinutes - lockAge) / 60000);
-          throw new Error(
-            `Bookmarks are locked by another device. ` +
-            `Lock will expire in ${remainingMinutes} minute${remainingMinutes > 1 ? 's' : ''}.`
-          );
-        }
+        throw new Error(
+          `Bookmarks are currently being edited on another device. ` +
+          `Please wait a moment and try again.`
+        );
       }
 
       // Acquire/refresh lock
@@ -208,6 +201,104 @@ class SyncManager {
   }
 
   /**
+   * Calculate diff between local and remote bookmark trees
+   * Returns: { added: [], removed: [], moved: [], modified: [] }
+   */
+  calculateBookmarkDiff(localTree, remoteTree) {
+    const diff = {
+      added: [],
+      removed: [],
+      moved: [],
+      modified: []
+    };
+
+    // Create ID maps for quick lookup
+    const localMap = new Map();
+    const remoteMap = new Map();
+
+    // Recursively map all items by ID
+    const mapItems = (node, map, parentPath = '') => {
+      if (!node) return;
+
+      const path = parentPath ? `${parentPath}/${node.title || node.id}` : (node.title || node.id);
+      map.set(node.id, { node, path, parentId: node.parentId });
+
+      if (node.children) {
+        node.children.forEach(child => mapItems(child, map, path));
+      }
+    };
+
+    // Map local tree
+    if (localTree?.roots) {
+      Object.values(localTree.roots).forEach(root => mapItems(root, localMap));
+    }
+
+    // Map remote tree
+    if (remoteTree?.roots) {
+      Object.values(remoteTree.roots).forEach(root => mapItems(root, remoteMap));
+    }
+
+    // Find added items (in remote, not in local)
+    remoteMap.forEach((value, id) => {
+      if (!localMap.has(id)) {
+        diff.added.push({
+          id,
+          title: value.node.title || 'Untitled',
+          url: value.node.url || null,
+          path: value.path,
+          type: value.node.url ? 'bookmark' : 'folder'
+        });
+      }
+    });
+
+    // Find removed items (in local, not in remote)
+    localMap.forEach((value, id) => {
+      if (!remoteMap.has(id)) {
+        diff.removed.push({
+          id,
+          title: value.node.title || 'Untitled',
+          url: value.node.url || null,
+          path: value.path,
+          type: value.node.url ? 'bookmark' : 'folder'
+        });
+      }
+    });
+
+    // Find moved/modified items
+    localMap.forEach((localValue, id) => {
+      const remoteValue = remoteMap.get(id);
+      if (remoteValue) {
+        // Check if moved (parent changed)
+        if (localValue.parentId !== remoteValue.parentId) {
+          diff.moved.push({
+            id,
+            title: remoteValue.node.title || 'Untitled',
+            url: remoteValue.node.url || null,
+            oldPath: localValue.path,
+            newPath: remoteValue.path,
+            type: remoteValue.node.url ? 'bookmark' : 'folder'
+          });
+        }
+        // Check if modified (title or url changed)
+        else if (localValue.node.title !== remoteValue.node.title ||
+                 localValue.node.url !== remoteValue.node.url) {
+          diff.modified.push({
+            id,
+            oldTitle: localValue.node.title || 'Untitled',
+            newTitle: remoteValue.node.title || 'Untitled',
+            oldUrl: localValue.node.url || null,
+            newUrl: remoteValue.node.url || null,
+            path: remoteValue.path,
+            type: remoteValue.node.url ? 'bookmark' : 'folder'
+          });
+        }
+      }
+    });
+
+    return diff;
+  }
+
+  /**
    * Sync remote changes to local (pull)
    */
   async syncFromRemote() {
@@ -244,6 +335,43 @@ class SyncManager {
       if (remoteData.version > localVersion) {
         console.log(`[SyncFromRemote] Remote version (${remoteData.version}) > Local version (${localVersion}), pulling changes...`);
 
+        // Get current local data for diff
+        const localData = await this.getLocalBookmarks();
+
+        // Calculate diff
+        const diff = this.calculateBookmarkDiff(localData, remoteData);
+        console.log('[SyncFromRemote] Changes detected:', {
+          added: diff.added.length,
+          removed: diff.removed.length,
+          moved: diff.moved.length,
+          modified: diff.modified.length
+        });
+
+        // Check if there are deletions - require user confirmation
+        if (diff.removed.length > 0) {
+          // Emit event with diff data for UI to handle
+          this.emitEvent('syncConflict', {
+            diff,
+            remoteData,
+            requiresConfirmation: true,
+            message: `Remote has ${diff.removed.length} deletion(s). Review changes before syncing.`
+          });
+
+          this.isSyncing = false;
+          return false; // Don't auto-sync, wait for user confirmation
+        }
+
+        // No deletions - auto-sync with notification
+        if (diff.added.length > 0 || diff.moved.length > 0 || diff.modified.length > 0) {
+          // Emit event with diff data
+          this.emitEvent('syncChanges', {
+            diff,
+            remoteData,
+            requiresConfirmation: false,
+            message: `Remote has ${diff.added.length} addition(s), ${diff.moved.length} move(s), ${diff.modified.length} modification(s).`
+          });
+        }
+
         // Save remote data to local
         await this.saveLocalBookmarks(remoteData);
         console.log('[SyncFromRemote] Saved remote data to IndexedDB');
@@ -266,6 +394,39 @@ class SyncManager {
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  /**
+   * Apply remote sync manually (after user confirmation)
+   */
+  async applyRemoteSync(remoteData) {
+    try {
+      // Save remote data to local
+      await this.saveLocalBookmarks(remoteData);
+      console.log('[ApplyRemoteSync] Saved remote data to IndexedDB');
+
+      await this.setLocalVersion(remoteData.version);
+      console.log('[ApplyRemoteSync] Updated local version to:', remoteData.version);
+
+      this.lastSyncTime = Date.now();
+      await dbManager.put('metadata', { key: 'lastSync', value: this.lastSyncTime });
+
+      console.log('[ApplyRemoteSync] Manual sync applied successfully');
+      this.emitEvent('syncSuccess', 'Bookmarks updated from remote');
+
+      return true;
+    } catch (error) {
+      console.error('[ApplyRemoteSync] Failed to apply sync:', error);
+      this.emitEvent('syncError', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Get local bookmarks (alias for loadLocalBookmarks for diff calculation)
+   */
+  async getLocalBookmarks() {
+    return await this.loadLocalBookmarks();
   }
 
   /**

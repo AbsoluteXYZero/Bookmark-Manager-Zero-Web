@@ -8,7 +8,10 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 ## Features
 
 - **GitHub Gist Storage**: Your bookmarks are stored in a private Gist in your GitHub account
-- **Bidirectional Sync**: Changes sync automatically between devices
+- **Auto-Sync**: Automatic polling every 60 seconds checks for remote changes
+- **Smart Notifications**: Additions auto-sync with toast notification; deletions require user confirmation
+- **Change Preview**: "View Changes" button shows detailed diff before syncing
+- **Multi-Device Sync**: Bookmarks sync automatically between devices with edit lock notifications
 - **Offline Support**: Work offline with IndexedDB caching
 - **Device Code OAuth**: Secure authentication without exposing secrets
 - **Import/Export**: Support for HTML (Netscape format) and JSON bookmark files

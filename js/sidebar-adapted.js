@@ -194,8 +194,8 @@ async function logError(error, context = '') {
     };
 
     // Get existing error logs
-    const result = await browser.storage.local.get('errorLogs');
-    let errorLogs = result.errorLogs || [];
+    const errorLogsStr = localStorage.getItem('errorLogs');
+    let errorLogs = errorLogsStr ? JSON.parse(errorLogsStr) : [];
 
     // Add new error
     errorLogs.unshift(errorLog);
@@ -206,7 +206,7 @@ async function logError(error, context = '') {
     }
 
     // Save to storage
-    await browser.storage.local.set({ errorLogs });
+    localStorage.setItem('errorLogs', JSON.stringify(errorLogs));
     console.error(`[Error Logged] ${context}:`, error);
   } catch (storageError) {
     console.error('Failed to log error to storage:', storageError);
@@ -263,7 +263,8 @@ if (document.readyState === 'loading') {
 // ============================================================================
 
 // Detect if we're in private/incognito mode
-const isPrivateMode = browser.extension.inIncognitoContext;
+// Website version: always false (no private browsing detection available)
+const isPrivateMode = false;
 
 // Session-only storage for private mode (cleared when window closes)
 const privateSessionStorage = new Map();
@@ -284,8 +285,23 @@ const safeStorage = {
       }
       return {};
     }
-    // Normal mode: use browser.storage.local
-    return await browser.storage.local.get(keys);
+    // Normal mode: use localStorage for website version
+    if (typeof keys === 'string') {
+      return { [keys]: localStorage.getItem(keys) };
+    } else if (Array.isArray(keys)) {
+      const result = {};
+      keys.forEach(key => {
+        result[key] = localStorage.getItem(key);
+      });
+      return result;
+    } else if (typeof keys === 'object') {
+      const result = {};
+      Object.keys(keys).forEach(key => {
+        result[key] = localStorage.getItem(key) || keys[key];
+      });
+      return result;
+    }
+    return {};
   },
 
   async set(items) {
@@ -297,8 +313,12 @@ const safeStorage = {
       console.log('[Private Mode] Data stored in session memory only (will not persist)');
       return;
     }
-    // Normal mode: use browser.storage.local
-    return await browser.storage.local.set(items);
+    // Normal mode: use localStorage for website version
+    Object.entries(items).forEach(([key, value]) => {
+      if (value !== undefined && value !== null) {
+        localStorage.setItem(key, value);
+      }
+    });
   },
 
   async remove(keys) {
@@ -307,7 +327,9 @@ const safeStorage = {
       keysArray.forEach(key => privateSessionStorage.delete(key));
       return;
     }
-    return await browser.storage.local.remove(keys);
+    // Normal mode: use localStorage for website version
+    const keysArray = Array.isArray(keys) ? keys : [keys];
+    keysArray.forEach(key => localStorage.removeItem(key));
   }
 };
 
@@ -351,7 +373,9 @@ function showPrivateModeIndicator() {
 
 // Encryption utilities inlined to avoid module loading issues
 async function getDerivedKey() {
-  const browserInfo = `${navigator.userAgent}-${navigator.language}-${screen.width}x${screen.height}`;
+  // Use origin and browser info for key derivation (consistent with extensions)
+  const appId = window.location.origin;
+  const browserInfo = `${navigator.userAgent}-${navigator.language}-${appId}`;
   const encoder = new TextEncoder();
   const data = encoder.encode(browserInfo);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -489,16 +513,12 @@ async function getFolderPath(itemId) {
     let currentId = itemId;
 
     while (currentId) {
-      const items = await browser.bookmarks.get(currentId);
-      if (!items || items.length === 0) break;
-
-      const item = items[0];
+      const item = findBookmarkById(currentId, bookmarkTree);
+      if (!item) break;
       if (!item.parentId) break;
 
-      const parentItems = await browser.bookmarks.get(item.parentId);
-      if (!parentItems || parentItems.length === 0) break;
-
-      const parent = parentItems[0];
+      const parent = findBookmarkById(item.parentId, bookmarkTree);
+      if (!parent) break;
       if (!parent.title) break;
 
       parents.unshift(parent.title);
@@ -697,9 +717,9 @@ async function loadFolderScanTimestamps() {
   if (isPreviewMode) return;
 
   try {
-    const result = await browser.storage.local.get('folderScanTimestamps');
-    if (result.folderScanTimestamps) {
-      folderScanTimestamps = result.folderScanTimestamps;
+    const timestampsStr = localStorage.getItem('folderScanTimestamps');
+    if (timestampsStr) {
+      folderScanTimestamps = JSON.parse(timestampsStr);
       console.log(`[Folder Scan Cache] Loaded timestamps for ${Object.keys(folderScanTimestamps).length} folders`);
     }
   } catch (error) {
@@ -713,7 +733,7 @@ async function saveFolderScanTimestamp(folderId) {
 
   try {
     folderScanTimestamps[folderId] = Date.now();
-    await browser.storage.local.set({ folderScanTimestamps });
+    localStorage.setItem('folderScanTimestamps', JSON.stringify(folderScanTimestamps));
     console.log(`[Folder Scan Cache] Saved timestamp for folder ${folderId}`);
   } catch (error) {
     console.error('[Folder Scan Cache] Error saving timestamp:', error);
@@ -730,17 +750,16 @@ function shouldScanFolder(folderId) {
   return elapsed > FOLDER_SCAN_CACHE_DURATION; // >7 days
 }
 
-// Sync UI with ongoing background scan status
+// Sync UI with ongoing scan status
 async function syncBackgroundScanStatus() {
   try {
-    const status = await browser.runtime.sendMessage({ action: 'getBackgroundScanStatus' });
-
-    if (status && status.isScanning) {
-      console.log(`[Background Scan] Syncing UI - ${status.scanned}/${status.total}`);
+    // In website version, check scanner service directly
+    if (scannerService && scannerService.isScanning) {
+      console.log(`[Scanner] Syncing UI - ${scannerService.scannedCount}/${scannerService.totalCount}`);
 
       // Update progress text
       if (scanProgress) {
-        scanProgress.textContent = `Scanning: ${status.scanned}/${status.total}`;
+        scanProgress.textContent = `Scanning: ${scannerService.scannedCount}/${scannerService.totalCount}`;
       }
 
       // Show stop button, hide rescan button
@@ -750,90 +769,39 @@ async function syncBackgroundScanStatus() {
       if (rescanBtn) rescanBtn.style.display = 'none';
     }
   } catch (error) {
-    console.error('Error syncing background scan status:', error);
+    console.error('Error syncing scan status:', error);
   }
 }
 
-// Setup listener for blocklist download progress messages from background script
+// Setup listener for blocklist download progress messages
 function setupBlocklistProgressListener() {
-  browser.runtime.onMessage.addListener((message) => {
-    if (message.type === 'blocklistProgress') {
-      // Update status bar with download progress
-      if (scanProgress && message.status === 'starting') {
-        scanProgress.textContent = 'Downloading blocklists...';
-        if (scanStatusBar) scanStatusBar.classList.add('scanning');
-      } else if (scanProgress && message.status === 'downloading') {
-        scanProgress.textContent = `Downloading blocklists... (${message.current}/${message.total})`;
-        if (scanStatusBar) scanStatusBar.classList.add('scanning');
-      }
-      console.log(`[Blocklist Progress] ${message.current}/${message.total}${message.sourceName ? ` - ${message.sourceName}` : ''}`);
-    } else if (message.type === 'blocklistComplete') {
-      // Clear status bar after completion
-      if (scanProgress) {
-        scanProgress.textContent = `Blocklists loaded: ${message.domains.toLocaleString()} domains`;
-        setTimeout(() => {
-          if (scanProgress && scanProgress.textContent.startsWith('Blocklists loaded:')) {
-            scanProgress.textContent = 'Ready';
-          }
-        }, 3000); // Show completion message for 3 seconds
-      }
-      if (scanStatusBar) scanStatusBar.classList.remove('scanning');
-      console.log(`[Blocklist Complete] ${message.domains.toLocaleString()} unique domains from ${message.totalEntries.toLocaleString()} entries (${message.sources} sources)`);
+  // Listen for CustomEvents dispatched by blocklist service
+  window.addEventListener('blocklist:progress', (event) => {
+    const message = event.detail;
+    // Update status bar with download progress
+    if (scanProgress && message.status === 'starting') {
+      scanProgress.textContent = 'Downloading blocklists...';
+      if (scanStatusBar) scanStatusBar.classList.add('scanning');
+    } else if (scanProgress && message.status === 'downloading') {
+      scanProgress.textContent = `Downloading blocklists... (${message.current}/${message.total})`;
+      if (scanStatusBar) scanStatusBar.classList.add('scanning');
     }
-    // Background scan messages
-    else if (message.type === 'scanStarted') {
-      console.log(`[Background Scan] Started - ${message.total} bookmarks`);
-      if (scanProgress) scanProgress.textContent = `Scanning: 0/${message.total}`;
+    console.log(`[Blocklist Progress] ${message.current}/${message.total}${message.sourceName ? ` - ${message.sourceName}` : ''}`);
+  });
 
-      // Show stop button, hide rescan button
-      const stopBtn = document.getElementById('stopScanBtn');
-      const rescanBtn = document.getElementById('rescanAllBtn');
-      if (stopBtn) stopBtn.style.display = 'flex';
-      if (rescanBtn) rescanBtn.style.display = 'none';
-    } else if (message.type === 'scanProgress') {
-      // Update progress in status bar
-      if (scanProgress) {
-        scanProgress.textContent = `Scanning: ${message.scanned}/${message.total}`;
-      }
-
-      // Update the bookmark in the tree with scan results
-      if (message.result) {
-        const updates = {};
-        if (message.result.linkStatus) {
-          updates.linkStatus = message.result.linkStatus;
+  window.addEventListener('blocklist:complete', (event) => {
+    const message = event.detail;
+    // Clear status bar after completion
+    if (scanProgress) {
+      scanProgress.textContent = `Blocklists loaded: ${message.domains.toLocaleString()} domains`;
+      setTimeout(() => {
+        if (scanProgress && scanProgress.textContent.startsWith('Blocklists loaded:')) {
+          scanProgress.textContent = 'Ready';
         }
-        if (message.result.safetyStatus) {
-          updates.safetyStatus = message.result.safetyStatus;
-          updates.safetySources = message.result.safetySources || [];
-        }
-
-        updateBookmarkInTree(message.result.id, updates);
-
-        // Re-render if the bookmark is currently visible
-        const bookmarkElement = document.querySelector(`[data-id="${message.result.id}"]`);
-        if (bookmarkElement) {
-          renderBookmarks();
-        }
-      }
-    } else if (message.type === 'scanComplete') {
-      console.log(`[Background Scan] Complete - ${message.scanned}/${message.total} bookmarks scanned`);
-      if (scanProgress) scanProgress.textContent = 'Ready';
-
-      // Show rescan button, hide stop button
-      const stopBtn = document.getElementById('stopScanBtn');
-      const rescanBtn = document.getElementById('rescanAllBtn');
-      if (stopBtn) stopBtn.style.display = 'none';
-      if (rescanBtn) rescanBtn.style.display = 'flex';
-    } else if (message.type === 'scanCancelled') {
-      console.log(`[Background Scan] Cancelled - ${message.scanned}/${message.total} bookmarks scanned`);
-      if (scanProgress) scanProgress.textContent = 'Ready';
-
-      // Show rescan button, hide stop button
-      const stopBtn = document.getElementById('stopScanBtn');
-      const rescanBtn = document.getElementById('rescanAllBtn');
-      if (stopBtn) stopBtn.style.display = 'none';
-      if (rescanBtn) rescanBtn.style.display = 'flex';
+      }, 3000); // Show completion message for 3 seconds
     }
+    if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+    console.log(`[Blocklist Complete] ${message.domains.toLocaleString()} unique domains from ${message.totalEntries.toLocaleString()} entries (${message.sources} sources)`);
   });
 }
 
@@ -2264,16 +2232,12 @@ async function openBookmarkUrl(url, openInNewTab = false) {
       // Try window.open for other privileged URLs
       window.open(url, '_blank');
     } else {
-      // Use browser APIs for regular URLs (better control)
+      // Use window.open for all URLs in website version
       if (openInNewTab) {
-        browser.tabs.create({ url: url });
+        window.open(url, '_blank');
       } else {
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tabs[0]) {
-          browser.tabs.update(tabs[0].id, { url: url });
-        } else {
-          browser.tabs.create({ url: url });
-        }
+        // In website version, always open in new tab since we can't navigate current tab
+        window.open(url, '_blank');
       }
     }
   } catch (error) {
@@ -3387,6 +3351,28 @@ function showQRCodePopup(url) {
     qrContainer.innerHTML = '';
 
     // Generate QR code locally using qrcode-lib.js
+    // The library throws "Unable to load image" errors during SVG capability detection
+    // These are cosmetic and don't affect functionality - suppress them
+    const suppressQRImageError = (e) => {
+      if (e && (e.message === 'Unable to load image' ||
+                (typeof e === 'string' && e.includes('Unable to load image')))) {
+        e.preventDefault?.();
+        e.stopPropagation?.();
+        return true;
+      }
+      return false;
+    };
+
+    // Catch uncaught exceptions from QR library
+    const errorHandler = (event) => {
+      if (suppressQRImageError(event.error) || suppressQRImageError(event.reason)) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener('error', errorHandler);
+    window.addEventListener('unhandledrejection', errorHandler);
+
     try {
       new QRCode(qrContainer, {
         text: text,
@@ -3397,8 +3383,19 @@ function showQRCodePopup(url) {
         correctLevel: QRCode.CorrectLevel.M
       });
     } catch (error) {
-      console.error('Error generating QR code:', error);
-      qrContainer.innerHTML = '<div style="padding: 20px;">Error generating QR code</div>';
+      // Only show error if QR code actually failed to render
+      if (!suppressQRImageError(error)) {
+        console.error('Error generating QR code:', error);
+        if (!qrContainer.querySelector('svg') && !qrContainer.querySelector('canvas')) {
+          qrContainer.innerHTML = '<div style="padding: 20px;">Error generating QR code</div>';
+        }
+      }
+    } finally {
+      // Clean up error handlers after QR library finishes
+      setTimeout(() => {
+        window.removeEventListener('error', errorHandler);
+        window.removeEventListener('unhandledrejection', errorHandler);
+      }, 200);
     }
   }
 
@@ -3521,7 +3518,7 @@ async function handleDropToRoot(draggedId) {
     const oldParent = await getFolderPath(draggedItem.parentId);
 
     // Move to root at the last position
-    await browser.bookmarks.move(draggedId, {
+    await bookmarkManager.move(draggedId, {
       parentId: undefined,
       index: bookmarkTree.length
     });
@@ -3587,7 +3584,7 @@ async function handleDropToPosition(draggedId, targetParentId, targetIndex) {
     // Get old parent folder path before moving
     const oldParent = await getFolderPath(draggedItem.parentId);
 
-    await browser.bookmarks.move(draggedId, {
+    await bookmarkManager.move(draggedId, {
       parentId: targetParentId === 'root________' ? undefined : targetParentId,
       index: targetIndex
     });
@@ -3713,7 +3710,7 @@ async function handleDrop(draggedId, targetId, targetElement, dropState) {
     // Get old parent folder path before moving
     const oldParent = await getFolderPath(draggedItem.parentId);
 
-    await browser.bookmarks.move(draggedId, {
+    await bookmarkManager.move(draggedId, {
       parentId: targetParentId,
       index: newIndex
     });
@@ -4052,35 +4049,37 @@ async function rescanFolder(folderId, folderTitle) {
   try {
     console.log(`[Folder Rescan] Starting rescan for folder: ${folderTitle} (${folderId})`);
 
-    // Get all bookmarks recursively from this folder
-    const bookmarks = [];
-    const collectBookmarks = async (nodeId) => {
-      const nodes = await browser.bookmarks.getChildren(nodeId);
-      for (const node of nodes) {
-        // Skip separators
-        if (node.type === 'separator') continue;
+    // Find the folder node in the bookmark tree
+    const folder = findFolderById(folderId, bookmarkTree);
+    if (!folder) {
+      alert(`Folder "${folderTitle}" not found.`);
+      return;
+    }
 
-        if (node.url) {
-          // It's a bookmark
-          bookmarks.push(node);
-        } else if (node.children || node.type === 'folder') {
-          // It's a folder, recurse into it
-          await collectBookmarks(node.id);
-        }
+    // Count bookmarks in folder recursively
+    const countBookmarks = (node) => {
+      let count = 0;
+      if (node.url) {
+        count = 1;
+      } else if (node.children) {
+        node.children.forEach(child => {
+          count += countBookmarks(child);
+        });
       }
+      return count;
     };
 
-    await collectBookmarks(folderId);
+    const bookmarkCount = countBookmarks(folder);
 
-    if (bookmarks.length === 0) {
+    if (bookmarkCount === 0) {
       alert(`Folder "${folderTitle}" has no bookmarks to scan.`);
       return;
     }
 
-    console.log(`[Folder Rescan] Found ${bookmarks.length} bookmark(s) in folder "${folderTitle}"`);
+    console.log(`[Folder Rescan] Found ${bookmarkCount} bookmark(s) in folder "${folderTitle}"`);
 
     // Show confirmation
-    const confirmMessage = `Rescan ${bookmarks.length} bookmark(s) in "${folderTitle}" and its subfolders?\n\nThis will check link status and security for all bookmarks.`;
+    const confirmMessage = `Rescan ${bookmarkCount} bookmark(s) in "${folderTitle}" and its subfolders?\n\nThis will check link status and security for all bookmarks.`;
     if (!confirm(confirmMessage)) {
       return;
     }
@@ -4107,124 +4106,37 @@ async function rescanFolder(folderId, folderTitle) {
     if (scanStatusBar) scanStatusBar.classList.add('scanning');
     if (scanProgress) scanProgress.textContent = `Preparing scan...`;
 
-    // Ensure blocklist database is ready (triggers update if needed, then waits for completion)
-    // This prevents getting 'unknown' results during database download
+    // Ensure blocklist database is ready
     try {
       if (scanProgress) scanProgress.textContent = `Loading security database...`;
       console.log('[Folder Rescan] Ensuring blocklist database is ready...');
 
-      const response = await browser.runtime.sendMessage({ action: 'ensureBlocklistReady' });
-
-      console.log(`[Folder Rescan] Blocklist ready with ${response.size} domains`);
+      const response = await blocklistService.ensureBlocklistReady();
+      console.log(`[Folder Rescan] Blocklist ready with ${response.domainCount} domains`);
     } catch (error) {
       console.warn('[Folder Rescan] Could not ensure blocklist is ready:', error);
     }
 
-    if (scanProgress) scanProgress.textContent = `Scanning folder: 0/${bookmarks.length}`;
-
-    // Track statistics
-    let scanned = 0;
-    let unsafe = 0;
-    let warning = 0;
-    let dead = 0;
-
-    // Process bookmarks in batches to avoid overwhelming the background service
-    const BATCH_SIZE = 10;
-    for (let i = 0; i < bookmarks.length; i += BATCH_SIZE) {
-      const batch = bookmarks.slice(i, i + BATCH_SIZE);
-
-      // Process each bookmark in the batch
-      const batchPromises = batch.map(async (bookmark) => {
-        try {
-          // Check safety status (bypass cache for folder rescan)
-          const safetyResult = await browser.runtime.sendMessage({
-            action: 'checkURLSafety',
-            url: bookmark.url,
-            bypassCache: true
-          });
-
-          // Check link status (bypass cache for folder rescan)
-          const linkResult = await browser.runtime.sendMessage({
-            action: 'checkLinkStatus',
-            url: bookmark.url,
-            bypassCache: true
-          });
-
-          // Update the bookmark tree with the results so they persist
-          updateBookmarkInTree(bookmark.id, {
-            linkStatus: linkResult?.status || 'unknown',
-            safetyStatus: safetyResult?.status || 'unknown',
-            safetySources: safetyResult?.sources || []
-          });
-
-          // Track statistics
-          if (safetyResult) {
-            if (safetyResult.status === 'unsafe') unsafe++;
-            if (safetyResult.status === 'warning') warning++;
-          }
-
-          if (linkResult) {
-            if (linkResult.status === 'dead' || linkResult.status === 'parked') dead++;
-          }
-
-          scanned++;
-          console.log(`[Folder Rescan] Progress: ${scanned}/${bookmarks.length} - Safety: ${safetyResult?.status || 'unknown'}, Link: ${linkResult?.status || 'unknown'}`);
-        } catch (error) {
-          console.error(`[Folder Rescan] Error checking bookmark ${bookmark.id}:`, error);
-        }
-      });
-
-      // Wait for batch to complete
-      await Promise.all(batchPromises);
-
-      // Update UI after each batch to show progress
-      renderBookmarks();
-
-      // Update status bar with progress
-      const progress = Math.min(scanned, bookmarks.length);
-      if (scanProgress) scanProgress.textContent = `Scanning folder: ${progress}/${bookmarks.length}`;
-
-      // Add delay between batches to avoid overwhelming background service
-      if (i + BATCH_SIZE < bookmarks.length) {
-        await new Promise(resolve => setTimeout(resolve, 300));
-      }
-    }
+    // Use scanner service to scan the folder
+    await scannerService.scanFolder(folder, true);
 
     // Save the updated folder scan timestamp
     saveFolderScanTimestamp(folderId);
-
-    // Mark all rescanned bookmarks as checked so they won't be auto-scanned again
-    bookmarks.forEach(bookmark => {
-      checkedBookmarks.add(bookmark.id);
-    });
 
     // Refresh the display with updated status icons
     renderBookmarks();
 
     // Update status bar to show completion
     if (scanStatusBar) scanStatusBar.classList.remove('scanning');
-    if (scanProgress) scanProgress.textContent = `Scan complete: ${scanned}/${bookmarks.length}`;
+    if (scanProgress) scanProgress.textContent = `Scan complete`;
 
-    // Clear checkedBookmarks to free memory after folder scan completes
-    checkedBookmarks.clear();
-
-    // Show summary
-    const summary = [
-      `Rescan complete for "${folderTitle}"!`,
-      ``,
-      `📊 Scanned: ${scanned} bookmark(s)`,
-      `🛡️ Unsafe: ${unsafe}`,
-      `⚠️ Warnings: ${warning}`,
-      `🔗 Dead links: ${dead}`,
-      `✅ Safe: ${scanned - unsafe - warning}`
-    ].join('\n');
-
-    alert(summary);
-    console.log(`[Folder Rescan] Complete: ${scanned} scanned, ${unsafe} unsafe, ${warning} warnings, ${dead} dead`);
+    console.log(`[Folder Rescan] Complete for folder "${folderTitle}"`);
 
   } catch (error) {
     console.error('[Folder Rescan] Error:', error);
     alert(`Failed to rescan folder: ${error.message}`);
+    if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+    if (scanProgress) scanProgress.textContent = 'Ready';
   }
 }
 
@@ -4249,8 +4161,8 @@ async function countFolderItems(folderId) {
   }
 
   try {
-    const subtree = await browser.bookmarks.getSubTree(folderId);
-    if (!subtree[0] || !subtree[0].children) return 0;
+    const folder = findFolderById(folderId, bookmarkTree);
+    if (!folder || !folder.children) return 0;
 
     let count = 0;
     const countRecursive = (items) => {
@@ -4261,7 +4173,7 @@ async function countFolderItems(folderId) {
         }
       }
     };
-    countRecursive(subtree[0].children);
+    countRecursive(folder.children);
     return count;
   } catch (error) {
     console.error('Error counting folder items:', error);
@@ -4332,14 +4244,16 @@ async function deleteFolder(id) {
 
   try {
     // Get folder details before deleting for undo functionality
-    const folderInfo = await browser.bookmarks.getSubTree(id);
-    const folder = folderInfo[0];
+    const folder = findFolderById(id, bookmarkTree);
+    if (!folder) {
+      throw new Error('Folder not found');
+    }
 
     // Add to changelog before deleting
     await addChangelogEntry('delete', 'folder', folder.title || 'Untitled');
 
     // Delete the folder
-    await browser.bookmarks.removeTree(id);
+    await bookmarkManager.remove(id);
 
     // Show undo toast
     showUndoToast({
@@ -4442,7 +4356,7 @@ async function performUndo() {
       // Real extension mode
       if (type === 'bookmark') {
         // Restore bookmark
-        await browser.bookmarks.create({
+        await bookmarkManager.create({
           title: data.title,
           url: data.url,
           parentId: data.parentId,
@@ -4470,10 +4384,11 @@ async function performUndo() {
 // Recursively restore a folder and all its contents
 async function restoreFolderRecursive(folderData, parentId, index) {
   // Create the folder
-  const newFolder = await browser.bookmarks.create({
+  const newFolder = await bookmarkManager.create({
     title: folderData.title,
     parentId: parentId,
-    index: index
+    index: index,
+    type: 'folder'
   });
 
   // Restore children if any
@@ -4482,7 +4397,7 @@ async function restoreFolderRecursive(folderData, parentId, index) {
       const child = folderData.children[i];
       if (child.url) {
         // It's a bookmark
-        await browser.bookmarks.create({
+        await bookmarkManager.create({
           title: child.title,
           url: child.url,
           parentId: newFolder.id,
@@ -4776,6 +4691,9 @@ async function checkSafetyStatus(url, bypassCache = false) {
 // Export functions to window for browser API compatibility layer
 window._webCheckLinkStatus = checkLinkStatus;
 window._webCheckSafetyStatus = checkSafetyStatus;
+window.updateBookmarkInTree = updateBookmarkInTree;
+window.updateBookmarkStatusInDOM = updateBookmarkStatusInDOM;
+window.renderBookmarks = renderBookmarks;
 
 // Recheck bookmark status (link + safety)
 async function recheckBookmarkStatus(bookmarkId) {
@@ -4801,25 +4719,11 @@ async function recheckBookmarkStatus(bookmarkId) {
   updateBookmarkInTree(bookmarkId, checkingUpdates);
   renderBookmarks();
 
-  // Ensure blocklist is ready before checking safety
-  if (safetyCheckingEnabled) {
-    const blocklistStatus = await blocklistService.ensureBlocklistReady();
-    console.log('[Blocklist] Ready with', blocklistStatus.domainCount, 'domains');
-  }
+  // Use scanner service to perform the scan via Web Worker
+  // The scanner service will handle blocklist readiness, API keys, etc.
+  await scannerService.scanBookmark(bookmark, true); // Bypass cache for rescan
 
-  const results = {};
-  if (linkCheckingEnabled) {
-    results.linkStatus = await checkLinkStatus(bookmark.url, true); // Bypass cache for rescan
-  }
-  if (safetyCheckingEnabled) {
-    const safetyStatusResult = await checkSafetyStatus(bookmark.url, true); // Bypass cache for rescan
-    results.safetyStatus = safetyStatusResult.status;
-    results.safetySources = safetyStatusResult.sources;
-  }
-
-  updateBookmarkInTree(bookmarkId, results);
-  renderBookmarks(); // Re-render to show final results
-  console.log('[Recheck] Complete:', bookmark.title, '→', results.linkStatus || '', results.safetyStatus || '');
+  console.log('[Recheck] Complete:', bookmark.title);
 }
 
 // Find bookmark by ID in tree
@@ -5033,17 +4937,8 @@ function trackSafetyChange(url, newStatus, sources) {
 async function handleBookmarkAction(action, bookmark) {
   switch (action) {
     case 'open':
-      // Open in active tab
-      if (isPreviewMode) {
-        window.open(bookmark.url, '_blank');
-      } else {
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tabs[0]) {
-          browser.tabs.update(tabs[0].id, { url: bookmark.url });
-        } else {
-          browser.tabs.create({ url: bookmark.url });
-        }
-      }
+      // Open in new tab (website version always opens in new tab)
+      window.open(bookmark.url, '_blank');
       break;
 
     case 'open-new-tab':
@@ -5052,50 +4947,21 @@ async function handleBookmarkAction(action, bookmark) {
 
     case 'open-new-window':
       // Open in new window
-      if (isPreviewMode) {
-        window.open(bookmark.url, '_blank', 'noopener,noreferrer');
-      } else {
-        browser.windows.create({ url: bookmark.url });
-      }
+      window.open(bookmark.url, '_blank', 'noopener,noreferrer');
       break;
 
     case 'reader-view':
       // Open in text-only view using Textise
       const textiseUrl = `https://www.textise.net/showText.aspx?strURL=${encodeURIComponent(bookmark.url)}`;
-      if (isPreviewMode) {
-        window.open(textiseUrl, '_blank');
-      } else {
-        browser.tabs.create({ url: textiseUrl });
-      }
+      window.open(textiseUrl, '_blank');
       break;
 
     case 'save-pdf':
-      // Save page as PDF
-      if (isPreviewMode) {
-        // In preview mode, open the page and show instructions
-        window.open(bookmark.url, '_blank');
-        setTimeout(() => {
-          alert('Page opened in a new tab. To save as PDF:\n\n1. Wait for the page to load\n2. Press Ctrl+P (or Cmd+P on Mac)\n3. Select "Save as PDF" as the destination\n4. Click "Save"');
-        }, 500);
-      } else {
-        // Open the page in a new tab and save as PDF
-        const tab = await browser.tabs.create({ url: bookmark.url });
-
-        // Wait for the page to load before saving as PDF
-        const listener = (tabId, changeInfo) => {
-          if (tabId === tab.id && changeInfo.status === 'complete') {
-            browser.tabs.onUpdated.removeListener(listener);
-            // Trigger the save as PDF action
-            browser.tabs.saveAsPDF(tab.id).then(() => {
-              console.log('PDF save initiated');
-            }).catch(err => {
-              console.error('Failed to save PDF:', err);
-              alert('Failed to save page as PDF. Please try using the browser\'s built-in print-to-PDF feature.');
-            });
-          }
-        };
-        browser.tabs.onUpdated.addListener(listener);
-      }
+      // Save page as PDF - open page and show instructions
+      window.open(bookmark.url, '_blank');
+      setTimeout(() => {
+        alert('Page opened in a new tab. To save as PDF:\n\n1. Wait for the page to load\n2. Press Ctrl+P (or Cmd+P on Mac)\n3. Select "Save as PDF" as the destination\n4. Click "Save"');
+      }, 500);
       break;
 
     case 'edit':
@@ -5115,11 +4981,7 @@ async function handleBookmarkAction(action, bookmark) {
       try {
         const domain = new URL(bookmark.url).hostname;
         const vtUrl = `https://www.virustotal.com/gui/search/${domain}`;
-        if (isPreviewMode) {
-          window.open(vtUrl, '_blank');
-        } else {
-          browser.tabs.create({ url: vtUrl });
-        }
+        window.open(vtUrl, '_blank');
       } catch (error) {
         console.error('Error opening VirusTotal:', error);
         alert('Failed to open VirusTotal. Invalid URL.');
@@ -5139,7 +5001,7 @@ async function handleBookmarkAction(action, bookmark) {
         try {
           await navigator.clipboard.writeText(bookmark.url);
           const waybackSaveUrl = 'https://web.archive.org/save';
-          browser.tabs.create({ url: waybackSaveUrl });
+          window.open(waybackSaveUrl, '_blank');
           // Brief notification that URL was copied
           setTimeout(() => {
             alert(`URL copied to clipboard!\n\n"${bookmark.url}"\n\nPaste it into the Wayback Machine save page that just opened.`);
@@ -5148,7 +5010,7 @@ async function handleBookmarkAction(action, bookmark) {
           console.error('Error copying URL:', error);
           // Fallback: just open the save page
           const waybackSaveUrl = 'https://web.archive.org/save';
-          browser.tabs.create({ url: waybackSaveUrl });
+          window.open(waybackSaveUrl, '_blank');
         }
       }
       break;
@@ -5157,7 +5019,7 @@ async function handleBookmarkAction(action, bookmark) {
       // Browse Wayback Machine snapshots
       {
         const waybackBrowseUrl = `https://web.archive.org/web/*/${bookmark.url}`;
-        browser.tabs.create({ url: waybackBrowseUrl });
+        window.open(waybackBrowseUrl, '_blank');
       }
       break;
 
@@ -5269,7 +5131,7 @@ async function saveEditModal() {
     const oldUrl = currentEditItem.url;
     const itemType = isFolder ? 'folder' : 'bookmark';
 
-    await browser.bookmarks.update(currentEditItem.id, updates);
+    await bookmarkManager.update(currentEditItem.id, updates);
 
     // Add to changelog
     const changeDetails = {};
@@ -5342,14 +5204,16 @@ async function deleteBookmark(id) {
 
   try {
     // Get bookmark details before deleting for undo functionality
-    const bookmarks = await browser.bookmarks.get(id);
-    const bookmark = bookmarks[0];
+    const bookmark = findBookmarkById(id, bookmarkTree);
+    if (!bookmark) {
+      throw new Error('Bookmark not found');
+    }
 
     // Add to changelog before deleting
     await addChangelogEntry('delete', 'bookmark', bookmark.title || 'Untitled', bookmark.url);
 
     // Delete the bookmark
-    await browser.bookmarks.remove(id);
+    await bookmarkManager.remove(id);
 
     // Show undo toast
     showUndoToast({
@@ -5415,19 +5279,14 @@ async function openAddBookmarkModal() {
   const folderSelect = document.getElementById('newBookmarkFolder');
 
   // Try to get the current active tab to pre-populate fields
+  // Website version: cannot access current tab info, leave fields empty
   if (!isPreviewMode) {
     try {
-      const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-      if (tabs && tabs.length > 0) {
-        const currentTab = tabs[0];
-        titleInput.value = currentTab.title || '';
-        urlInput.value = currentTab.url || '';
-      } else {
-        titleInput.value = '';
-        urlInput.value = '';
-      }
+      // In website version, we can't get tab info, so leave empty
+      titleInput.value = '';
+      urlInput.value = '';
     } catch (error) {
-      console.error('Error getting current tab:', error);
+      console.error('Error in add bookmark:', error);
       titleInput.value = '';
       urlInput.value = '';
     }
@@ -5512,7 +5371,7 @@ async function saveNewBookmark() {
 
   try {
     // SAFETY: Check for duplicate bookmarks to prevent accidental duplication
-    const existingBookmarks = await browser.bookmarks.search({ url });
+    const existingBookmarks = bookmarkManager.search(url);
     if (existingBookmarks.length > 0) {
       const duplicateInfo = existingBookmarks.map(b => `  • "${b.title}" in folder ${b.parentId}`).join('\n');
       const confirmed = confirm(
@@ -5524,7 +5383,7 @@ async function saveNewBookmark() {
       }
     }
 
-    const newBookmark = await browser.bookmarks.create({
+    const newBookmark = await bookmarkManager.create({
       title: title || url,
       url,
       parentId
@@ -5621,7 +5480,7 @@ async function saveNewFolder() {
   }
 
   try {
-    const newFolder = await browser.bookmarks.create({
+    const newFolder = await bookmarkManager.create({
       title,
       type: 'folder',
       parentId
@@ -5810,10 +5669,8 @@ async function openInNewTab() {
   }
 
   try {
-    // Get the extension's URL for the sidebar page
-    const extensionUrl = browser.runtime.getURL('sidebar.html');
-    // Open it in a new tab
-    await browser.tabs.create({ url: extensionUrl });
+    // In website version, just reload the current page
+    window.location.reload();
   } catch (error) {
     console.error('Error opening in new tab:', error);
     alert('Failed to open in new tab');
@@ -5886,14 +5743,8 @@ async function exportBookmarks() {
 
     let data;
 
-    if (isPreviewMode) {
-      // Export mock data in preview mode
-      data = bookmarkTree;
-    } else {
-      // Export actual bookmarks
-      const tree = await browser.bookmarks.getTree();
-      data = tree;
-    }
+    // Export bookmark tree from bookmarkManager
+    data = bookmarkManager.getTree();
 
     // Generate filename with timestamp
     const date = new Date().toISOString().split('T')[0];
@@ -5950,14 +5801,9 @@ async function findDuplicates() {
   try {
     let allBookmarks = [];
 
-    if (isPreviewMode) {
-      // Use mock data in preview mode
-      allBookmarks = getAllBookmarksFlat(bookmarkTree);
-    } else {
-      // Get all bookmarks from Firefox
-      const tree = await browser.bookmarks.getTree();
-      allBookmarks = getAllBookmarksFlat(tree);
-    }
+    // Get all bookmarks from bookmarkManager
+    const tree = bookmarkManager.getTree();
+    allBookmarks = getAllBookmarksFlat(Object.values(tree.roots));
 
     // Group bookmarks by URL
     const urlMap = new Map();
@@ -6168,7 +6014,7 @@ async function deleteSelectedDuplicates() {
     for (const checkbox of checkboxes) {
       const bookmarkId = checkbox.dataset.bookmarkId;
       try {
-        await browser.bookmarks.remove(bookmarkId);
+        await bookmarkManager.remove(bookmarkId);
         successCount++;
       } catch (error) {
         console.error(`Failed to delete bookmark ${bookmarkId}:`, error);
@@ -6398,22 +6244,12 @@ async function closeExtension() {
   }
 
   try {
-    // Check if we're running in a sidebar or a tab
-    const currentTab = await browser.tabs.getCurrent();
-
-    if (currentTab && currentTab.id) {
-      // We're in a tab, so close the tab
-      await browser.tabs.remove(currentTab.id);
-    } else {
-      // We're in a sidebar, use sidebarAction to close it
-      // Note: Firefox doesn't have a direct API to close sidebar programmatically
-      // We'll try to close the window, which works for sidebar panels
-      window.close();
-    }
-  } catch (error) {
-    console.error('Error closing extension:', error);
-    // Fallback: just try to close the window
+    // In website version, just try to close the window
     window.close();
+  } catch (error) {
+    console.error('Error closing window:', error);
+    // If that doesn't work, show a message
+    alert('Please close this tab manually.');
   }
 }
 
@@ -6643,11 +6479,12 @@ async function bulkMoveItems() {
     // Move each selected item
     for (const itemId of selectedItems) {
       // Get item details before moving
-      const items = await browser.bookmarks.get(itemId);
-      const item = items[0];
+      const item = findBookmarkById(itemId, bookmarkTree);
+      if (!item) continue;
+
       const oldParent = await getFolderPath(item.parentId);
 
-      await browser.bookmarks.move(itemId, { parentId: destinationFolder.id });
+      await bookmarkManager.move(itemId, { parentId: destinationFolder.id });
 
       // Add to changelog
       const itemType = item.url ? 'bookmark' : 'folder';
@@ -6681,7 +6518,7 @@ async function bulkDeleteItems() {
   try {
     // Delete each selected item
     for (const itemId of selectedItems) {
-      await browser.bookmarks.removeTree(itemId);
+      await bookmarkManager.remove(itemId);
     }
 
     selectedItems.clear();
@@ -6874,19 +6711,11 @@ function setupEventListeners() {
   // QR Code button - generate QR for current page URL
   if (qrCodeBtn) {
     qrCodeBtn.addEventListener('click', async () => {
-      // Get the current active tab URL
+      // In website version, can't get current tab URL, so show with empty URL
       try {
-        const tabs = await browser.tabs.query({ active: true, currentWindow: true });
-        if (tabs && tabs[0] && tabs[0].url) {
-          showQRCodePopup(tabs[0].url);
-        } else {
-          // Fallback: show with empty URL so user can paste one
-          showQRCodePopup('');
-        }
-      } catch (error) {
-        console.error('Error getting current tab URL:', error);
-        // Fallback: show with empty URL so user can paste one
         showQRCodePopup('');
+      } catch (error) {
+        console.error('Error showing QR code popup:', error);
       }
     });
   }
@@ -6939,106 +6768,128 @@ function setupEventListeners() {
   }
 
   // View menu
-  viewBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const wasOpen = viewMenu.classList.contains('show');
-    closeAllMenus();
-    if (!wasOpen) {
-      menuJustOpened = true;
-      viewMenu.classList.add('show');
-      positionToolbarMenu(viewMenu, viewBtn);
-    }
-  });
-
-  // View selection
-  viewMenu.querySelectorAll('.action-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const selectedView = btn.dataset.view;
-      setView(selectedView);
+  if (viewBtn && viewMenu) {
+    viewBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = viewMenu.classList.contains('show');
       closeAllMenus();
+      if (!wasOpen) {
+        menuJustOpened = true;
+        viewMenu.classList.add('show');
+        positionToolbarMenu(viewMenu, viewBtn);
+      }
     });
-  });
+
+    // View selection
+    viewMenu.querySelectorAll('.action-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const selectedView = btn.dataset.view;
+        setView(selectedView);
+        closeAllMenus();
+      });
+    });
+  } else {
+    console.warn('[Setup] viewBtn or viewMenu not found, cannot attach listener');
+  }
 
   // Zoom menu
-  zoomBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const wasOpen = zoomMenu.classList.contains('show');
-    closeAllMenus();
-    if (!wasOpen) {
-      menuJustOpened = true;
-      zoomMenu.classList.add('show');
-      positionToolbarMenu(zoomMenu, zoomBtn);
-    }
-  });
+  if (zoomBtn && zoomMenu && zoomSlider && fontSizeSlider) {
+    zoomBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const wasOpen = zoomMenu.classList.contains('show');
+      closeAllMenus();
+      if (!wasOpen) {
+        menuJustOpened = true;
+        zoomMenu.classList.add('show');
+        positionToolbarMenu(zoomMenu, zoomBtn);
+      }
+    });
 
-  // Zoom slider
-  zoomSlider.addEventListener('input', (e) => {
-    const newZoom = parseInt(e.target.value);
-    setZoom(newZoom);
-  });
+    // Zoom slider
+    zoomSlider.addEventListener('input', (e) => {
+      const newZoom = parseInt(e.target.value);
+      setZoom(newZoom);
+    });
 
-  // Font size slider
-  fontSizeSlider.addEventListener('input', (e) => {
-    const newSize = parseInt(e.target.value);
-    setFontSize(newSize);
-  });
+    // Font size slider
+    fontSizeSlider.addEventListener('input', (e) => {
+      const newSize = parseInt(e.target.value);
+      setFontSize(newSize);
+    });
+  } else {
+    console.warn('[Setup] zoomBtn, zoomMenu, or sliders not found, cannot attach listeners');
+  }
 
   // Settings menu
-  settingsBtn.addEventListener('click', async (e) => {
-    e.stopPropagation();
-    const wasOpen = settingsMenu.classList.contains('show');
-    closeAllMenus();
-    if (!wasOpen) {
-      menuJustOpened = true;
-      settingsMenu.classList.add('show');
-      positionToolbarMenu(settingsMenu, settingsBtn);
+  if (settingsBtn && settingsMenu) {
+    settingsBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const wasOpen = settingsMenu.classList.contains('show');
+      closeAllMenus();
+      if (!wasOpen) {
+        menuJustOpened = true;
+        settingsMenu.classList.add('show');
+        positionToolbarMenu(settingsMenu, settingsBtn);
 
-      // Update cache size display when menu opens
-      await updateCacheSizeDisplay();
-    }
-  });
+        // Update cache size display when menu opens
+        await updateCacheSizeDisplay();
+      }
+    });
+  } else {
+    console.warn('[Setup] settingsBtn or settingsMenu not found, cannot attach listener');
+  }
 
   // Open in new tab
-  openInTabBtn.addEventListener('click', () => {
-    openInNewTab();
-    closeAllMenus();
-  });
+  if (openInTabBtn) {
+    openInTabBtn.addEventListener('click', () => {
+      openInNewTab();
+      closeAllMenus();
+    });
+  }
 
   // Export bookmarks (backup)
-  exportBookmarksBtn.addEventListener('click', () => {
-    exportBookmarks();
-    closeAllMenus();
-  });
+  if (exportBookmarksBtn) {
+    exportBookmarksBtn.addEventListener('click', () => {
+      exportBookmarks();
+      closeAllMenus();
+    });
+  }
 
   // Clear cache
-  clearCacheBtn.addEventListener('click', async () => {
-    await clearCache();
-    closeAllMenus();
-  });
+  if (clearCacheBtn) {
+    clearCacheBtn.addEventListener('click', async () => {
+      await clearCache();
+      closeAllMenus();
+    });
+  }
 
   // Auto-clear cache setting
-  autoClearCacheSelect.addEventListener('change', async (e) => {
-    const autoClearDays = e.target.value;
-    await safeStorage.set({ autoClearCacheDays: autoClearDays });
-    console.log(`Auto-clear cache set to: ${autoClearDays === 'never' ? 'Never' : autoClearDays + ' days'}`);
+  if (autoClearCacheSelect) {
+    autoClearCacheSelect.addEventListener('change', async (e) => {
+      const autoClearDays = e.target.value;
+      await safeStorage.set({ autoClearCacheDays: autoClearDays });
+      console.log(`Auto-clear cache set to: ${autoClearDays === 'never' ? 'Never' : autoClearDays + ' days'}`);
 
-    // Run auto-clear immediately if enabled
-    if (autoClearDays !== 'never') {
-      await clearOldCacheEntries(autoClearDays);
-    }
-  });
+      // Run auto-clear immediately if enabled
+      if (autoClearDays !== 'never') {
+        await clearOldCacheEntries(autoClearDays);
+      }
+    });
+  }
 
   // Start folder setting
-  startFolderSelect.addEventListener('change', async (e) => {
-    startFolderId = e.target.value || null;
-    await safeStorage.set({ startFolderId: startFolderId });
-    console.log(`Start folder set to: ${startFolderId || 'Root'}`);
+  if (startFolderSelect) {
+    startFolderSelect.addEventListener('change', async (e) => {
+      startFolderId = e.target.value || null;
+      await safeStorage.set({ startFolderId: startFolderId });
+      console.log(`Start folder set to: ${startFolderId || 'Root'}`);
 
-    // Clear expanded folders and expand to new start folder
-    expandedFolders.clear();
-    await expandToStartFolder();
-    renderBookmarks();
-  });
+      // Clear expanded folders and expand to new start folder
+      expandedFolders.clear();
+      await expandToStartFolder();
+      renderBookmarks();
+    });
+  }
 
   // Container opacity slider
   if (containerOpacitySlider) {
@@ -7081,34 +6932,40 @@ function setupEventListeners() {
 
   // Link checking toggle
   const enableLinkCheckingToggle = document.getElementById('enableLinkChecking');
-  enableLinkCheckingToggle.addEventListener('change', (e) => {
-    linkCheckingEnabled = e.target.checked;
-    localStorage.setItem('linkCheckingEnabled', linkCheckingEnabled);
-    console.log(`Link checking ${linkCheckingEnabled ? 'enabled' : 'disabled'}`);
-  });
+  if (enableLinkCheckingToggle) {
+    enableLinkCheckingToggle.addEventListener('change', (e) => {
+      linkCheckingEnabled = e.target.checked;
+      localStorage.setItem('linkCheckingEnabled', linkCheckingEnabled);
+      console.log(`Link checking ${linkCheckingEnabled ? 'enabled' : 'disabled'}`);
+    });
+  }
 
   // Safety checking toggle
   const enableSafetyCheckingToggle = document.getElementById('enableSafetyChecking');
-  enableSafetyCheckingToggle.addEventListener('change', (e) => {
-    safetyCheckingEnabled = e.target.checked;
-    localStorage.setItem('safetyCheckingEnabled', safetyCheckingEnabled);
-    console.log(`Safety checking ${safetyCheckingEnabled ? 'enabled' : 'disabled'}`);
-  });
+  if (enableSafetyCheckingToggle) {
+    enableSafetyCheckingToggle.addEventListener('change', (e) => {
+      safetyCheckingEnabled = e.target.checked;
+      localStorage.setItem('safetyCheckingEnabled', safetyCheckingEnabled);
+      console.log(`Safety checking ${safetyCheckingEnabled ? 'enabled' : 'disabled'}`);
+    });
+  }
 
   // Accent color picker
-  accentColorPicker.addEventListener('input', (e) => {
-    const color = e.target.value;
-    applyAccentColor(color);
-    localStorage.setItem('customAccentColor', color);
-  });
+  if (accentColorPicker && resetAccentColorBtn) {
+    accentColorPicker.addEventListener('input', (e) => {
+      const color = e.target.value;
+      applyAccentColor(color);
+      localStorage.setItem('customAccentColor', color);
+    });
 
-  // Reset accent color
-  resetAccentColorBtn.addEventListener('click', () => {
-    const defaultColor = getDefaultAccentColor();
-    accentColorPicker.value = defaultColor;
-    applyAccentColor(defaultColor);
-    localStorage.removeItem('customAccentColor');
-  });
+    // Reset accent color
+    resetAccentColorBtn.addEventListener('click', () => {
+      const defaultColor = getDefaultAccentColor();
+      accentColorPicker.value = defaultColor;
+      applyAccentColor(defaultColor);
+      localStorage.removeItem('customAccentColor');
+    });
+  }
 
   // Load saved accent color on startup
   function loadSavedAccentColor() {
@@ -7146,136 +7003,141 @@ function setupEventListeners() {
   let isDragging = false;
 
   // Choose background image
-  chooseBackgroundImageBtn.addEventListener('click', () => {
-    backgroundImagePicker.click();
-  });
+  if (chooseBackgroundImageBtn && backgroundImagePicker) {
+    chooseBackgroundImageBtn.addEventListener('click', () => {
+      backgroundImagePicker.click();
+    });
 
-  backgroundImagePicker.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = (event) => {
-        const imageData = event.target.result;
-        localStorage.setItem('backgroundImage', imageData);
+    backgroundImagePicker.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file && backgroundOpacitySlider && backgroundBlurSlider && backgroundSizeSelect && backgroundScaleSlider) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          const imageData = event.target.result;
+          localStorage.setItem('backgroundImage', imageData);
+          applyBackgroundImage(
+            imageData,
+            backgroundOpacitySlider.value,
+            backgroundBlurSlider.value,
+            backgroundSizeSelect.value,
+            localStorage.getItem('backgroundPositionX') || 50,
+            localStorage.getItem('backgroundPositionY') || 50,
+            backgroundScaleSlider.value
+          );
+        };
+        reader.readAsDataURL(file);
+      }
+    });
+  }
+
+  // Remove background image
+  if (removeBackgroundImageBtn && backgroundOpacitySlider && backgroundBlurSlider && backgroundSizeSelect && backgroundScaleSlider && opacityValue && blurValue && scaleValue) {
+    removeBackgroundImageBtn.addEventListener('click', () => {
+      localStorage.removeItem('backgroundImage');
+      localStorage.removeItem('backgroundOpacity');
+      localStorage.removeItem('backgroundBlur');
+      localStorage.removeItem('backgroundSize');
+      localStorage.removeItem('backgroundPositionX');
+      localStorage.removeItem('backgroundPositionY');
+      localStorage.removeItem('backgroundScale');
+      applyBackgroundImage(null);
+      backgroundOpacitySlider.value = 100;
+      opacityValue.textContent = '100%';
+      backgroundBlurSlider.value = 0;
+      blurValue.textContent = '0px';
+      backgroundSizeSelect.value = 'contain';
+      backgroundScaleSlider.value = 200;
+      scaleValue.textContent = '200%';
+    });
+
+    // Opacity slider
+    backgroundOpacitySlider.addEventListener('input', (e) => {
+      const opacity = e.target.value;
+      opacityValue.textContent = `${opacity}%`;
+      const savedImage = localStorage.getItem('backgroundImage');
+      if (savedImage) {
+        localStorage.setItem('backgroundOpacity', opacity);
         applyBackgroundImage(
-          imageData,
-          backgroundOpacitySlider.value,
+          savedImage,
+          opacity,
           backgroundBlurSlider.value,
           backgroundSizeSelect.value,
           localStorage.getItem('backgroundPositionX') || 50,
           localStorage.getItem('backgroundPositionY') || 50,
           backgroundScaleSlider.value
         );
-      };
-      reader.readAsDataURL(file);
-    }
-  });
+      }
+    });
 
-  // Remove background image
-  removeBackgroundImageBtn.addEventListener('click', () => {
-    localStorage.removeItem('backgroundImage');
-    localStorage.removeItem('backgroundOpacity');
-    localStorage.removeItem('backgroundBlur');
-    localStorage.removeItem('backgroundSize');
-    localStorage.removeItem('backgroundPositionX');
-    localStorage.removeItem('backgroundPositionY');
-    localStorage.removeItem('backgroundScale');
-    applyBackgroundImage(null);
-    backgroundOpacitySlider.value = 100;
-    opacityValue.textContent = '100%';
-    backgroundBlurSlider.value = 0;
-    blurValue.textContent = '0px';
-    backgroundSizeSelect.value = 'contain';
-    backgroundScaleSlider.value = 200;
-    scaleValue.textContent = '200%';
-  });
+    // Blur slider
+    backgroundBlurSlider.addEventListener('input', (e) => {
+      const blur = e.target.value;
+      blurValue.textContent = `${blur}px`;
+      const savedImage = localStorage.getItem('backgroundImage');
+      if (savedImage) {
+        localStorage.setItem('backgroundBlur', blur);
+        applyBackgroundImage(
+          savedImage,
+          backgroundOpacitySlider.value,
+          blur,
+          backgroundSizeSelect.value,
+          localStorage.getItem('backgroundPositionX') || 50,
+          localStorage.getItem('backgroundPositionY') || 50,
+          backgroundScaleSlider.value
+        );
+      }
+    });
 
-  // Opacity slider
-  backgroundOpacitySlider.addEventListener('input', (e) => {
-    const opacity = e.target.value;
-    opacityValue.textContent = `${opacity}%`;
-    const savedImage = localStorage.getItem('backgroundImage');
-    if (savedImage) {
-      localStorage.setItem('backgroundOpacity', opacity);
-      applyBackgroundImage(
-        savedImage,
-        opacity,
-        backgroundBlurSlider.value,
-        backgroundSizeSelect.value,
-        localStorage.getItem('backgroundPositionX') || 50,
-        localStorage.getItem('backgroundPositionY') || 50,
-        backgroundScaleSlider.value
-      );
-    }
-  });
+    // Size select
+    backgroundSizeSelect.addEventListener('change', (e) => {
+      const size = e.target.value;
+      const savedImage = localStorage.getItem('backgroundImage');
+      if (savedImage) {
+        localStorage.setItem('backgroundSize', size);
+        applyBackgroundImage(
+          savedImage,
+          backgroundOpacitySlider.value,
+          backgroundBlurSlider.value,
+          size,
+          localStorage.getItem('backgroundPositionX') || 50,
+          localStorage.getItem('backgroundPositionY') || 50,
+          backgroundScaleSlider.value
+        );
+      }
+    });
 
-  // Blur slider
-  backgroundBlurSlider.addEventListener('input', (e) => {
-    const blur = e.target.value;
-    blurValue.textContent = `${blur}px`;
-    const savedImage = localStorage.getItem('backgroundImage');
-    if (savedImage) {
-      localStorage.setItem('backgroundBlur', blur);
-      applyBackgroundImage(
-        savedImage,
-        backgroundOpacitySlider.value,
-        blur,
-        backgroundSizeSelect.value,
-        localStorage.getItem('backgroundPositionX') || 50,
-        localStorage.getItem('backgroundPositionY') || 50,
-        backgroundScaleSlider.value
-      );
-    }
-  });
-
-  // Size select
-  backgroundSizeSelect.addEventListener('change', (e) => {
-    const size = e.target.value;
-    const savedImage = localStorage.getItem('backgroundImage');
-    if (savedImage) {
-      localStorage.setItem('backgroundSize', size);
-      applyBackgroundImage(
-        savedImage,
-        backgroundOpacitySlider.value,
-        backgroundBlurSlider.value,
-        size,
-        localStorage.getItem('backgroundPositionX') || 50,
-        localStorage.getItem('backgroundPositionY') || 50,
-        backgroundScaleSlider.value
-      );
-    }
-  });
-
-  // Scale slider
-  backgroundScaleSlider.addEventListener('input', (e) => {
-    const scale = e.target.value;
-    scaleValue.textContent = `${scale}%`;
-    const savedImage = localStorage.getItem('backgroundImage');
-    if (savedImage) {
-      localStorage.setItem('backgroundScale', scale);
-      applyBackgroundImage(
-        savedImage,
-        backgroundOpacitySlider.value,
-        backgroundBlurSlider.value,
-        backgroundSizeSelect.value,
-        localStorage.getItem('backgroundPositionX') || 50,
-        localStorage.getItem('backgroundPositionY') || 50,
-        scale
-      );
-    }
-  });
+    // Scale slider
+    backgroundScaleSlider.addEventListener('input', (e) => {
+      const scale = e.target.value;
+      scaleValue.textContent = `${scale}%`;
+      const savedImage = localStorage.getItem('backgroundImage');
+      if (savedImage) {
+        localStorage.setItem('backgroundScale', scale);
+        applyBackgroundImage(
+          savedImage,
+          backgroundOpacitySlider.value,
+          backgroundBlurSlider.value,
+          backgroundSizeSelect.value,
+          localStorage.getItem('backgroundPositionX') || 50,
+          localStorage.getItem('backgroundPositionY') || 50,
+          scale
+        );
+      }
+    });
+  }
 
   // Reposition background (drag mode)
-  repositionBackgroundBtn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const savedImage = localStorage.getItem('backgroundImage');
-    if (!savedImage) {
-      return;
-    }
+  if (repositionBackgroundBtn && dragModeOverlay && closeDragModeBtn && backgroundOpacitySlider && backgroundBlurSlider && backgroundSizeSelect && backgroundScaleSlider) {
+    repositionBackgroundBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const savedImage = localStorage.getItem('backgroundImage');
+      if (!savedImage) {
+        return;
+      }
 
-    const bgOverlay = document.getElementById('background-overlay');
-    if (!bgOverlay) return;
+      const bgOverlay = document.getElementById('background-overlay');
+      if (!bgOverlay) return;
 
     // Reload current position from localStorage when entering drag mode
     let currentPosX = parseFloat(localStorage.getItem('backgroundPositionX')) || 50;
@@ -7401,9 +7263,10 @@ function setupEventListeners() {
     document.addEventListener('mouseup', handleMouseUp);
     document.addEventListener('wheel', handleWheel, { passive: false });
 
-    // Set up banner close handler
-    closeDragModeBtn.addEventListener('click', stopDragging);
-  });
+      // Set up banner close handler
+      closeDragModeBtn.addEventListener('click', stopDragging);
+    });
+  }
 
   // GUI Scale select
   if (guiScaleSelect) {
@@ -7423,11 +7286,11 @@ function setupEventListeners() {
       }
 
       try {
-        // Stop any ongoing background scan first
-        await browser.runtime.sendMessage({ action: 'stopBackgroundScan' });
-
-        // Wait a moment for the scan to stop
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Stop any ongoing scan first
+        if (scannerService && scannerService.isScanning) {
+          scannerService.stopScan();
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
 
         // Clear the checkedBookmarks set to allow re-checking
         checkedBookmarks.clear();
@@ -7447,13 +7310,8 @@ function setupEventListeners() {
         resetStatuses(bookmarkTree);
         renderBookmarks();
 
-        // Start background scan (runs in background script)
-        const response = await browser.runtime.sendMessage({ action: 'startBackgroundScan' });
-
-        if (!response.success) {
-          console.error('Failed to start background scan:', response.message);
-          alert('Failed to start scan: ' + response.message);
-        }
+        // Start scan using scanner service
+        await scannerService.scanAllBookmarks(true);
       } catch (error) {
         console.error('Error rescanning bookmarks:', error);
         alert('Failed to rescan bookmarks. Please try again.');
@@ -7464,9 +7322,11 @@ function setupEventListeners() {
     const stopScanBtn = document.getElementById('stopScanBtn');
     if (stopScanBtn) {
       stopScanBtn.addEventListener('click', async () => {
-        // Stop background scan
-        await browser.runtime.sendMessage({ action: 'stopBackgroundScan' });
-        console.log('User requested scan cancellation');
+        // Stop scan using scanner service
+        if (scannerService) {
+          scannerService.stopScan();
+          console.log('User requested scan cancellation');
+        }
       });
     }
   }
@@ -7583,11 +7443,7 @@ function setupEventListeners() {
   const helpDocsBtn = document.getElementById('helpDocsBtn');
   helpDocsBtn.addEventListener('click', () => {
     const readmeUrl = 'https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Firefox/blob/main/README.md';
-    if (isPreviewMode) {
-      window.open(readmeUrl, '_blank');
-    } else {
-      browser.tabs.create({ url: readmeUrl });
-    }
+    window.open(readmeUrl, '_blank');
     closeAllMenus();
   });
 
@@ -7595,11 +7451,7 @@ function setupEventListeners() {
   const buyMeCoffeeBtn = document.getElementById('buyMeCoffeeBtn');
   buyMeCoffeeBtn.addEventListener('click', () => {
     const coffeeUrl = 'https://buymeacoffee.com/absolutexyzero';
-    if (isPreviewMode) {
-      window.open(coffeeUrl, '_blank');
-    } else {
-      browser.tabs.create({ url: coffeeUrl });
-    }
+    window.open(coffeeUrl, '_blank');
     closeAllMenus();
   });
 
@@ -7612,31 +7464,41 @@ function setupEventListeners() {
   const changelogList = document.getElementById('changelogList');
   const changelogCount = document.getElementById('changelogCount');
 
-  viewChangelogBtn.addEventListener('click', async () => {
-    await openChangelogModal();
-    closeAllMenus();
-  });
+  if (viewChangelogBtn && changelogModal) {
+    viewChangelogBtn.addEventListener('click', async () => {
+      await openChangelogModal();
+      closeAllMenus();
+    });
+  }
 
-  changelogModalClose.addEventListener('click', () => {
-    closeModal(changelogModal);
-  });
+  if (changelogModalClose && changelogModal) {
+    changelogModalClose.addEventListener('click', () => {
+      closeModal(changelogModal);
+    });
+  }
 
-  changelogModalOk.addEventListener('click', () => {
-    closeModal(changelogModal);
-  });
+  if (changelogModalOk && changelogModal) {
+    changelogModalOk.addEventListener('click', () => {
+      closeModal(changelogModal);
+    });
+  }
 
-  clearChangelogBtn.addEventListener('click', async () => {
-    if (confirm('Are you sure you want to clear all changelog history? This action cannot be undone.')) {
-      await clearChangelog();
-      await openChangelogModal(); // Refresh the display
-    }
-  });
+  if (clearChangelogBtn) {
+    clearChangelogBtn.addEventListener('click', async () => {
+      if (confirm('Are you sure you want to clear all changelog history? This action cannot be undone.')) {
+        await clearChangelog();
+        await openChangelogModal(); // Refresh the display
+      }
+    });
+  }
 
   // Close extension
-  closeExtensionBtn.addEventListener('click', () => {
-    closeExtension();
-    closeAllMenus();
-  });
+  if (closeExtensionBtn) {
+    closeExtensionBtn.addEventListener('click', () => {
+      closeExtension();
+      closeAllMenus();
+    });
+  }
 
   // New bookmark
   document.getElementById('newBookmarkBtn').addEventListener('click', createNewBookmark);
@@ -7648,21 +7510,23 @@ function setupEventListeners() {
   document.getElementById('findDuplicatesBtn').addEventListener('click', findDuplicates);
 
   // Header collapse/expand
-  headerCollapseBtn.addEventListener('click', () => {
-    const isCollapsed = collapsibleHeader.classList.toggle('collapsed');
-    headerCollapseBtn.classList.toggle('collapsed');
-    headerCollapseBtn.title = isCollapsed ? 'Expand header' : 'Collapse header';
+  if (headerCollapseBtn && collapsibleHeader) {
+    headerCollapseBtn.addEventListener('click', () => {
+      const isCollapsed = collapsibleHeader.classList.toggle('collapsed');
+      headerCollapseBtn.classList.toggle('collapsed');
+      headerCollapseBtn.title = isCollapsed ? 'Expand header' : 'Collapse header';
 
-    // Save state to localStorage
-    localStorage.setItem('headerCollapsed', isCollapsed);
-  });
+      // Save state to localStorage
+      localStorage.setItem('headerCollapsed', isCollapsed);
+    });
 
-  // Restore header collapse state
-  const headerCollapsed = localStorage.getItem('headerCollapsed') === 'true';
-  if (headerCollapsed) {
-    collapsibleHeader.classList.add('collapsed');
-    headerCollapseBtn.classList.add('collapsed');
-    headerCollapseBtn.title = 'Expand header';
+    // Restore header collapse state
+    const headerCollapsed = localStorage.getItem('headerCollapsed') === 'true';
+    if (headerCollapsed) {
+      collapsibleHeader.classList.add('collapsed');
+      headerCollapseBtn.classList.add('collapsed');
+      headerCollapseBtn.title = 'Expand header';
+    }
   }
 
   // Track when menus are opened to prevent immediate closing
@@ -7801,27 +7665,9 @@ function setupEventListeners() {
       }, 100); // 100ms debounce
     };
 
-    browser.bookmarks.onCreated.addListener((id, bookmark) => {
-      console.log('[Bookmark Sync] Bookmark created:', bookmark.title || bookmark.url);
-      syncBookmarks('onCreated');
-    });
-
-    browser.bookmarks.onRemoved.addListener((id, removeInfo) => {
-      console.log('[Bookmark Sync] Bookmark removed:', id);
-      syncBookmarks('onRemoved');
-    });
-
-    browser.bookmarks.onChanged.addListener((id, changeInfo) => {
-      console.log('[Bookmark Sync] Bookmark changed:', changeInfo);
-      syncBookmarks('onChanged');
-    });
-
-    browser.bookmarks.onMoved.addListener((id, moveInfo) => {
-      console.log('[Bookmark Sync] Bookmark moved:', id);
-      syncBookmarks('onMoved');
-    });
-
-    console.log('[Bookmark Sync] ✓ Real-time bidirectional sync enabled');
+    // Note: Website version doesn't have browser.bookmarks API
+    // Bookmarks are managed locally via bookmarkManager
+    console.log('[Bookmark Sync] Website version - using local bookmark storage');
   }
 
   // Multi-select toggle button
