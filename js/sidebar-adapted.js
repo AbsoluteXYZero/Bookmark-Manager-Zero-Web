@@ -4860,6 +4860,14 @@ async function loadSafetyHistory() {
 function cleanupSafetyHistory() {
   if (isPreviewMode || !bookmarkTree || bookmarkTree.length === 0) return;
 
+  // Ensure safetyHistory is an object
+  if (Array.isArray(safetyHistory) || typeof safetyHistory !== 'object') {
+    console.warn('[Memory Cleanup] safetyHistory is not an object, resetting to {}');
+    safetyHistory = {};
+    saveSafetyHistory();
+    return;
+  }
+
   // Collect all current bookmark URLs
   const currentUrls = new Set();
   const collectUrls = (nodes) => {
@@ -4874,17 +4882,22 @@ function cleanupSafetyHistory() {
   };
   collectUrls(bookmarkTree);
 
-  // Remove history entries for URLs that no longer exist in bookmarks
-  const historyUrls = Object.keys(safetyHistory);
+  // Create a new object with only URLs that still exist
+  const newSafetyHistory = {};
   let removedCount = 0;
-  historyUrls.forEach(url => {
-    if (!currentUrls.has(url)) {
-      delete safetyHistory[url];
-      removedCount++;
+
+  for (const url in safetyHistory) {
+    if (safetyHistory.hasOwnProperty(url)) {
+      if (currentUrls.has(url)) {
+        newSafetyHistory[url] = safetyHistory[url];
+      } else {
+        removedCount++;
+      }
     }
-  });
+  }
 
   if (removedCount > 0) {
+    safetyHistory = newSafetyHistory;
     console.log(`[Memory Cleanup] Removed ${removedCount} stale entries from safetyHistory`);
     saveSafetyHistory(); // Persist the cleanup
   }

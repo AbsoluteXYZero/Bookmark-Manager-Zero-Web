@@ -1,16 +1,19 @@
 /**
  * Sync Manager
- * Handles bidirectional sync between IndexedDB and GitHub Gist
+ * Handles bidirectional sync between IndexedDB and remote storage (GitHub Gist or GitLab Snippet)
  * Implements edit locking to prevent concurrent modifications across devices
  */
 
 import dbManager from './indexeddb.js';
 import gistAdapter from './gist-adapter.js';
+import snippetAdapter from './snippet-adapter.js';
 import authManager from '../auth/auth-manager.js';
 
 class SyncManager {
   constructor() {
     this.gistId = null;
+    this.snippetId = null;
+    this.provider = null; // 'github' or 'gitlab'
     this.deviceId = authManager.getDeviceId();
     this.syncInterval = null;
     this.isSyncing = false;
@@ -20,17 +23,74 @@ class SyncManager {
   }
 
   /**
+   * Get the appropriate adapter based on current provider
+   */
+  getAdapter() {
+    if (this.provider === 'gitlab') {
+      return snippetAdapter;
+    }
+    // Default to GitHub
+    return gistAdapter;
+  }
+
+  /**
+   * Get the current remote ID (gist or snippet)
+   */
+  getRemoteId() {
+    if (this.provider === 'gitlab') {
+      return this.snippetId;
+    }
+    return this.gistId;
+  }
+
+  /**
+   * Set the current provider
+   */
+  async setProvider(provider) {
+    this.provider = provider;
+    await dbManager.put('metadata', { key: 'syncProvider', value: provider });
+    console.log('Sync provider set to:', provider);
+  }
+
+  /**
    * Initialize sync manager
-   * Loads Gist ID from metadata and starts auto-sync
+   * Loads provider, Gist/Snippet ID from metadata and starts auto-sync
    */
   async init() {
     try {
+      // Load sync provider
+      const providerRecord = await dbManager.get('metadata', 'syncProvider');
+      if (providerRecord) {
+        this.provider = providerRecord.value;
+        console.log('Loaded sync provider from storage:', this.provider);
+      }
+
       // Load Gist ID from metadata
       const gistIdRecord = await dbManager.get('metadata', 'gistId');
       if (gistIdRecord) {
         this.gistId = gistIdRecord.value;
         gistAdapter.setGistId(this.gistId);
         console.log('Loaded Gist ID from storage:', this.gistId);
+
+        // If no provider set but we have a gist ID, assume GitHub
+        if (!this.provider) {
+          this.provider = 'github';
+          await this.setProvider('github');
+        }
+      }
+
+      // Load Snippet ID from metadata
+      const snippetIdRecord = await dbManager.get('metadata', 'snippetId');
+      if (snippetIdRecord) {
+        this.snippetId = snippetIdRecord.value;
+        snippetAdapter.setSnippetId(this.snippetId);
+        console.log('Loaded Snippet ID from storage:', this.snippetId);
+
+        // If no provider set but we have a snippet ID, assume GitLab
+        if (!this.provider) {
+          this.provider = 'gitlab';
+          await this.setProvider('gitlab');
+        }
       }
 
       // Load last sync time
@@ -67,15 +127,17 @@ class SyncManager {
       return true;
     }
 
-    if (!this.gistId) {
-      console.warn('No Gist ID - cannot acquire lock');
+    const remoteId = this.getRemoteId();
+    if (!remoteId) {
+      console.warn('No remote ID - cannot acquire lock');
       return false;
     }
 
     try {
-      // Read current Gist data
-      const gistData = await gistAdapter.readBookmarks(this.gistId);
-      const currentLock = gistData.editLock;
+      // Read current remote data
+      const adapter = this.getAdapter();
+      const remoteData = await adapter.readBookmarks(remoteId);
+      const currentLock = remoteData.editLock;
 
       // Check if locked by another device
       if (currentLock && currentLock.deviceId !== this.deviceId) {
@@ -86,12 +148,12 @@ class SyncManager {
       }
 
       // Acquire/refresh lock
-      gistData.editLock = {
+      remoteData.editLock = {
         deviceId: this.deviceId,
         timestamp: Date.now()
       };
 
-      await gistAdapter.updateBookmarks(this.gistId, gistData, gistData.version);
+      await adapter.updateBookmarks(remoteId, remoteData, remoteData.version);
       console.log('Edit lock acquired for device:', this.deviceId);
       return true;
     } catch (error) {
@@ -104,16 +166,18 @@ class SyncManager {
    * Release edit lock
    */
   async releaseLock() {
-    if (!navigator.onLine || !this.gistId) {
+    const remoteId = this.getRemoteId();
+    if (!navigator.onLine || !remoteId) {
       return;
     }
 
     try {
-      const gistData = await gistAdapter.readBookmarks(this.gistId);
+      const adapter = this.getAdapter();
+      const remoteData = await adapter.readBookmarks(remoteId);
 
-      if (gistData.editLock?.deviceId === this.deviceId) {
-        delete gistData.editLock;
-        await gistAdapter.updateBookmarks(this.gistId, gistData, gistData.version);
+      if (remoteData.editLock?.deviceId === this.deviceId) {
+        delete remoteData.editLock;
+        await adapter.updateBookmarks(remoteId, remoteData, remoteData.version);
         console.log('Edit lock released');
       }
     } catch (error) {
@@ -134,14 +198,29 @@ class SyncManager {
       if (this.syncDebounceTimer) {
         clearTimeout(this.syncDebounceTimer);
       }
-      this.syncDebounceTimer = setTimeout(() => {
-        this.syncToRemote().catch(console.error);
+      this.syncDebounceTimer = setTimeout(async () => {
+        try {
+          await this.syncToRemote();
+          this.emitEvent('syncSuccess', 'Changes synced to remote');
+        } catch (error) {
+          console.error('Sync failed:', error);
+          this.emitEvent('syncError', error.message || 'Failed to sync changes');
+          // Retry after 5 seconds
+          setTimeout(() => {
+            if (this.hasUnsyncedChanges && navigator.onLine) {
+              this.syncToRemote().catch(err => {
+                console.error('Retry sync failed:', err);
+                this.emitEvent('syncError', 'Sync retry failed. Changes will sync when connection improves.');
+              });
+            }
+          }, 5000);
+        }
       }, 1000); // Wait 1 second after last change
     }
   }
 
   /**
-   * Sync local changes to Gist (push)
+   * Sync local changes to remote (push)
    */
   async syncToRemote() {
     if (this.isSyncing) {
@@ -154,15 +233,16 @@ class SyncManager {
       return;
     }
 
-    if (!this.gistId) {
-      console.log('No Gist ID, cannot sync');
+    const remoteId = this.getRemoteId();
+    if (!remoteId) {
+      console.log('No remote ID, cannot sync');
       return;
     }
 
     this.isSyncing = true;
 
     try {
-      console.log('Syncing local changes to Gist...');
+      console.log(`Syncing local changes to ${this.provider}...`);
 
       // Acquire lock
       await this.acquireLock();
@@ -171,7 +251,8 @@ class SyncManager {
       const localBookmarks = await this.loadLocalBookmarks();
 
       // Get remote version
-      const remoteData = await gistAdapter.readBookmarks(this.gistId);
+      const adapter = this.getAdapter();
+      const remoteData = await adapter.readBookmarks(remoteId);
       const localVersion = await this.getLocalVersion();
 
       // Check for conflicts
@@ -182,7 +263,7 @@ class SyncManager {
 
       // Push local changes
       const newVersion = remoteData.version + 1;
-      await gistAdapter.updateBookmarks(this.gistId, localBookmarks, newVersion);
+      await adapter.updateBookmarks(remoteId, localBookmarks, newVersion);
 
       // Update local metadata
       await this.setLocalVersion(newVersion);
@@ -312,17 +393,19 @@ class SyncManager {
       return;
     }
 
-    if (!this.gistId) {
-      console.log('[SyncFromRemote] No gist ID, skipping...');
+    const remoteId = this.getRemoteId();
+    if (!remoteId) {
+      console.log('[SyncFromRemote] No remote ID, skipping...');
       return;
     }
 
     this.isSyncing = true;
 
     try {
-      console.log('[SyncFromRemote] Starting sync for gist:', this.gistId);
+      console.log(`[SyncFromRemote] Starting sync for ${this.provider}:`, remoteId);
 
-      const remoteData = await gistAdapter.readBookmarks(this.gistId);
+      const adapter = this.getAdapter();
+      const remoteData = await adapter.readBookmarks(remoteId);
       console.log('[SyncFromRemote] Remote data fetched:', {
         hasRoots: !!remoteData?.roots,
         rootKeys: remoteData?.roots ? Object.keys(remoteData.roots) : [],
@@ -475,13 +558,27 @@ class SyncManager {
   }
 
   /**
-   * Set Gist ID
+   * Set Gist ID (GitHub)
    */
   async setGistId(gistId) {
     this.gistId = gistId;
+    this.provider = 'github';
     gistAdapter.setGistId(gistId);
     await dbManager.put('metadata', { key: 'gistId', value: gistId });
+    await this.setProvider('github');
     console.log('Gist ID saved:', gistId);
+  }
+
+  /**
+   * Set Snippet ID (GitLab)
+   */
+  async setSnippetId(snippetId) {
+    this.snippetId = snippetId;
+    this.provider = 'gitlab';
+    snippetAdapter.setSnippetId(snippetId);
+    await dbManager.put('metadata', { key: 'snippetId', value: snippetId });
+    await this.setProvider('gitlab');
+    console.log('Snippet ID saved:', snippetId);
   }
 
   /**
@@ -541,12 +638,57 @@ class SyncManager {
     this.syncInterval = setInterval(async () => {
       if (navigator.onLine && !this.isSyncing) {
         try {
+          // First, push any local changes if needed
+          if (this.hasUnsyncedChanges) {
+            await this.syncToRemote();
+          }
+          // Then, pull remote changes
           await this.syncFromRemote();
         } catch (error) {
           console.error('Auto-sync failed:', error);
+          this.emitEvent('syncError', 'Auto-sync failed: ' + error.message);
         }
       }
     }, 60000); // Every 60 seconds
+  }
+
+  /**
+   * Manual sync trigger - bidirectional
+   */
+  async manualSync() {
+    if (this.isSyncing) {
+      console.log('Sync already in progress');
+      return;
+    }
+
+    if (!navigator.onLine) {
+      this.emitEvent('syncError', 'Cannot sync while offline');
+      return;
+    }
+
+    const remoteId = this.getRemoteId();
+    if (!remoteId) {
+      this.emitEvent('syncError', 'No remote storage configured');
+      return;
+    }
+
+    try {
+      // Push local changes first
+      if (this.hasUnsyncedChanges) {
+        await this.syncToRemote();
+      }
+      // Then pull remote changes
+      const updated = await this.syncFromRemote();
+
+      if (updated || this.hasUnsyncedChanges) {
+        this.emitEvent('syncSuccess', 'Manual sync complete');
+      } else {
+        this.emitEvent('syncSuccess', 'Already up to date');
+      }
+    } catch (error) {
+      console.error('Manual sync failed:', error);
+      this.emitEvent('syncError', 'Manual sync failed: ' + error.message);
+    }
   }
 
   /**
@@ -620,7 +762,10 @@ class SyncManager {
       isSyncing: this.isSyncing,
       hasUnsyncedChanges: this.hasUnsyncedChanges,
       lastSyncTime: this.lastSyncTime,
+      provider: this.provider,
       gistId: this.gistId,
+      snippetId: this.snippetId,
+      remoteId: this.getRemoteId(),
       deviceId: this.deviceId
     };
   }

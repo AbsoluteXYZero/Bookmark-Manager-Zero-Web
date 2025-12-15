@@ -8,6 +8,7 @@ import dbManager from '../storage/indexeddb.js';
 import authManager from '../auth/auth-manager.js';
 import oauthPAT from '../auth/oauth-pat.js';
 import gistAdapter from '../storage/gist-adapter.js';
+import snippetAdapter from '../storage/snippet-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
@@ -114,25 +115,49 @@ class App {
    * Check if user is authenticated
    */
   async checkAuth() {
-    const token = await authManager.getToken();
+    // Keep login screen hidden during auth check
+    const loginScreen = document.getElementById('loginScreen');
+    if (loginScreen) {
+      loginScreen.classList.add('hidden');
+    }
+
+    // Check for saved provider preference
+    const provider = await authManager.getPreference('syncProvider', 'github');
+    const token = await authManager.getToken(provider);
 
     if (token) {
       // Verify token is valid by fetching user info
       try {
-        const response = await fetch('https://api.github.com/user', {
-          headers: {
-            'Authorization': `Bearer ${token}`,
-            'Accept': 'application/vnd.github.v3+json'
-          }
-        });
+        let response;
+        if (provider === 'gitlab') {
+          response = await fetch('https://gitlab.com/api/v4/user', {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
+        } else {
+          // GitHub - use 'token' not 'Bearer'
+          response = await fetch('https://api.github.com/user', {
+            headers: {
+              'Authorization': `token ${token}`,
+              'Accept': 'application/vnd.github.v3+json'
+            }
+          });
+        }
 
         if (response.ok) {
           this.currentUser = await response.json();
           this.isAuthenticated = true;
+
+          // Set the provider in oauthPAT so it's available
+          oauthPAT.provider = provider;
+          oauthPAT.token = token;
+          oauthPAT.user = this.currentUser;
+
           await this.showMainApp();
         } else {
           // Token invalid, clear it
-          await authManager.clearToken();
+          await authManager.clearToken(provider);
           this.showLoginScreen();
         }
       } catch (error) {
@@ -153,7 +178,51 @@ class App {
       loginScreen.classList.remove('hidden');
     }
 
-    // Set up login button handler (Personal Access Token)
+    // Provider toggle functionality
+    const providerToggle = document.getElementById('providerToggle');
+    const githubLogo = document.getElementById('githubLogo');
+    const gitlabLogo = document.getElementById('gitlabLogo');
+    const toggleSlider = document.getElementById('toggleSlider');
+    const githubInstructions = document.getElementById('githubInstructions');
+    const gitlabInstructions = document.getElementById('gitlabInstructions');
+
+    let currentProvider = 'github'; // Default to GitHub
+
+    const switchToProvider = (provider) => {
+      currentProvider = provider;
+      if (provider === 'github') {
+        // Switch to GitHub
+        toggleSlider.style.left = '4px';
+        githubLogo.style.opacity = '1';
+        gitlabLogo.style.opacity = '0.4';
+        githubInstructions.style.display = 'block';
+        gitlabInstructions.style.display = 'none';
+      } else {
+        // Switch to GitLab
+        toggleSlider.style.left = '32px';
+        githubLogo.style.opacity = '0.4';
+        gitlabLogo.style.opacity = '1';
+        githubInstructions.style.display = 'none';
+        gitlabInstructions.style.display = 'block';
+      }
+    };
+
+    // Toggle click handler
+    if (providerToggle) {
+      providerToggle.onclick = () => {
+        switchToProvider(currentProvider === 'github' ? 'gitlab' : 'github');
+      };
+    }
+
+    // Logo click handlers
+    if (githubLogo) {
+      githubLogo.onclick = () => switchToProvider('github');
+    }
+    if (gitlabLogo) {
+      gitlabLogo.onclick = () => switchToProvider('gitlab');
+    }
+
+    // Set up GitHub login button handler
     const loginBtn = document.getElementById('loginBtn');
     const tokenInput = document.getElementById('tokenInput');
     const loginError = document.getElementById('loginError');
@@ -183,8 +252,13 @@ class App {
           // Authenticate with token
           const authResult = await oauthPAT.authenticate(token);
 
-          // Store token securely (just the token string, not the object)
-          await authManager.storeToken(authResult.access_token);
+          console.log(`Authenticated with ${authResult.provider}:`, authResult.user.login || authResult.user.username);
+
+          // Store token securely with provider information
+          await authManager.storeToken(authResult.access_token, null, authResult.provider);
+
+          // Store provider preference
+          await authManager.storePreference('syncProvider', authResult.provider);
 
           // Show success and load main app
           await this.showMainApp();
@@ -195,7 +269,65 @@ class App {
 
           // Reset button
           loginBtn.disabled = false;
-          loginBtn.textContent = 'Login';
+          loginBtn.textContent = 'Login with GitHub';
+        }
+      };
+    }
+
+    // Set up GitLab login button handler
+    const loginBtnGitlab = document.getElementById('loginBtnGitlab');
+    const tokenInputGitlab = document.getElementById('tokenInputGitlab');
+    const loginErrorGitlab = document.getElementById('loginErrorGitlab');
+
+    if (loginBtnGitlab && tokenInputGitlab) {
+      // Handle Enter key in token input
+      tokenInputGitlab.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') {
+          loginBtnGitlab.click();
+        }
+      });
+
+      loginBtnGitlab.onclick = async () => {
+        const token = tokenInputGitlab.value.trim();
+
+        if (!token) {
+          if (loginErrorGitlab) {
+            loginErrorGitlab.textContent = 'Please enter your Personal Access Token';
+            loginErrorGitlab.style.display = 'block';
+          }
+          return;
+        }
+
+        // Show loading state
+        loginBtnGitlab.disabled = true;
+        loginBtnGitlab.textContent = 'Authenticating...';
+        if (loginErrorGitlab) loginErrorGitlab.style.display = 'none';
+
+        try {
+          // Authenticate with token
+          const authResult = await oauthPAT.authenticate(token);
+
+          console.log(`Authenticated with ${authResult.provider}:`, authResult.user.login || authResult.user.username);
+
+          // Store token securely with provider information
+          await authManager.storeToken(authResult.access_token, null, authResult.provider);
+
+          // Store provider preference
+          await authManager.storePreference('syncProvider', authResult.provider);
+
+          // Show success and load main app
+          await this.showMainApp();
+
+        } catch (error) {
+          console.error('Login failed:', error);
+          if (loginErrorGitlab) {
+            loginErrorGitlab.textContent = error.message || 'Authentication failed. Please check your token and try again.';
+            loginErrorGitlab.style.display = 'block';
+          }
+
+          // Reset button
+          loginBtnGitlab.disabled = false;
+          loginBtnGitlab.textContent = 'Login with GitLab';
         }
       };
     }
@@ -214,21 +346,37 @@ class App {
 
   /**
    * Logout user and return to login screen
+   * Clears all local data but does NOT delete remote gists/snippets
    */
   async logout() {
     try {
-      // Clear authentication
-      await authManager.clearToken();
+      // Clear authentication for both providers
+      await authManager.clearToken('github');
+      await authManager.clearToken('gitlab');
       oauthPAT.clear();
+
+      // Clear provider preference
+      await authManager.storePreference('syncProvider', null);
 
       // Clear gist ID from localStorage and adapter
       localStorage.removeItem('bmz_gist_id');
       gistAdapter.gistId = null;
 
+      // Clear snippet ID from localStorage and adapter
+      localStorage.removeItem('bmz_snippet_id');
+      snippetAdapter.snippetId = null;
+
       // Clear sync manager state
-      if (syncManager.gistId) {
-        syncManager.gistId = null;
-      }
+      syncManager.gistId = null;
+      syncManager.snippetId = null;
+      syncManager.provider = null;
+
+      // Clear all local bookmark data from IndexedDB
+      await dbManager.clearStore('bookmarks');
+      await dbManager.clearStore('metadata');
+
+      // Keep settings (like theme, API keys) but clear auth-related data
+      // Settings are user preferences, not user data
 
       // Reload the page to reset everything
       window.location.reload();
@@ -278,25 +426,54 @@ class App {
   }
 
   /**
-   * Check if gist is set up
-   * Always returns false to force gist selection modal
+   * Check if we have a gist/snippet set up
+   * Checks for saved gist/snippet ID based on current provider
    */
   async checkGistSetup() {
-    // Clear any saved gist ID so user can choose
-    const savedGistId = gistAdapter.loadSavedGistId();
-    if (savedGistId) {
-      console.log('Found saved gist, but clearing to let user choose:', savedGistId);
-      localStorage.removeItem('bmz_gist_id');
-      await dbManager.delete('metadata', 'gistId');
-      gistAdapter.gistId = null;
+    const provider = await authManager.getPreference('syncProvider', 'github');
+
+    if (provider === 'gitlab') {
+      // Check for GitLab snippet
+      const savedSnippetId = snippetAdapter.loadSavedSnippetId();
+      if (savedSnippetId) {
+        console.log('Found saved snippet ID:', savedSnippetId);
+        // Verify we can read from it
+        try {
+          await snippetAdapter.readBookmarks(savedSnippetId);
+          snippetAdapter.snippetId = savedSnippetId;
+          syncManager.setProvider('gitlab');
+          syncManager.snippetId = savedSnippetId;
+          return true;
+        } catch (error) {
+          console.warn('Saved snippet ID is invalid, clearing:', error);
+          localStorage.removeItem('bmz_snippet_id');
+        }
+      }
+    } else {
+      // Check for GitHub gist
+      const savedGistId = gistAdapter.loadSavedGistId();
+      if (savedGistId) {
+        console.log('Found saved gist ID:', savedGistId);
+        // Verify we can read from it
+        try {
+          await gistAdapter.readBookmarks(savedGistId);
+          gistAdapter.gistId = savedGistId;
+          syncManager.setProvider('github');
+          syncManager.gistId = savedGistId;
+          return true;
+        } catch (error) {
+          console.warn('Saved gist ID is invalid, clearing:', error);
+          localStorage.removeItem('bmz_gist_id');
+        }
+      }
     }
 
-    // Always show gist selection modal
+    // No valid saved ID found
     return false;
   }
 
   /**
-   * Show gist setup modal
+   * Show gist/snippet setup modal (supports both GitHub and GitLab)
    */
   async showGistSetup() {
     const modal = document.getElementById('gistSetupModal');
@@ -306,70 +483,119 @@ class App {
     const existingGistInfo = document.getElementById('existingGistInfo');
     const gistList = document.getElementById('gistList');
 
+    // Get the current provider from stored preference or oauth
+    const provider = oauthPAT.getProvider() || await authManager.getPreference('syncProvider', 'github');
+    const adapter = provider === 'gitlab' ? snippetAdapter : gistAdapter;
+    const itemName = provider === 'gitlab' ? 'Snippet' : 'Gist';
+
+    console.log(`Setting up ${itemName} for provider: ${provider}`);
+
     // Hide all sections first
     noGistsSection.style.display = 'none';
     existingGistSection.style.display = 'none';
     multipleGistsSection.style.display = 'none';
 
     try {
-      // Get all gists
-      const gists = await gistAdapter.getAllGists();
+      // Get all remote items (gists or snippets)
+      const items = provider === 'gitlab' ?
+        await adapter.getAllSnippets() :
+        await adapter.getAllGists();
 
-      // Filter for bookmark-like gists
-      const bookmarkGists = gists.filter(g =>
-        g.files['bookmarks.json'] ||
-        g.description?.includes('BMZ') ||
-        g.description?.includes('Bookmark Manager Zero') ||
-        g.description?.includes('bookmark')
-      );
+      // Filter for bookmark-like items
+      const bookmarkItems = items.filter(item => {
+        if (provider === 'gitlab') {
+          // GitLab snippet filtering
+          return item.title?.includes('BMZ') ||
+                 item.title?.includes('Bookmark Manager Zero') ||
+                 item.file_name === 'bookmarks.json';
+        } else {
+          // GitHub gist filtering
+          return item.files['bookmarks.json'] ||
+                 item.description?.includes('BMZ') ||
+                 item.description?.includes('Bookmark Manager Zero') ||
+                 item.description?.includes('bookmark');
+        }
+      });
 
-      if (bookmarkGists.length === 0) {
-        // No gists found - show create option
+      if (bookmarkItems.length === 0) {
+        // No items found - show create option
         noGistsSection.style.display = 'block';
-      } else if (bookmarkGists.length === 1) {
-        // One gist found - show use or create new
+        // Update button text
+        const createBtn = document.getElementById('createNewGistBtn');
+        if (createBtn) createBtn.textContent = `Create New ${itemName}`;
+      } else if (bookmarkItems.length === 1) {
+        // One item found - show use or create new
         existingGistSection.style.display = 'block';
-        const gist = bookmarkGists[0];
-        const fileCount = Object.keys(gist.files).length;
-        const lastUpdated = new Date(gist.updated_at).toLocaleDateString();
-        existingGistInfo.textContent = `${gist.description || 'Untitled Gist'} • ${fileCount} files • Updated ${lastUpdated}`;
+        const item = bookmarkItems[0];
 
-        // Store gist for use button
+        // Format based on provider
+        let fileCount, lastUpdated, description;
+        if (provider === 'gitlab') {
+          fileCount = item.files?.length || 1;
+          lastUpdated = new Date(item.updated_at).toLocaleDateString();
+          description = item.title || 'Untitled Snippet';
+        } else {
+          fileCount = Object.keys(item.files).length;
+          lastUpdated = new Date(item.updated_at).toLocaleDateString();
+          description = item.description || 'Untitled Gist';
+        }
+
+        existingGistInfo.textContent = `${description} • ${fileCount} files • Updated ${lastUpdated}`;
+
+        // Store item for use button
         document.getElementById('useExistingGistBtn').onclick = async () => {
-          await this.useGist(gist.id);
+          await this.useRemoteStorage(item.id, provider);
         };
+
+        // Update button texts
+        const useBtn = document.getElementById('useExistingGistBtn');
+        const createBtn2 = document.getElementById('createNewGistBtn2');
+        if (useBtn) useBtn.textContent = `Use This ${itemName}`;
+        if (createBtn2) createBtn2.textContent = `Create New ${itemName}`;
       } else {
-        // Multiple gists - show selection
+        // Multiple items - show selection
         multipleGistsSection.style.display = 'block';
         gistList.innerHTML = '';
 
-        bookmarkGists.forEach(gist => {
-          const fileCount = Object.keys(gist.files).length;
-          const lastUpdated = new Date(gist.updated_at).toLocaleDateString();
+        bookmarkItems.forEach(item => {
+          let fileCount, lastUpdated, description;
+          if (provider === 'gitlab') {
+            fileCount = item.files?.length || 1;
+            lastUpdated = new Date(item.updated_at).toLocaleDateString();
+            description = item.title || 'Untitled Snippet';
+          } else {
+            fileCount = Object.keys(item.files).length;
+            lastUpdated = new Date(item.updated_at).toLocaleDateString();
+            description = item.description || 'Untitled Gist';
+          }
 
-          const gistItem = document.createElement('div');
-          gistItem.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
-          gistItem.innerHTML = `
-            <div style="font-weight: 500; margin-bottom: 4px;">${gist.description || 'Untitled Gist'}</div>
+          const itemDiv = document.createElement('div');
+          itemDiv.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
+          itemDiv.innerHTML = `
+            <div style="font-weight: 500; margin-bottom: 4px;">${description}</div>
             <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant);">${fileCount} files • Updated ${lastUpdated}</div>
           `;
 
-          gistItem.onclick = async () => {
-            await this.useGist(gist.id);
+          itemDiv.onclick = async () => {
+            await this.useRemoteStorage(item.id, provider);
           };
 
-          gistItem.onmouseover = () => {
-            gistItem.style.borderColor = 'var(--md-sys-color-primary)';
+          itemDiv.onmouseover = () => {
+            itemDiv.style.borderColor = 'var(--md-sys-color-primary)';
           };
-          gistItem.onmouseout = () => {
-            gistItem.style.borderColor = 'transparent';
+          itemDiv.onmouseout = () => {
+            itemDiv.style.borderColor = 'transparent';
           };
 
-          gistList.appendChild(gistItem);
+          gistList.appendChild(itemDiv);
         });
+
+        // Update create button text
+        const createBtn3 = document.getElementById('createNewGistBtn3');
+        if (createBtn3) createBtn3.textContent = `Create New ${itemName}`;
       }
 
-      // Setup create new gist buttons
+      // Setup create new buttons
       const createButtons = [
         document.getElementById('createNewGistBtn'),
         document.getElementById('createNewGistBtn2'),
@@ -379,7 +605,7 @@ class App {
       createButtons.forEach(btn => {
         if (btn) {
           btn.onclick = async () => {
-            await this.createNewGist();
+            await this.createNewRemoteStorage(provider);
           };
         }
       });
@@ -389,17 +615,25 @@ class App {
       modal.classList.remove('hidden');
 
     } catch (error) {
-      console.error('Failed to load gists:', error);
-      this.showGistSetupError('Failed to load gists: ' + error.message);
+      console.error(`Failed to load ${itemName}s:`, error);
+      this.showGistSetupError(`Failed to load ${itemName}s: ` + error.message);
     }
   }
 
   /**
-   * Use existing gist
+   * Use existing remote storage (gist or snippet)
    */
-  async useGist(gistId) {
+  async useRemoteStorage(itemId, provider) {
     try {
-      gistAdapter.setGistId(gistId);
+      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
+
+      if (provider === 'gitlab') {
+        snippetAdapter.setSnippetId(itemId);
+        await syncManager.setSnippetId(itemId);
+      } else {
+        gistAdapter.setGistId(itemId);
+        await syncManager.setGistId(itemId);
+      }
 
       // Hide modal
       const modal = document.getElementById('gistSetupModal');
@@ -413,37 +647,54 @@ class App {
         await window.initSidebar();
       }
 
-      console.log('Using gist:', gistId);
+      console.log(`Using ${itemName}:`, itemId);
     } catch (error) {
-      console.error('Failed to use gist:', error);
-      this.showGistSetupError('Failed to use gist: ' + error.message);
+      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
+      console.error(`Failed to use ${itemName}:`, error);
+      this.showGistSetupError(`Failed to use ${itemName}: ` + error.message);
     }
   }
 
   /**
-   * Create new gist
+   * Create new remote storage (gist or snippet)
    */
-  async createNewGist() {
+  async createNewRemoteStorage(provider) {
     try {
-      console.log('[CreateGist] Step 1: Creating gist via adapter...');
-      const gistId = await gistAdapter.createBookmarkGist();
-      console.log('[CreateGist] Step 1 Complete: Gist created with ID:', gistId);
+      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
 
-      console.log('[CreateGist] Step 2: Setting gist ID in adapter...');
-      gistAdapter.setGistId(gistId);
+      console.log(`[Create${itemName}] Step 1: Creating ${itemName} via adapter...`);
+
+      let itemId;
+      if (provider === 'gitlab') {
+        itemId = await snippetAdapter.createBookmarkSnippet();
+        console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
+
+        console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
+        snippetAdapter.setSnippetId(itemId);
+
+        // Save snippet ID to sync manager
+        console.log(`[CreateSnippet] Step 4: Saving snippet ID to sync manager...`);
+        await syncManager.setSnippetId(itemId);
+      } else {
+        itemId = await gistAdapter.createBookmarkGist();
+        console.log(`[CreateGist] Step 1 Complete: Gist created with ID:`, itemId);
+
+        console.log(`[CreateGist] Step 2: Setting gist ID in adapter...`);
+        gistAdapter.setGistId(itemId);
+
+        // Save gist ID to sync manager
+        console.log(`[CreateGist] Step 4: Saving gist ID to sync manager...`);
+        await syncManager.setGistId(itemId);
+      }
 
       // Hide modal
-      console.log('[CreateGist] Step 3: Hiding modal...');
+      console.log(`[Create${itemName}] Step 3: Hiding modal...`);
       const modal = document.getElementById('gistSetupModal');
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
-      // Save gist ID to sync manager
-      console.log('[CreateGist] Step 4: Saving gist ID to sync manager...');
-      await syncManager.setGistId(gistId);
-
       // Clear local version to force sync
-      console.log('[CreateGist] Step 4.5: Clearing local version to force sync...');
+      console.log(`[Create${itemName}] Step 4.5: Clearing local version to force sync...`);
       await syncManager.setLocalVersion(0);
 
       // Sync the new gist data from remote to local
@@ -494,11 +745,15 @@ class App {
    */
   async loadBookmarks() {
     try {
+      console.log('[App] Starting bookmark load...');
+
       // First, try to sync from remote
       const updated = await syncManager.syncFromRemote();
+      console.log('[App] Sync from remote completed, updated:', updated);
 
       // Reload bookmark manager to get latest data
       await bookmarkManager.reload();
+      console.log('[App] Bookmark manager reloaded');
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
       // Try to reload with local data anyway
@@ -672,9 +927,19 @@ class App {
     });
 
     // Handle sync changes (additions/modifications only - auto-apply)
-    window.addEventListener('sync:syncChanges', (e) => {
+    window.addEventListener('sync:syncChanges', async (e) => {
       const { diff, message } = e.detail;
       this.showSyncChangesNotification(diff, message);
+
+      // Reload bookmark manager and UI to reflect changes
+      try {
+        await bookmarkManager.reload();
+        if (window.reloadBookmarkUI) {
+          await window.reloadBookmarkUI();
+        }
+      } catch (error) {
+        console.error('Failed to reload bookmarks after sync:', error);
+      }
     });
 
     // Handle sync conflicts (deletions present - require confirmation)

@@ -89,44 +89,60 @@ class AuthManager {
 
   /**
    * Store encrypted token in IndexedDB
+   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async storeToken(token, userPassword = null) {
+  async storeToken(token, userPassword = null, provider = 'github') {
     const encrypted = await this.encryptToken(token, userPassword);
+    const key = `${provider}_token`;
     await dbManager.put('settings', {
-      key: 'github_token',
+      key: key,
       value: encrypted
     });
-    this.token = token;
-    console.log('Token stored securely');
+
+    if (provider === 'github') {
+      this.token = token;
+    }
+    console.log(`${provider} token stored securely`);
   }
 
   /**
    * Retrieve and decrypt token from IndexedDB
+   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async loadToken(userPassword = null) {
-    const record = await dbManager.get('settings', 'github_token');
+  async loadToken(userPassword = null, provider = 'github') {
+    const key = `${provider}_token`;
+    const record = await dbManager.get('settings', key);
     if (!record) return null;
 
-    this.token = await this.decryptToken(record.value, userPassword);
-    return this.token;
+    const token = await this.decryptToken(record.value, userPassword);
+    if (provider === 'github') {
+      this.token = token;
+    }
+    return token;
   }
 
   /**
    * Remove token from storage
+   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async clearToken() {
-    await dbManager.delete('settings', 'github_token');
-    this.token = null;
-    this.user = null;
-    console.log('Token cleared');
+  async clearToken(provider = 'github') {
+    const key = `${provider}_token`;
+    await dbManager.delete('settings', key);
+
+    if (provider === 'github') {
+      this.token = null;
+      this.user = null;
+    }
+    console.log(`${provider} token cleared`);
   }
 
   /**
    * Get current token (from memory or storage)
+   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async getToken() {
-    if (this.token) return this.token;
-    return await this.loadToken();
+  async getToken(provider = 'github') {
+    if (provider === 'github' && this.token) return this.token;
+    return await this.loadToken(null, provider);
   }
 
   /**
