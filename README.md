@@ -3,7 +3,6 @@
 A fully static web application for managing bookmarks with GitHub Gist synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension.
 
 **Live Website**: https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/
-**Custom Domain**: https://bmzweb.absolutezero.fyi (once DNS is configured)
 
 ## Features
 
@@ -21,11 +20,6 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 - **Mobile-Friendly**: Full touch support with press-and-hold gestures
 - **No Backend**: 100% static website hosted on GitHub Pages
 
-## Live Demo
-
-- **Primary**: https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/
-- **Custom Domain**: https://bmzweb.absolutezero.fyi/
-
 ## Technology Stack
 
 - **Frontend**: Vanilla JavaScript (no frameworks)
@@ -34,156 +28,13 @@ A fully static web application for managing bookmarks with GitHub Gist synchroni
 - **Hosting**: GitHub Pages
 - **Security**: AES-256-GCM encryption for tokens and API keys
 
-## Getting Started
-
-### For Users
-
-1. Visit the website
-2. Click "Login with GitHub"
-3. You'll receive a code like `ABCD-1234`
-4. Open GitHub in a new tab and paste the code
-5. Grant `gist` permission
-6. Start managing your bookmarks!
-
 **Note**: Your bookmarks are stored in YOUR private Gist. The website owner cannot access your data.
-
-### For Developers
-
-```bash
-# Clone the repository
-git clone https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website.git
-cd Bookmark-Manager-Zero-Website
-
-# Serve locally (requires a local web server)
-python -m http.server 8000
-# or
-npx serve .
-
-# Open in browser
-open http://localhost:8000
-```
-
-#### Setting Up OAuth (Website Owner Only)
-
-If you're deploying your own instance:
-
-1. Go to https://github.com/settings/developers
-2. Click "New OAuth App"
-3. Fill in:
-   - **Application name**: Bookmark Manager Zero Web
-   - **Homepage URL**: Your website URL
-   - **Authorization callback URL**: (leave blank - not used for device flow)
-4. Click "Register application"
-5. Copy the **Client ID**
-6. Open `config/github-oauth.js` and replace `YOUR_CLIENT_ID_HERE`
-
-**Important**: You do NOT need the Client Secret for device flow!
-
-## Project Structure
-
-```
-Bookmark-Manager-Zero-Website/
-├── index.html                    # Main application
-├── css/
-│   └── themes.css               # Material Design 3 themes
-├── js/
-│   ├── core/
-│   │   ├── app.js              # Main application logic
-│   │   ├── bookmarks.js        # Bookmark tree operations
-│   │   ├── ui.js               # UI rendering
-│   │   └── scanner.js          # Scanning coordinator
-│   ├── storage/
-│   │   ├── gist-adapter.js     # GitHub Gist integration
-│   │   ├── indexeddb.js        # Offline storage
-│   │   ├── sync-manager.js     # Sync + edit locking
-│   │   └── storage-adapter.js  # Unified storage interface
-│   ├── auth/
-│   │   ├── oauth-device.js     # Device code OAuth flow
-│   │   └── auth-manager.js     # Token encryption & management
-│   ├── import-export/
-│   │   ├── html-parser.js      # HTML bookmark parser
-│   │   ├── json-parser.js      # JSON parser
-│   │   └── converter.js        # Format conversion
-│   ├── mobile/
-│   │   └── touch-handler.js    # Touch gestures
-│   └── lib/
-│       └── qrcode-lib.js       # QR code generation
-├── workers/
-│   └── scanner-worker.js       # Background scanning
-└── config/
-    └── github-oauth.js         # OAuth configuration
-```
-
-## Architecture
-
-### Storage Layers
-
-1. **GitHub Gist** (remote, source of truth)
-2. **IndexedDB** (local cache, offline support)
-3. **Memory** (active session data)
-
-### Data Flow
-
-```
-User Action → In-Memory Tree → Sync Manager → IndexedDB → GitHub Gist
-```
 
 ### Security
 
 - **Token Encryption**: AES-256-GCM with browser fingerprint-derived key
 - **API Keys**: User-provided, encrypted storage
 - **URL Validation**: Block dangerous schemes and private IPs
-- **CORS**: Native GitHub API support, proxied blocklists
-
-## Browser Support
-
-### Desktop
-- Chrome 90+
-- Firefox 88+
-- Edge 90+
-- Safari 14+
-
-### Mobile
-- Chrome Android 90+
-- Safari iOS 14+
-- Firefox Android 88+
-
-## Development
-
-### Setting Up OAuth Apps
-
-1. Go to https://github.com/settings/developers
-2. Register two OAuth apps:
-   - **Development**: `http://localhost:8000/auth/callback`
-   - **Production**: `https://bmzweb.absolutezero.fyi/auth/callback`
-3. Request scope: `gist`
-4. Copy Client IDs to `config/github-oauth.js`
-
-### Local Development
-
-```javascript
-// config/github-oauth.js
-export const GITHUB_OAUTH = {
-  clientId: 'your_development_client_id',
-  redirectUri: 'http://localhost:8000/auth/callback',
-  scope: 'gist'
-};
-```
-
-## Deployment
-
-Automatically deployed to GitHub Pages via GitHub Actions when pushing to `main` branch.
-
-### Custom Domain Setup
-
-1. Add `CNAME` file with domain: `bmzweb.absolutezero.fyi`
-2. Configure DNS:
-   ```
-   Type: CNAME
-   Name: bmzweb
-   Value: absolutexyzero.github.io
-   ```
-3. Enable HTTPS in GitHub Pages settings
 
 ## Features in Detail
 
@@ -216,14 +67,6 @@ Automatically deployed to GitHub Pages via GitHub Actions when pushing to `main`
 ## License
 
 MIT License - See LICENSE file for details
-
-## Contributing
-
-Contributions are welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
 
 ## Support
 
