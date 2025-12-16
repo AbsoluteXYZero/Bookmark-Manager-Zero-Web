@@ -220,13 +220,13 @@ class SnippetAdapter {
         throw new Error('Snippet does not contain bookmarks.json');
       }
 
-      // Fetch the raw content of the file
-      const rawResponse = await fetch(bookmarkFile.raw_url, { headers });
-      if (!rawResponse.ok) {
-        throw new Error(`Failed to fetch snippet content: ${rawResponse.status}`);
+      // GitLab API v4 includes the content directly in the response
+      // No need to fetch raw_url which has CORS issues
+      const content = bookmarkFile.content;
+      if (!content) {
+        throw new Error('Snippet file content is empty');
       }
 
-      const content = await rawResponse.text();
       const bookmarkData = JSON.parse(content);
 
       console.log('Read bookmarks from Snippet:', id);

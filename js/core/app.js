@@ -207,20 +207,33 @@ class App {
       }
     };
 
-    // Toggle click handler
-    if (providerToggle) {
-      providerToggle.onclick = () => {
-        switchToProvider(currentProvider === 'github' ? 'gitlab' : 'github');
-      };
-    }
+    // Helper to add both click and touch handlers
+    const addToggleHandler = (element, handler) => {
+      if (!element) return;
 
-    // Logo click handlers
-    if (githubLogo) {
-      githubLogo.onclick = () => switchToProvider('github');
-    }
-    if (gitlabLogo) {
-      gitlabLogo.onclick = () => switchToProvider('gitlab');
-    }
+      // Click handler for desktop
+      element.addEventListener('click', handler);
+
+      // Touch handler for mobile - use touchend to avoid conflicts with scrolling
+      element.addEventListener('touchend', (e) => {
+        e.preventDefault(); // Prevent ghost click
+        handler();
+      });
+
+      // Improve visual feedback
+      element.style.userSelect = 'none';
+      element.style.webkitUserSelect = 'none';
+      element.style.webkitTapHighlightColor = 'transparent';
+    };
+
+    // Toggle handlers with touch support
+    addToggleHandler(providerToggle, () => {
+      switchToProvider(currentProvider === 'github' ? 'gitlab' : 'github');
+    });
+
+    // Logo handlers with touch support
+    addToggleHandler(githubLogo, () => switchToProvider('github'));
+    addToggleHandler(gitlabLogo, () => switchToProvider('gitlab'));
 
     // Set up GitHub login button handler
     const loginBtn = document.getElementById('loginBtn');
@@ -754,6 +767,17 @@ class App {
       // Reload bookmark manager to get latest data
       await bookmarkManager.reload();
       console.log('[App] Bookmark manager reloaded');
+
+      // If bookmarks were updated from remote, trigger automatic scan
+      if (updated && scannerService) {
+        console.log('[App] Bookmarks loaded from remote, triggering automatic scan...');
+        // Use setTimeout to avoid blocking the UI
+        setTimeout(() => {
+          scannerService.scanAllBookmarks(false).catch(err => {
+            console.error('[App] Auto-scan failed:', err);
+          });
+        }, 500);
+      }
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
       // Try to reload with local data anyway

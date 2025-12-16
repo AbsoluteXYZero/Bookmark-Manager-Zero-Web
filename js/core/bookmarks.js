@@ -6,6 +6,7 @@
 
 import dbManager from '../storage/indexeddb.js';
 import syncManager from '../storage/sync-manager.js';
+import scannerService from './scanner.js';
 
 class BookmarkManager {
   constructor() {
@@ -194,6 +195,18 @@ class BookmarkManager {
     await this.saveChanges();
 
     console.log(`Created ${type}:`, newNode);
+
+    // If this is a bookmark (not a folder), trigger automatic scan
+    if (type === 'bookmark' && scannerService) {
+      console.log('[BookmarkManager] New bookmark created, triggering automatic scan...');
+      // Use setTimeout to avoid blocking
+      setTimeout(() => {
+        scannerService.scanBookmark(newNode, false).catch(err => {
+          console.error('[BookmarkManager] Auto-scan of new bookmark failed:', err);
+        });
+      }, 200);
+    }
+
     return newNode;
   }
 
