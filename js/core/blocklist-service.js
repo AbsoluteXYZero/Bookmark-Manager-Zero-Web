@@ -74,9 +74,64 @@ class BlocklistService {
         this.blocklistLastUpdate = metadata.value;
       }
 
-      console.log('[Blocklist] Service initialized');
+      // Load cached blocklist data from IndexedDB
+      await this.loadCachedBlocklist();
+
+      console.log('[Blocklist] Service initialized with', this.maliciousUrlsSet.size, 'cached domains');
     } catch (error) {
       console.error('[Blocklist] Failed to initialize:', error);
+    }
+  }
+
+  /**
+   * Load cached blocklist from IndexedDB
+   */
+  async loadCachedBlocklist() {
+    try {
+      // Check if we have cached blocklist data
+      const cachedData = await dbManager.get('blocklists', 'compiled');
+      if (!cachedData) {
+        console.log('[Blocklist] No cached data found');
+        return false;
+      }
+
+      // Check if cache is still fresh (within 24 hours)
+      const now = Date.now();
+      if (now - this.blocklistLastUpdate > this.BLOCKLIST_UPDATE_INTERVAL) {
+        console.log('[Blocklist] Cached data is stale, will update');
+        return false;
+      }
+
+      // Load from cache
+      console.log('[Blocklist] Loading from cache...');
+      this.maliciousUrlsSet = new Set(cachedData.domains || []);
+      this.domainSourceMap = new Map(cachedData.domainSourceMap || []);
+      this.domainOnlyMap = new Map(cachedData.domainOnlyMap || []);
+
+      console.log(`[Blocklist] Loaded ${this.maliciousUrlsSet.size} domains from cache`);
+      return true;
+    } catch (error) {
+      console.error('[Blocklist] Failed to load cached blocklist:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Save compiled blocklist to IndexedDB for faster loading
+   */
+  async saveCachedBlocklist() {
+    try {
+      console.log('[Blocklist] Saving to cache...');
+      await dbManager.put('blocklists', {
+        source: 'compiled',
+        domains: Array.from(this.maliciousUrlsSet),
+        domainSourceMap: Array.from(this.domainSourceMap.entries()),
+        domainOnlyMap: Array.from(this.domainOnlyMap.entries()),
+        lastUpdate: this.blocklistLastUpdate
+      });
+      console.log('[Blocklist] Cache saved successfully');
+    } catch (error) {
+      console.error('[Blocklist] Failed to save cache:', error);
     }
   }
 
@@ -235,6 +290,8 @@ class BlocklistService {
 
       console.log(`[Blocklist] ✓ Database updated: ${this.maliciousUrlsSet.size} unique domains from ${totalCount} total entries`);
 
+      // Save to IndexedDB cache for next page load
+      await this.saveCachedBlocklist();
       await dbManager.put('metadata', { key: 'blocklistLastUpdate', value: this.blocklistLastUpdate });
 
       window.dispatchEvent(new CustomEvent('blocklist:complete', {
@@ -252,9 +309,22 @@ class BlocklistService {
 
   async ensureBlocklistReady() {
     const now = Date.now();
-    if (now - this.blocklistLastUpdate > this.BLOCKLIST_UPDATE_INTERVAL || this.maliciousUrlsSet.size === 0) {
-      console.log('[Blocklist] Ensuring database is up to date...');
+    const cacheAge = now - this.blocklistLastUpdate;
+    const isStale = cacheAge > this.BLOCKLIST_UPDATE_INTERVAL;
+    const isEmpty = this.maliciousUrlsSet.size === 0;
+
+    console.log('[Blocklist] ensureBlocklistReady check:', {
+      cacheAge: Math.floor(cacheAge / 1000 / 60), // minutes
+      isStale,
+      isEmpty,
+      currentSize: this.maliciousUrlsSet.size
+    });
+
+    if (isStale || isEmpty) {
+      console.log('[Blocklist] Need update - isStale:', isStale, 'isEmpty:', isEmpty);
       await this.updateBlocklistDatabase();
+    } else {
+      console.log('[Blocklist] Using cached data');
     }
 
     if (this.blocklistLoading) {

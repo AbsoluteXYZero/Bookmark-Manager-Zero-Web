@@ -112,9 +112,11 @@ class AuthManager {
   async loadToken(userPassword = null, provider = 'github') {
     const key = `${provider}_token`;
     const record = await dbManager.get('settings', key);
+
     if (!record) return null;
 
     const token = await this.decryptToken(record.value, userPassword);
+
     if (provider === 'github') {
       this.token = token;
     }
@@ -129,10 +131,11 @@ class AuthManager {
     const key = `${provider}_token`;
     await dbManager.delete('settings', key);
 
-    if (provider === 'github') {
-      this.token = null;
-      this.user = null;
-    }
+    // Always clear in-memory state regardless of provider
+    // This ensures no stale tokens remain in memory
+    this.token = null;
+    this.user = null;
+
     console.log(`${provider} token cleared`);
   }
 
@@ -141,7 +144,9 @@ class AuthManager {
    * Supports multiple providers: 'github' (default) or 'gitlab'
    */
   async getToken(provider = 'github') {
-    if (provider === 'github' && this.token) return this.token;
+    if (provider === 'github' && this.token) {
+      return this.token;
+    }
     return await this.loadToken(null, provider);
   }
 

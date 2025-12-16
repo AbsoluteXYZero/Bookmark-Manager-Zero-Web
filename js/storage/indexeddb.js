@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'bmz_storage';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // Incremented to fix cache keyPath bug
 
 class IndexedDBManager {
   constructor() {
@@ -54,11 +54,21 @@ class IndexedDBManager {
         }
 
         // 3. Cache store - Link/safety status (7-day TTL)
+        // Note: Using composite key 'cacheKey' (url + type) to allow multiple cache types per URL
         if (!db.objectStoreNames.contains('cache')) {
-          const cacheStore = db.createObjectStore('cache', { keyPath: 'url' });
+          const cacheStore = db.createObjectStore('cache', { keyPath: 'cacheKey' });
+          cacheStore.createIndex('url', 'url', { unique: false });
           cacheStore.createIndex('timestamp', 'timestamp', { unique: false });
           cacheStore.createIndex('type', 'type', { unique: false });
           console.log('Created cache store');
+        } else if (event.oldVersion < 2) {
+          // Migrate from version 1 to version 2: recreate cache store with new keyPath
+          db.deleteObjectStore('cache');
+          const cacheStore = db.createObjectStore('cache', { keyPath: 'cacheKey' });
+          cacheStore.createIndex('url', 'url', { unique: false });
+          cacheStore.createIndex('timestamp', 'timestamp', { unique: false });
+          cacheStore.createIndex('type', 'type', { unique: false });
+          console.log('Migrated cache store to use composite key');
         }
 
         // 4. Settings store - Theme, preferences, encrypted API keys

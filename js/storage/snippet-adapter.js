@@ -223,8 +223,11 @@ class SnippetAdapter {
       // GitLab API v4 includes the content directly in the response
       // No need to fetch raw_url which has CORS issues
       const content = bookmarkFile.content;
-      if (!content) {
-        throw new Error('Snippet file content is empty');
+
+      // If content is empty or just whitespace, return empty bookmark structure
+      if (!content || content.trim() === '') {
+        console.log('Snippet file is empty, returning empty bookmark structure');
+        return this.getEmptyBookmarkTree();
       }
 
       const bookmarkData = JSON.parse(content);
@@ -335,6 +338,51 @@ class SnippetAdapter {
    */
   getSnippetId() {
     return this.snippetId;
+  }
+
+  /**
+   * Get empty bookmark tree structure
+   */
+  getEmptyBookmarkTree() {
+    return {
+      version: 1,
+      checksum: '',
+      lastModified: Date.now(),
+      roots: {
+        bookmark_bar: {
+          id: '1',
+          title: 'Bookmarks Toolbar',
+          name: 'Bookmarks Toolbar',
+          type: 'folder',
+          dateAdded: Date.now(),
+          children: []
+        },
+        menu: {
+          id: '2',
+          title: 'Bookmarks Menu',
+          name: 'Bookmarks Menu',
+          type: 'folder',
+          dateAdded: Date.now(),
+          children: []
+        },
+        other: {
+          id: '3',
+          title: 'Other Bookmarks',
+          name: 'Other Bookmarks',
+          type: 'folder',
+          dateAdded: Date.now(),
+          children: []
+        },
+        mobile: {
+          id: '4',
+          title: 'Mobile Bookmarks',
+          name: 'Mobile Bookmarks',
+          type: 'folder',
+          dateAdded: Date.now(),
+          children: []
+        }
+      }
+    };
   }
 }
 

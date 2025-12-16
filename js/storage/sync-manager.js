@@ -563,6 +563,17 @@ class SyncManager {
   async setGistId(gistId) {
     this.gistId = gistId;
     this.provider = 'github';
+
+    // Clear GitLab snippet data when switching to GitHub
+    // (This handles manual provider switches after login)
+    if (this.snippetId) {
+      this.snippetId = null;
+      snippetAdapter.snippetId = null;
+      localStorage.removeItem('bmz_snippet_id');
+      await dbManager.delete('metadata', 'snippetId');
+      console.log('Cleared GitLab snippet data during provider switch');
+    }
+
     gistAdapter.setGistId(gistId);
     await dbManager.put('metadata', { key: 'gistId', value: gistId });
     await this.setProvider('github');
@@ -575,6 +586,17 @@ class SyncManager {
   async setSnippetId(snippetId) {
     this.snippetId = snippetId;
     this.provider = 'gitlab';
+
+    // Clear GitHub gist data when switching to GitLab
+    // (This handles manual provider switches after login)
+    if (this.gistId) {
+      this.gistId = null;
+      gistAdapter.gistId = null;
+      localStorage.removeItem('bmz_gist_id');
+      await dbManager.delete('metadata', 'gistId');
+      console.log('Cleared GitHub gist data during provider switch');
+    }
+
     snippetAdapter.setSnippetId(snippetId);
     await dbManager.put('metadata', { key: 'snippetId', value: snippetId });
     await this.setProvider('gitlab');

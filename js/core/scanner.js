@@ -40,9 +40,67 @@ class ScannerService {
 
       // Initialize worker with API keys and blocklist
       await this.initializeWorker();
+
+      // Restore cached statuses for all bookmarks (bookmarks should be loaded before scanner init)
+      await this.restoreCachedStatuses();
     } catch (error) {
       console.error('Failed to initialize scanner worker:', error);
       // Gracefully degrade - scanning just won't work
+    }
+  }
+
+  /**
+   * Restore cached scan results from IndexedDB to all bookmarks
+   */
+  async restoreCachedStatuses() {
+    try {
+      if (!window.bookmarkManager) {
+        console.log('[Scanner] BookmarkManager not available, skipping cache restore');
+        return;
+      }
+
+      const allBookmarks = window.bookmarkManager.getAllBookmarks();
+      let restored = 0;
+      let linkRestored = 0;
+      let safetyRestored = 0;
+
+      console.log(`[Scanner] Starting cache restore for ${allBookmarks.length} bookmarks...`);
+
+      for (const bookmark of allBookmarks) {
+        if (!bookmark.url) continue;
+
+        // Load cached link status
+        if (!bookmark.linkStatus) {
+          const cachedLink = await this.getCachedResult(bookmark.url, 'link');
+          if (cachedLink) {
+            bookmark.linkStatus = cachedLink;
+            linkRestored++;
+            console.log(`[Scanner] Restored link status "${cachedLink}" for ${bookmark.title || bookmark.url}`);
+          }
+        }
+
+        // Load cached safety status
+        if (!bookmark.safetyStatus) {
+          const cachedSafety = await this.getCachedResult(bookmark.url, 'safety');
+          if (cachedSafety) {
+            bookmark.safetyStatus = cachedSafety.status;
+            bookmark.safetySources = cachedSafety.sources || [];
+            safetyRestored++;
+            console.log(`[Scanner] Restored safety status "${cachedSafety.status}" for ${bookmark.title || bookmark.url}`);
+          }
+        }
+      }
+
+      restored = linkRestored + safetyRestored;
+      console.log(`[Scanner] Cache restore complete: ${linkRestored} link statuses, ${safetyRestored} safety statuses (${restored} total) for ${allBookmarks.length} bookmarks`);
+
+      // Trigger UI re-render if any statuses were restored
+      if (restored > 0 && window.renderBookmarks) {
+        console.log('[Scanner] Triggering UI re-render to show cached statuses');
+        window.renderBookmarks();
+      }
+    } catch (error) {
+      console.error('[Scanner] Failed to restore cached statuses:', error);
     }
   }
 
@@ -277,6 +335,7 @@ class ScannerService {
       const expiresAt = now + (this.cacheExpiryDays * 24 * 60 * 60 * 1000);
 
       await dbManager.put('cache', {
+        cacheKey: `${url}::${type}`, // Composite key: url + type
         url: url,
         type: type,
         result: result,
@@ -293,14 +352,15 @@ class ScannerService {
    */
   async getCachedResult(url, type) {
     try {
-      const record = await dbManager.get('cache', url);
-      if (record && record.type === type) {
+      const cacheKey = `${url}::${type}`; // Composite key: url + type
+      const record = await dbManager.get('cache', cacheKey);
+      if (record) {
         // Check if expired
         if (Date.now() < record.expiresAt) {
           return record.result;
         } else {
           // Expired, delete it
-          await dbManager.delete('cache', url);
+          await dbManager.delete('cache', cacheKey);
         }
       }
       return null;
@@ -322,9 +382,25 @@ class ScannerService {
       const cachedSafety = await this.getCachedResult(bookmark.url, 'safety');
 
       if (cachedLink && cachedSafety) {
+        console.log(`[Scanner] Using cached results for ${bookmark.url}`);
         bookmark.linkStatus = cachedLink;
         bookmark.safetyStatus = cachedSafety.status;
         bookmark.safetySources = cachedSafety.sources;
+
+        // Update bookmark in tree using global function
+        if (window.updateBookmarkInTree) {
+          window.updateBookmarkInTree(bookmark.id, {
+            linkStatus: cachedLink,
+            safetyStatus: cachedSafety.status,
+            safetySources: cachedSafety.sources
+          });
+        }
+
+        // Update UI to show cached status
+        if (window.updateBookmarkStatusInDOM) {
+          window.updateBookmarkStatusInDOM(bookmark.id, cachedLink, cachedSafety.status, cachedSafety.sources, bookmark.url);
+        }
+
         return;
       }
     }

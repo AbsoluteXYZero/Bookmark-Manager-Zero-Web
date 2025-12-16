@@ -458,7 +458,20 @@ const MAX_CHANGELOG_ENTRIES = 1000;
 async function addChangelogEntry(type, itemType, title, url = null, details = {}) {
   try {
     const result = await safeStorage.get('changelogEntries');
-    let changelogEntries = result.changelogEntries || [];
+    let storedValue = result.changelogEntries;
+
+    // Parse JSON string from localStorage, or use empty array if null/invalid
+    let changelogEntries = [];
+    if (storedValue) {
+      try {
+        changelogEntries = JSON.parse(storedValue);
+        if (!Array.isArray(changelogEntries)) {
+          changelogEntries = [];
+        }
+      } catch (e) {
+        changelogEntries = [];
+      }
+    }
 
     const entry = {
       id: Date.now(),
@@ -478,7 +491,8 @@ async function addChangelogEntry(type, itemType, title, url = null, details = {}
       changelogEntries = changelogEntries.slice(0, MAX_CHANGELOG_ENTRIES);
     }
 
-    await safeStorage.set({ changelogEntries });
+    // Stringify before saving to localStorage
+    await safeStorage.set({ changelogEntries: JSON.stringify(changelogEntries) });
     console.log('[Changelog] Added entry:', entry);
   } catch (error) {
     console.error('[Changelog] Failed to add entry:', error);
@@ -849,9 +863,8 @@ async function init() {
   console.log('[init] Loading bookmarks...');
   await loadBookmarks();
 
-  console.log('[init] Cleaning up and restoring...');
+  console.log('[init] Cleaning up...');
   cleanupSafetyHistory(); // Clean up stale entries on sidebar load
-  await restoreCachedBookmarkStatuses();
   await expandToStartFolder();
 
   console.log('[init] Setting up event listeners...');
@@ -1633,6 +1646,9 @@ async function loadBookmarks() {
     };
     bookmarkTree = restoreStatuses(bookmarkTree);
 
+    // Load cached scan results from IndexedDB for all bookmarks
+    await restoreCachedStatusesToBookmarkTree();
+
     // Clear checked bookmarks when loading fresh data
     checkedBookmarks.clear();
     // Update start folder dropdown with current folders
@@ -1643,71 +1659,64 @@ async function loadBookmarks() {
   }
 }
 
+// Restore cached scan results from IndexedDB to bookmarkTree
+async function restoreCachedStatusesToBookmarkTree() {
+  if (!window.scannerService) {
+    console.log('[Cache Restore] Scanner service not available');
+    return;
+  }
+
+  console.log('[Cache Restore] Loading cached statuses into bookmarkTree...');
+  let linkRestored = 0;
+  let safetyRestored = 0;
+
+  // Recursively restore statuses to all bookmarks
+  const restoreNode = async (node) => {
+    if (node.url && !node.linkStatus && !node.safetyStatus) {
+      // Load cached link status
+      const cachedLink = await window.scannerService.getCachedResult(node.url, 'link');
+      if (cachedLink) {
+        node.linkStatus = cachedLink;
+        linkRestored++;
+      }
+
+      // Load cached safety status
+      const cachedSafety = await window.scannerService.getCachedResult(node.url, 'safety');
+      if (cachedSafety) {
+        node.safetyStatus = cachedSafety.status;
+        node.safetySources = cachedSafety.sources || [];
+        safetyRestored++;
+      }
+    }
+
+    // Recursively process children
+    if (node.children) {
+      for (const child of node.children) {
+        await restoreNode(child);
+      }
+    }
+  };
+
+  // Process all root folders
+  for (const root of bookmarkTree) {
+    await restoreNode(root);
+  }
+
+  if (linkRestored > 0 || safetyRestored > 0) {
+    console.log(`[Cache Restore] Restored ${linkRestored} link + ${safetyRestored} safety statuses to bookmarkTree`);
+  } else {
+    console.log('[Cache Restore] No cached statuses found');
+  }
+}
+
 // Helper function to validate cache entries
 function isValidCache(cached) {
   const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
   return cached && (Date.now() - cached.timestamp < CACHE_TTL);
 }
 
-// Restore cached bookmark statuses from persistent storage
-async function restoreCachedBookmarkStatuses() {
-  try {
-    // Load both caches from storage
-    const result = await safeStorage.get(['linkStatusCache', 'safetyStatusCache']);
-    const linkCache = result.linkStatusCache || {};
-    const safetyCache = result.safetyStatusCache || {};
-
-    let restored = 0;
-
-    // Recursively traverse bookmark tree
-    function restoreStatuses(nodes) {
-      nodes.forEach(node => {
-        if (node.url) {
-          // Check if URL is whitelisted (takes priority over cache)
-          try {
-            const hostname = new URL(node.url).hostname;
-            if (whitelistedUrls.has(hostname)) {
-              node.safetyStatus = 'safe';
-              node.safetySources = ['Whitelisted by user'];
-              node.linkStatus = node.linkStatus || 'unknown'; // Keep existing link status if present
-              restored++;
-            }
-          } catch (e) {
-            // Invalid URL, skip whitelist check
-          }
-
-          // Check link status cache (only if not already set by whitelist)
-          if (!node.linkStatus) {
-            const linkCached = linkCache[node.url];
-            if (linkCached && isValidCache(linkCached)) {
-              node.linkStatus = linkCached.result;
-              restored++;
-            }
-          }
-
-          // Check safety status cache (only if not whitelisted)
-          if (!node.safetyStatus) {
-            const safetyCached = safetyCache[node.url];
-            if (safetyCached && isValidCache(safetyCached)) {
-              node.safetyStatus = safetyCached.result?.status || safetyCached.result;
-              node.safetySources = safetyCached.result?.sources || [];
-              restored++;
-            }
-          }
-        }
-
-        if (node.children) {
-          restoreStatuses(node.children);
-        }
-      });
-    }
-
-    restoreStatuses(bookmarkTree);
-    console.log(`[Cache Restore] Restored ${restored} cached status indicators`);
-  } catch (error) {
-    console.error('[Cache Restore] Error restoring cached statuses:', error);
-  }
-}
+// Cached bookmark statuses are restored when bookmarks are loaded
+// See restoreCachedStatusesToBookmarkTree() above
 
 // Scan ALL bookmarks regardless of folder expansion (used by rescan button)
 async function rescanAllBookmarks() {
@@ -2731,10 +2740,18 @@ function createFolderElement(folder) {
   });
 
   // Add menu button handler
-  menuBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  const handleFolderMenuToggle = (e) => {
+    e.preventDefault(); // Prevent default behavior and synthetic click events
+    e.stopPropagation(); // Stop event from bubbling up
+    e.stopImmediatePropagation(); // Stop other handlers on same element
     toggleFolderMenu(folderDiv);
-  });
+    return false;
+  };
+  menuBtn.addEventListener('click', handleFolderMenuToggle, true); // Use capture phase
+  menuBtn.addEventListener('touchend', handleFolderMenuToggle, true); // Use capture phase
+  menuBtn.addEventListener('touchstart', (e) => {
+    e.stopPropagation(); // Also stop touchstart from bubbling
+  }, true);
 
   // Add right-click context menu support for folder
   folderDiv.addEventListener('contextmenu', (e) => {
@@ -3029,10 +3046,18 @@ function createBookmarkElement(bookmark) {
 
   // Add menu toggle handler
   const menuBtn = bookmarkDiv.querySelector('.bookmark-menu-btn');
-  menuBtn.addEventListener('click', (e) => {
-    e.stopPropagation();
+  const handleMenuToggle = (e) => {
+    e.preventDefault(); // Prevent default behavior and synthetic click events
+    e.stopPropagation(); // Stop event from bubbling up
+    e.stopImmediatePropagation(); // Stop other handlers on same element
     toggleBookmarkMenu(bookmarkDiv);
-  });
+    return false;
+  };
+  menuBtn.addEventListener('click', handleMenuToggle, true); // Use capture phase
+  menuBtn.addEventListener('touchend', handleMenuToggle, true); // Use capture phase
+  menuBtn.addEventListener('touchstart', (e) => {
+    e.stopPropagation(); // Also stop touchstart from bubbling
+  }, true);
 
   // Add right-click context menu support
   bookmarkDiv.addEventListener('contextmenu', (e) => {
@@ -3751,8 +3776,13 @@ function toggleFolder(folderId, folderElement) {
   } else {
     expandedFolders.add(folderId);
     // When expanding a folder, check its bookmarks only if cache expired (>7 days) or never scanned
+
+    // Get folder node for logging
+    const folderNode = window.bookmarkManager?.getFolder(folderId);
+    const folderTitle = folderNode?.title || folderId;
+
     if (shouldScanFolder(folderId)) {
-      console.log(`[Folder Scan Cache] Folder ${folderId} needs scanning (cache expired or never scanned)`);
+      console.log(`[Folder Scan Cache] "${folderTitle}" needs scanning (cache expired or never scanned)`);
       setTimeout(() => {
         autoCheckBookmarkStatuses();
         // Save timestamp after successful scan
@@ -3761,12 +3791,112 @@ function toggleFolder(folderId, folderElement) {
     } else {
       const lastScan = folderScanTimestamps[folderId];
       const daysAgo = Math.floor((Date.now() - lastScan) / (24 * 60 * 60 * 1000));
-      console.log(`[Folder Scan Cache] Folder ${folderId} already scanned ${daysAgo} day(s) ago, skipping`);
+      console.log(`[Folder Scan Cache] "${folderTitle}" already scanned ${daysAgo} day(s) ago, loading cached statuses...`);
+      console.log('[Folder Scan Cache] window.scannerService:', window.scannerService);
+      console.log('[Folder Scan Cache] Checking if window.scannerService is truthy:', !!window.scannerService);
+
+      // Even though we skip scanning, we still need to load cached statuses from IndexedDB
+      // for the bookmarks that are now visible in this expanded folder
+      if (window.scannerService) {
+        console.log('[Folder Toggle] About to call loadCachedStatusesForFolder with folderId:', folderId);
+        console.log('[Folder Toggle] loadCachedStatusesForFolder is:', typeof loadCachedStatusesForFolder);
+
+        // Don't use setTimeout - we need this to complete before rendering
+        try {
+          const promise = loadCachedStatusesForFolder(folderId);
+          console.log('[Folder Toggle] Got promise:', promise);
+
+          promise.then(() => {
+            console.log('[Folder Toggle] Cache load complete, rendering...');
+            renderBookmarks(); // Re-render to show the loaded statuses
+          }).catch(err => {
+            console.error('[Folder Toggle] Cache load failed:', err);
+            renderBookmarks(); // Render anyway even if cache load fails
+          });
+        } catch (err) {
+          console.error('[Folder Toggle] Error calling loadCachedStatusesForFolder:', err);
+          renderBookmarks();
+        }
+        return; // Exit early, render will happen after cache load
+      }
     }
   }
 
-  // Re-render to reflect changes
+  // Re-render to reflect changes (only if we didn't load cached statuses above)
   renderBookmarks();
+}
+
+// Load cached statuses for all bookmarks in a folder
+async function loadCachedStatusesForFolder(folderId) {
+  console.log(`[Cache Load] START - folderId: ${folderId}`);
+
+  if (!window.scannerService) {
+    console.warn('[Cache Load] No scanner service available');
+    return;
+  }
+
+  console.log(`[Cache Load] Scanner service available, finding folder in bookmarkTree`);
+  console.log(`[Cache Load] bookmarkTree length:`, bookmarkTree.length);
+
+  // Find the folder in bookmarkTree (not bookmarkManager.tree!)
+  const folder = findBookmarkById(bookmarkTree, folderId);
+  if (!folder) {
+    console.warn(`[Cache Load] Folder ${folderId} not found in bookmarkTree`);
+    return;
+  }
+
+  console.log(`[Cache Load] Found folder: "${folder.title}"`);
+
+  const bookmarks = [];
+
+  // Recursively collect all bookmarks in this folder
+  function collectBookmarks(node) {
+    if (node.url) {
+      bookmarks.push(node);
+    }
+    if (node.children) {
+      node.children.forEach(collectBookmarks);
+    }
+  }
+
+  collectBookmarks(folder);
+
+  console.log(`[Cache Load] Collected ${bookmarks.length} bookmarks in "${folder.title}"`);
+  let linkLoaded = 0;
+  let safetyLoaded = 0;
+
+  for (const bookmark of bookmarks) {
+    console.log(`[Cache Load] Processing bookmark: ${bookmark.title || bookmark.url}`);
+
+    // Load cached link status
+    if (!bookmark.linkStatus) {
+      console.log(`[Cache Load] Checking link cache for ${bookmark.url}`);
+      const cachedLink = await window.scannerService.getCachedResult(bookmark.url, 'link');
+      if (cachedLink) {
+        bookmark.linkStatus = cachedLink;
+        linkLoaded++;
+        console.log(`[Cache Load] ✓ Link "${cachedLink}" for ${bookmark.title || bookmark.url}`);
+      }
+    } else {
+      console.log(`[Cache Load] Already has link status: ${bookmark.linkStatus}`);
+    }
+
+    // Load cached safety status
+    if (!bookmark.safetyStatus) {
+      console.log(`[Cache Load] Checking safety cache for ${bookmark.url}`);
+      const cachedSafety = await window.scannerService.getCachedResult(bookmark.url, 'safety');
+      if (cachedSafety) {
+        bookmark.safetyStatus = cachedSafety.status;
+        bookmark.safetySources = cachedSafety.sources || [];
+        safetyLoaded++;
+        console.log(`[Cache Load] ✓ Safety "${cachedSafety.status}" for ${bookmark.title || bookmark.url}`);
+      }
+    } else {
+      console.log(`[Cache Load] Already has safety status: ${bookmark.safetyStatus}`);
+    }
+  }
+
+  console.log(`[Cache Load] COMPLETE - Loaded ${linkLoaded} link + ${safetyLoaded} safety statuses for "${folder.title}"`);
 }
 
 // Toggle bookmark menu

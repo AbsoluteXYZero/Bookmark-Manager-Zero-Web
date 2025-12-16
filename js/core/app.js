@@ -42,43 +42,23 @@ class App {
     try {
       console.log('Initializing Bookmark Manager Zero Web...');
 
-      // Initialize IndexedDB
+      // Initialize IndexedDB first (needed for everything)
       await dbManager.init();
 
-      // Initialize bookmark manager
-      await bookmarkManager.init();
-      console.log('Bookmark manager initialized');
-
-      // Initialize sync manager
-      await syncManager.init();
-      console.log('Sync manager initialized');
-
-      // Initialize blocklist service
-      await blocklistService.init();
-      console.log('Blocklist service initialized');
-
-      // Initialize scanner service
-      await scannerService.init();
-      console.log('Scanner service initialized');
-
-      // Clean up any corrupted localStorage and IndexedDB data
-      await this.cleanupLocalStorage();
-
-      // Load theme
+      // Load theme early for visual consistency
       await this.loadTheme();
 
-      // Check authentication
-      await this.checkAuth();
-
-      // Set up global event listeners
+      // Set up global event listeners and touch handler FIRST
+      // This ensures UI is responsive while auth/loading happens
       this.setupEventListeners();
-
-      // Set up sync event listeners
       this.setupSyncListeners();
-
-      // Initialize touch handler for mobile devices
       touchHandler.init();
       console.log('Touch handler initialized');
+
+      // Check authentication IMMEDIATELY - this will show/hide screens appropriately
+      await this.checkAuth();
+
+      // Everything else happens in showMainApp() after auth succeeds
 
       this.isInitialized = true;
       console.log('App initialized successfully');
@@ -122,10 +102,15 @@ class App {
    * Check if user is authenticated
    */
   async checkAuth() {
-    // Keep login screen hidden during auth check
+    // Hide both login and main content during auth check
     const loginScreen = document.getElementById('loginScreen');
+    const mainContent = document.getElementById('mainContent');
+
     if (loginScreen) {
       loginScreen.classList.add('hidden');
+    }
+    if (mainContent) {
+      mainContent.classList.add('hidden');
     }
 
     // Check for saved provider preference
@@ -133,6 +118,7 @@ class App {
     const token = await authManager.getToken(provider);
 
     if (token) {
+      console.log('[Auth] Found saved token, verifying...');
       // Verify token is valid by fetching user info
       try {
         let response;
@@ -156,6 +142,8 @@ class App {
           this.currentUser = await response.json();
           this.isAuthenticated = true;
 
+          console.log('[Auth] Token valid, user:', this.currentUser.login || this.currentUser.username);
+
           // Set the provider in oauthPAT so it's available
           oauthPAT.provider = provider;
           oauthPAT.token = token;
@@ -164,14 +152,17 @@ class App {
           await this.showMainApp();
         } else {
           // Token invalid, clear it
+          console.log('[Auth] Token invalid, clearing...');
           await authManager.clearToken(provider);
           this.showLoginScreen();
         }
       } catch (error) {
-        console.error('Auth check failed:', error);
+        console.error('[Auth] Auth check failed:', error);
         this.showLoginScreen();
       }
     } else {
+      // No token found, show login
+      console.log('[Auth] No saved token found');
       this.showLoginScreen();
     }
   }
@@ -381,10 +372,16 @@ class App {
    */
   async logout() {
     try {
+      console.log('Logging out...');
+
       // Clear authentication for both providers
       await authManager.clearToken('github');
       await authManager.clearToken('gitlab');
       oauthPAT.clear();
+
+      // Clear app authentication state
+      this.isAuthenticated = false;
+      this.currentUser = null;
 
       // Clear provider preference
       await authManager.storePreference('syncProvider', null);
@@ -403,19 +400,56 @@ class App {
       syncManager.provider = null;
 
       // Clear all local bookmark data from IndexedDB
-      await dbManager.clearStore('bookmarks');
-      await dbManager.clearStore('metadata');
+      await dbManager.clear('bookmarks');
+      await dbManager.clear('metadata');
 
       // Keep settings (like theme, API keys) but clear auth-related data
       // Settings are user preferences, not user data
 
-      // Reload the page to reset everything
-      window.location.reload();
+      console.log('Logout complete, reloading page...');
+
+      // Use setTimeout with longer delay to ensure all IndexedDB operations complete
+      // IndexedDB commits are asynchronous even after await returns
+      setTimeout(() => {
+        window.location.reload();
+      }, 250);
     } catch (error) {
       console.error('Logout failed:', error);
-      // Even if there's an error, try to reload
-      window.location.reload();
+      // Even if there's an error, try to reload after a delay
+      setTimeout(() => {
+        window.location.reload();
+      }, 250);
     }
+  }
+
+  /**
+   * Clear all sync-related data (gist/snippet IDs and bookmarks)
+   * Call this when logging in to ensure fresh state
+   */
+  async clearAllSyncData() {
+    console.log('[App] Clearing all sync data for fresh login...');
+
+    // Clear sync manager state
+    syncManager.gistId = null;
+    syncManager.snippetId = null;
+    syncManager.provider = null;
+
+    // Clear adapter state
+    gistAdapter.gistId = null;
+    snippetAdapter.snippetId = null;
+
+    // Clear localStorage
+    localStorage.removeItem('bmz_gist_id');
+    localStorage.removeItem('bmz_snippet_id');
+
+    // Clear IndexedDB metadata (gist/snippet IDs)
+    await dbManager.delete('metadata', 'gistId');
+    await dbManager.delete('metadata', 'snippetId');
+
+    // Clear all bookmarks to force fresh sync
+    await dbManager.clear('bookmarks');
+
+    console.log('[App] All sync data cleared');
   }
 
   /**
@@ -423,11 +457,32 @@ class App {
    */
   async showMainApp() {
     try {
-      // Hide login screen
+      console.log('[App] showMainApp started');
+
+      // Hide login screen, show main content
       const loginScreen = document.getElementById('loginScreen');
+      const mainContent = document.getElementById('mainContent');
+
       if (loginScreen) {
         loginScreen.classList.add('hidden');
       }
+      if (mainContent) {
+        mainContent.classList.remove('hidden');
+      }
+
+      // Clear all previous sync data to ensure fresh state
+      await this.clearAllSyncData();
+
+      // Clean up any corrupted storage
+      await this.cleanupLocalStorage();
+
+      // Initialize bookmark manager
+      await bookmarkManager.init();
+      console.log('Bookmark manager initialized');
+
+      // Initialize sync manager
+      await syncManager.init();
+      console.log('Sync manager initialized');
 
       // Check if we have a gist set up
       const hasGist = await this.checkGistSetup();
@@ -438,16 +493,21 @@ class App {
         return;
       }
 
-      // Initialize sync manager
-      await syncManager.init();
-
-      // Load or create bookmarks
-      await this.loadBookmarks();
-
-      // Initialize sidebar (this loads bookmarks and renders UI)
+      console.log('[App] Initializing sidebar...');
+      // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
       if (window.initSidebar) {
         await window.initSidebar();
       }
+
+      console.log('[App] Initializing blocklist service...');
+      // Initialize blocklist service after bookmarks are loaded
+      await blocklistService.init();
+      console.log('Blocklist service initialized');
+
+      console.log('[App] Initializing scanner service...');
+      // Initialize scanner service - it will restore cached statuses to loaded bookmarks
+      await scannerService.init();
+      console.log('Scanner service initialized');
 
       console.log('Main app loaded successfully');
     } catch (error) {
@@ -1542,25 +1602,6 @@ class App {
     this.showToast(`${title}: ${message}`, 'error');
     console.error(title, error);
   }
-
-  /**
-   * Logout user
-   */
-  async logout() {
-    if (confirm('Are you sure you want to logout?')) {
-      try {
-        await authManager.clearToken();
-        this.isAuthenticated = false;
-        this.currentUser = null;
-
-        // Reload page to reset state
-        window.location.reload();
-      } catch (error) {
-        console.error('Logout failed:', error);
-        this.showError('Logout failed', error);
-      }
-    }
-  }
 }
 
 // Initialize app when DOM is ready
@@ -1579,4 +1620,5 @@ window.app = app;
 window.bookmarkManager = bookmarkManager;
 window.syncManager = syncManager;
 window.blocklistService = blocklistService;
+window.scannerService = scannerService;
 export default app;
