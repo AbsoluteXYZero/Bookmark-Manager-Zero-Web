@@ -40,18 +40,33 @@ function parseJSONBookmarks(jsonContent) {
 function parseChromeFormat(data) {
   // Chrome format already matches our structure
   // Just need to ensure IDs are unique and regenerate them
+  // Support all 4 root folders for cross-browser compatibility
   const bookmarkTree = {
     roots: {
-      bookmark_bar: regenerateIds(data.roots.bookmark_bar || {
+      bookmark_bar: regenerateIds(data.roots.bookmark_bar || data.roots.toolbar || {
         id: 'bmz_import_bar',
         title: 'Bookmarks Bar',
         type: 'folder',
         dateAdded: Date.now(),
         children: []
       }),
-      other: regenerateIds(data.roots.other || {
+      menu: regenerateIds(data.roots.menu || {
+        id: 'bmz_import_menu',
+        title: 'Bookmarks Menu',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      }),
+      other: regenerateIds(data.roots.other || data.roots.unfiled || {
         id: 'bmz_import_other',
         title: 'Other Bookmarks',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      }),
+      mobile: regenerateIds(data.roots.mobile || {
+        id: 'bmz_import_mobile',
+        title: 'Mobile Bookmarks',
         type: 'folder',
         dateAdded: Date.now(),
         children: []
@@ -79,9 +94,23 @@ function parseFirefoxFormat(data) {
         dateAdded: Date.now(),
         children: []
       },
+      menu: {
+        id: 'bmz_import_menu',
+        title: 'Bookmarks Menu',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      },
       other: {
         id: 'bmz_import_other',
         title: 'Other Bookmarks',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      },
+      mobile: {
+        id: 'bmz_import_mobile',
+        title: 'Mobile Bookmarks',
         type: 'folder',
         dateAdded: Date.now(),
         children: []
@@ -92,12 +121,23 @@ function parseFirefoxFormat(data) {
   // Process each top-level node
   data.forEach(node => {
     const normalizedNode = normalizeFirefoxNode(node);
-
-    // Check if it's a toolbar/bookmarks bar folder
     const title = (normalizedNode.title || '').toLowerCase();
-    if (title.includes('toolbar') || title.includes('bookmarks bar')) {
+
+    // Match Firefox/Chrome folder names to appropriate roots
+    if (title.includes('toolbar') || title.includes('bookmarks bar') || title.includes('favorites bar')) {
       bookmarkTree.roots.bookmark_bar.children = normalizedNode.children || [];
+      bookmarkTree.roots.bookmark_bar.title = normalizedNode.title; // Preserve original name
+    } else if (title.includes('bookmarks menu') || title === 'menu') {
+      bookmarkTree.roots.menu.children = normalizedNode.children || [];
+      bookmarkTree.roots.menu.title = normalizedNode.title; // Preserve original name
+    } else if (title.includes('other bookmarks') || title.includes('unfiled')) {
+      bookmarkTree.roots.other.children = normalizedNode.children || [];
+      bookmarkTree.roots.other.title = normalizedNode.title; // Preserve original name
+    } else if (title.includes('mobile')) {
+      bookmarkTree.roots.mobile.children = normalizedNode.children || [];
+      bookmarkTree.roots.mobile.title = normalizedNode.title; // Preserve original name
     } else {
+      // Unrecognized folder - add to "Other Bookmarks"
       bookmarkTree.roots.other.children.push(normalizedNode);
     }
   });
@@ -120,7 +160,21 @@ function parseSingleRootFormat(data) {
         dateAdded: Date.now(),
         children: []
       },
-      other: regenerateIds(data)
+      menu: {
+        id: 'bmz_import_menu',
+        title: 'Bookmarks Menu',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      },
+      other: regenerateIds(data),
+      mobile: {
+        id: 'bmz_import_mobile',
+        title: 'Mobile Bookmarks',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      }
     }
   };
 

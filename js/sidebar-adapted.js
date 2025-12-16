@@ -11,6 +11,8 @@ import bookmarkManager from './core/bookmarks.js';
 import blocklistService from './core/blocklist-service.js';
 import storageAdapter from './storage/storage-adapter.js';
 import scannerService from './core/scanner.js';
+import { parseHTMLBookmarks } from './import-export/html-parser.js';
+import { parseJSONBookmarks } from './import-export/json-parser.js';
 
 // ============================================================================
 // BROWSER API COMPATIBILITY LAYER
@@ -687,6 +689,7 @@ let settingsBtn = document.getElementById('settingsBtn');
 let settingsMenu = document.getElementById('settingsMenu');
 const openInTabBtn = document.getElementById('openInTabBtn');
 const exportBookmarksBtn = document.getElementById('exportBookmarksBtn');
+const importBookmarksBtn = document.getElementById('importBookmarksBtn');
 const closeExtensionBtn = document.getElementById('closeExtensionBtn');
 const clearCacheBtn = document.getElementById('clearCacheBtn');
 const autoClearCacheSelect = document.getElementById('autoClearCache');
@@ -5939,6 +5942,111 @@ async function exportBookmarks() {
   }
 }
 
+// IMPORT BOOKMARKS: Import bookmarks from HTML or JSON files
+async function importBookmarks() {
+  try {
+    const fileInput = document.getElementById('importFileInput');
+    if (!fileInput) {
+      alert('Import feature not available');
+      return;
+    }
+
+    // Trigger file selection
+    fileInput.click();
+
+    // Handle file selection
+    fileInput.onchange = async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        // Show loading indicator
+        const loadingMsg = alert('Importing bookmarks...\n\nThis may take a moment for large bookmark files.');
+
+        // Read file content
+        const content = await file.text();
+        let parsedTree;
+
+        // Parse based on file extension
+        if (file.name.endsWith('.html')) {
+          parsedTree = parseHTMLBookmarks(content);
+        } else if (file.name.endsWith('.json')) {
+          parsedTree = parseJSONBookmarks(content);
+        } else {
+          alert('Unsupported file format. Please select an HTML or JSON bookmark file.');
+          fileInput.value = ''; // Reset input
+          return;
+        }
+
+        // Confirm import with user
+        const confirmed = confirm(
+          'Import bookmarks from file?\n\n' +
+          `File: ${file.name}\n\n` +
+          'This will MERGE the imported bookmarks with your existing bookmarks.\n\n' +
+          'Current bookmarks will NOT be deleted.\n' +
+          'Imported bookmarks will be added to the corresponding folders.\n\n' +
+          'Continue?'
+        );
+
+        if (!confirmed) {
+          fileInput.value = ''; // Reset input
+          return;
+        }
+
+        // Merge imported bookmarks with existing tree
+        const currentTree = bookmarkManager.getTree();
+
+        // Merge each root folder
+        if (parsedTree.roots) {
+          for (const rootKey in parsedTree.roots) {
+            if (currentTree.roots[rootKey] && parsedTree.roots[rootKey].children) {
+              // Append imported children to existing root folder
+              currentTree.roots[rootKey].children.push(...parsedTree.roots[rootKey].children);
+            }
+          }
+        }
+
+        // Update checksum and timestamp
+        currentTree.lastModified = Date.now();
+        currentTree.checksum = ''; // Will be recalculated when saved
+
+        // Save merged tree
+        await syncManager.saveLocalBookmarks(currentTree);
+
+        // Reload bookmark manager
+        await bookmarkManager.reload();
+
+        // Re-render UI
+        renderBookmarks();
+
+        // Show success message
+        alert(
+          '✓ Bookmarks imported successfully!\n\n' +
+          `File: ${file.name}\n\n` +
+          'The imported bookmarks have been merged with your existing bookmarks.\n' +
+          'Remember to sync with your Gist/Snippet to save changes online.'
+        );
+
+        // Reset file input for next use
+        fileInput.value = '';
+
+      } catch (error) {
+        console.error('Error importing bookmarks:', error);
+        alert(
+          'Failed to import bookmarks.\n\n' +
+          `Error: ${error.message}\n\n` +
+          'Please check that the file is a valid bookmark export from Chrome or Firefox.'
+        );
+        fileInput.value = ''; // Reset input
+      }
+    };
+
+  } catch (error) {
+    console.error('Error in import function:', error);
+    alert('Failed to start import. Please try again.');
+  }
+}
+
 // DUPLICATE DETECTION: Find and manage duplicate bookmarks
 async function findDuplicates() {
   try {
@@ -6994,6 +7102,14 @@ function setupEventListeners() {
   if (exportBookmarksBtn) {
     exportBookmarksBtn.addEventListener('click', () => {
       exportBookmarks();
+      closeAllMenus();
+    });
+  }
+
+  // Import bookmarks
+  if (importBookmarksBtn) {
+    importBookmarksBtn.addEventListener('click', () => {
+      importBookmarks();
       closeAllMenus();
     });
   }

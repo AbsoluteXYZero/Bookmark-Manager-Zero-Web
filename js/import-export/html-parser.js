@@ -18,12 +18,19 @@ function parseHTMLBookmarks(htmlContent) {
     throw new Error('Invalid bookmark file: No bookmark list found');
   }
 
-  // Create root structure matching BMZ format
+  // Create root structure matching BMZ format with all 4 standard folders
   const bookmarkTree = {
     roots: {
       bookmark_bar: {
         id: 'bmz_import_bar',
         title: 'Bookmarks Bar',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
+      },
+      menu: {
+        id: 'bmz_import_menu',
+        title: 'Bookmarks Menu',
         type: 'folder',
         dateAdded: Date.now(),
         children: []
@@ -34,6 +41,13 @@ function parseHTMLBookmarks(htmlContent) {
         type: 'folder',
         dateAdded: Date.now(),
         children: []
+      },
+      mobile: {
+        id: 'bmz_import_mobile',
+        title: 'Mobile Bookmarks',
+        type: 'folder',
+        dateAdded: Date.now(),
+        children: []
       }
     }
   };
@@ -41,21 +55,46 @@ function parseHTMLBookmarks(htmlContent) {
   // Parse the DL structure recursively
   const parsedNodes = parseDL(mainDL);
 
-  // If there's a top-level folder structure, preserve it
-  // Otherwise, put everything in "Other Bookmarks"
-  if (parsedNodes.length > 0 && parsedNodes[0].type === 'folder') {
-    // Check if first folder might be "Bookmarks Bar" or similar
-    const firstFolder = parsedNodes[0];
-    const title = firstFolder.title.toLowerCase();
+  // Intelligently distribute parsed nodes to appropriate root folders
+  // Based on folder names and attributes from Chrome/Firefox exports
+  for (const node of parsedNodes) {
+    if (node.type === 'folder') {
+      const title = node.title.toLowerCase();
 
-    if (title.includes('toolbar') || title.includes('bookmarks bar') || title.includes('favorites bar')) {
-      bookmarkTree.roots.bookmark_bar.children = firstFolder.children;
-      bookmarkTree.roots.other.children = parsedNodes.slice(1);
+      // Check for PERSONAL_TOOLBAR_FOLDER attribute (highest priority)
+      // This is the Netscape standard way to mark the toolbar folder
+      if (node.isPersonalToolbar) {
+        bookmarkTree.roots.bookmark_bar.children = node.children || [];
+        bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
+      }
+      // Match Chrome's "Bookmarks bar" or Firefox's "Bookmarks Toolbar"
+      else if (title.includes('toolbar') || title.includes('bookmarks bar') || title.includes('favorites bar')) {
+        bookmarkTree.roots.bookmark_bar.children = node.children || [];
+        bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
+      }
+      // Match Firefox's "Bookmarks Menu"
+      else if (title.includes('bookmarks menu') || title === 'menu') {
+        bookmarkTree.roots.menu.children = node.children || [];
+        bookmarkTree.roots.menu.title = node.title; // Preserve original name
+      }
+      // Match Chrome's "Other bookmarks" or Firefox's "Other Bookmarks" / "Unfiled Bookmarks"
+      else if (title.includes('other bookmarks') || title.includes('unfiled')) {
+        bookmarkTree.roots.other.children = node.children || [];
+        bookmarkTree.roots.other.title = node.title; // Preserve original name
+      }
+      // Match "Mobile bookmarks" or "Mobile Bookmarks"
+      else if (title.includes('mobile')) {
+        bookmarkTree.roots.mobile.children = node.children || [];
+        bookmarkTree.roots.mobile.title = node.title; // Preserve original name
+      }
+      // Unrecognized folder - add to "Other Bookmarks"
+      else {
+        bookmarkTree.roots.other.children.push(node);
+      }
     } else {
-      bookmarkTree.roots.other.children = parsedNodes;
+      // Top-level bookmark (not in a folder) - add to "Other Bookmarks"
+      bookmarkTree.roots.other.children.push(node);
     }
-  } else {
-    bookmarkTree.roots.other.children = parsedNodes;
   }
 
   return bookmarkTree;
@@ -86,6 +125,11 @@ function parseDL(dlElement) {
         dateAdded: parseDateAdded(h3),
         children: []
       };
+
+      // Check for PERSONAL_TOOLBAR_FOLDER attribute (Netscape standard)
+      if (h3.getAttribute('PERSONAL_TOOLBAR_FOLDER') === 'true') {
+        folder.isPersonalToolbar = true;
+      }
 
       // Find the nested <DL> that contains this folder's children
       const nestedDL = dt.querySelector(':scope > DL');

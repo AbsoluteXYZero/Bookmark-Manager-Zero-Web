@@ -2463,6 +2463,14 @@
             </span>
             <span>Export Bookmarks (Backup)</span>
           </button>
+          <button class="action-btn" id="importBookmarksBtn">
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M14,2L20,8V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2H14M18,20V9H13V4H6V20H18M12,11L16,15H13.5V18H10.5V15H8L12,11Z"/>
+              </svg>
+            </span>
+            <span>Import Bookmarks (HTML/JSON)</span>
+          </button>
           <button class="action-btn" id="viewChangelogBtn">
             <span class="icon">
               <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
@@ -3455,6 +3463,9 @@
       <div id="gistSetupError" style="display: none; margin-top: 16px; padding: 12px; background: #fee; border-radius: 8px; color: #c00; font-size: 14px;"></div>
     </div>
   </div>
+
+  <!-- Hidden file input for importing bookmarks -->
+  <input type="file" id="importFileInput" accept=".html,.json" style="display: none;" />
 
   <script src="js/lib/qrcode-lib.js"></script>
   <script type="module" src="js/sidebar-adapted.js"></script>

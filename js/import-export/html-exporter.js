@@ -53,13 +53,25 @@ function generateBookmarkHTML(bookmarkTree) {
 <DL><p>
 `;
 
-  // Process all root folders
+  // Process all root folders in a specific order for better compatibility
+  // Export order: bookmark_bar, menu, other, mobile
   if (bookmarkTree && bookmarkTree.roots) {
-    const roots = Object.values(bookmarkTree.roots);
-    for (const root of roots) {
-      if (root.children && root.children.length > 0) {
-        // Add root folder as H3
-        html += `    <DT><H3>${escapeHtml(root.name || root.title)}</H3>\n`;
+    const rootOrder = ['bookmark_bar', 'menu', 'other', 'mobile'];
+
+    for (const rootKey of rootOrder) {
+      const root = bookmarkTree.roots[rootKey];
+      if (root && root.children && root.children.length > 0) {
+        const addDate = root.dateAdded ? Math.floor(root.dateAdded / 1000) : '';
+        const title = escapeHtml(root.name || root.title);
+
+        // Add PERSONAL_TOOLBAR_FOLDER attribute for bookmark bar/toolbar
+        // This is the Netscape standard way to mark the toolbar folder
+        if (rootKey === 'bookmark_bar') {
+          html += `    <DT><H3 PERSONAL_TOOLBAR_FOLDER="true"${addDate ? ` ADD_DATE="${addDate}"` : ''}>${title}</H3>\n`;
+        } else {
+          html += `    <DT><H3${addDate ? ` ADD_DATE="${addDate}"` : ''}>${title}</H3>\n`;
+        }
+
         html += `    <DL><p>\n`;
         html += bookmarksToHTML(root.children, 2);
         html += `    </DL><p>\n`;
