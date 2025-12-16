@@ -26,6 +26,13 @@ class App {
     this.isAuthenticated = false;
     this.isInitialized = false;
     this.currentUser = null;
+
+    // Expose provider switcher IMMEDIATELY for login screen onclick handlers
+    // This must be available before any async initialization happens
+    window.bmzSwitchProvider = (provider) => {
+      console.log('Provider switch requested:', provider);
+      this.switchToProvider(provider);
+    };
   }
 
   /**
@@ -178,80 +185,73 @@ class App {
       loginScreen.classList.remove('hidden');
     }
 
-    // Provider toggle functionality
-    const providerToggle = document.getElementById('providerToggle');
+    // Only set up handlers once - check if already initialized
+    if (this._loginHandlersInitialized) {
+      return;
+    }
+    this._loginHandlersInitialized = true;
+
+    // Provider switcher is already exposed in constructor
+    // Just set up login handlers
+    setTimeout(() => {
+      this.setupLoginHandlers();
+    }, 0);
+  }
+
+  /**
+   * Switch between GitHub and GitLab providers
+   */
+  switchToProvider(provider) {
     const githubLogo = document.getElementById('githubLogo');
     const gitlabLogo = document.getElementById('gitlabLogo');
-    const toggleSlider = document.getElementById('toggleSlider');
     const githubInstructions = document.getElementById('githubInstructions');
     const gitlabInstructions = document.getElementById('gitlabInstructions');
 
-    let currentProvider = 'github'; // Default to GitHub
+    if (!githubLogo || !gitlabLogo) {
+      return;
+    }
 
-    const switchToProvider = (provider) => {
-      currentProvider = provider;
-      if (provider === 'github') {
-        // Switch to GitHub
-        toggleSlider.style.left = '4px';
-        githubLogo.style.opacity = '1';
-        gitlabLogo.style.opacity = '0.4';
-        githubInstructions.style.display = 'block';
-        gitlabInstructions.style.display = 'none';
-      } else {
-        // Switch to GitLab
-        toggleSlider.style.left = '32px';
-        githubLogo.style.opacity = '0.4';
-        gitlabLogo.style.opacity = '1';
-        githubInstructions.style.display = 'none';
-        gitlabInstructions.style.display = 'block';
-      }
-    };
+    console.log('Switching to provider:', provider);
 
-    // Helper to add both click and touch handlers with debouncing
-    const addToggleHandler = (element, handler) => {
-      if (!element) return;
+    if (provider === 'github') {
+      // Highlight GitHub
+      githubLogo.style.background = 'var(--md-sys-color-primary)';
+      githubLogo.style.opacity = '1';
+      githubLogo.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+      githubLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-primary)';
 
-      let touchHandled = false;
-      let clickTimeout = null;
+      // Dim GitLab
+      gitlabLogo.style.background = 'var(--md-sys-color-surface-variant)';
+      gitlabLogo.style.opacity = '0.6';
+      gitlabLogo.style.boxShadow = 'none';
+      gitlabLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-surface)';
 
-      // Improve visual feedback
-      element.style.userSelect = 'none';
-      element.style.webkitUserSelect = 'none';
-      element.style.webkitTapHighlightColor = 'transparent';
-      element.style.cursor = 'pointer';
+      // Show GitHub instructions
+      githubInstructions.style.display = 'block';
+      gitlabInstructions.style.display = 'none';
+    } else {
+      // Highlight GitLab
+      gitlabLogo.style.background = 'var(--md-sys-color-primary)';
+      gitlabLogo.style.opacity = '1';
+      gitlabLogo.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+      gitlabLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-primary)';
 
-      // Touch handler for mobile
-      element.addEventListener('touchend', (e) => {
-        e.preventDefault(); // Prevent ghost click and scrolling
-        touchHandled = true;
-        handler();
+      // Dim GitHub
+      githubLogo.style.background = 'var(--md-sys-color-surface-variant)';
+      githubLogo.style.opacity = '0.6';
+      githubLogo.style.boxShadow = 'none';
+      githubLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-surface)';
 
-        // Reset flag after a delay to allow click events again
-        if (clickTimeout) clearTimeout(clickTimeout);
-        clickTimeout = setTimeout(() => {
-          touchHandled = false;
-        }, 500);
-      }, { passive: false });
+      // Show GitLab instructions
+      githubInstructions.style.display = 'none';
+      gitlabInstructions.style.display = 'block';
+    }
+  }
 
-      // Click handler for desktop
-      element.addEventListener('click', (e) => {
-        // If touch was just handled, ignore the click
-        if (touchHandled) {
-          e.preventDefault();
-          return;
-        }
-        handler();
-      });
-    };
-
-    // Toggle handlers with touch support
-    addToggleHandler(providerToggle, () => {
-      switchToProvider(currentProvider === 'github' ? 'gitlab' : 'github');
-    });
-
-    // Logo handlers with touch support
-    addToggleHandler(githubLogo, () => switchToProvider('github'));
-    addToggleHandler(gitlabLogo, () => switchToProvider('gitlab'));
+  /**
+   * Set up login button handlers
+   */
+  setupLoginHandlers() {
 
     // Set up GitHub login button handler
     const loginBtn = document.getElementById('loginBtn');
