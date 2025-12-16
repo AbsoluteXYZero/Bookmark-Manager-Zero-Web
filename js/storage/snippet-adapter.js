@@ -214,37 +214,23 @@ class SnippetAdapter {
 
       const snippet = await response.json();
 
-      // Debug: Log the snippet structure
-      console.log('[Snippet Debug] Full snippet object:', snippet);
-      console.log('[Snippet Debug] Files array:', snippet.files);
-      if (snippet.files && snippet.files.length > 0) {
-        console.log('[Snippet Debug] First file:', snippet.files[0]);
-        console.log('[Snippet Debug] File keys:', Object.keys(snippet.files[0]));
-      }
-
       // GitLab snippets have a 'files' array
       const bookmarkFile = snippet.files?.find(f => f.path === 'bookmarks.json' || f.file_name === 'bookmarks.json');
       if (!bookmarkFile) {
-        console.error('[Snippet Debug] Could not find bookmarks.json in files:', snippet.files);
         throw new Error('Snippet does not contain bookmarks.json');
       }
-      console.log('[Snippet Debug] Found bookmark file:', bookmarkFile);
 
       // GitLab API v4 doesn't include content directly, need to fetch it via API
       let content = bookmarkFile.content;
 
       // If content is not in the response, fetch it using the API with authentication
       if (!content) {
-        console.log('[Snippet Debug] Content not in response, fetching via API...');
         // Use the authenticated API endpoint instead of raw_url to avoid CORS
         const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
         if (!fileResponse.ok) {
-          console.warn('[Snippet Debug] API raw endpoint failed, trying alternate method...');
-          // Some GitLab versions might use different endpoints
           throw new Error(`Failed to fetch file content: ${fileResponse.status}`);
         }
         content = await fileResponse.text();
-        console.log('[Snippet Debug] Fetched content length:', content?.length);
       }
 
       // If content is empty or just whitespace, return empty bookmark structure

@@ -2972,7 +2972,23 @@
 
   <div class="content" id="bookmarkList">
     <div id="loginScreen" style="max-width: 600px; margin: 0 auto; padding: 40px 20px;">
-      <h2 style="font-size: 20px; margin-bottom: 32px; color: var(--md-sys-color-on-surface); text-align: center;">Bookmark Sync Login</h2>
+      <h2 style="font-size: 20px; margin-bottom: 16px; color: var(--md-sys-color-on-surface); text-align: center;">Bookmark Sync Setup</h2>
+
+      <!-- Security Notice -->
+      <div style="background: var(--md-sys-color-tertiary-container); border-left: 4px solid var(--md-sys-color-tertiary); padding: 16px; border-radius: 8px; margin-bottom: 24px;">
+        <div style="display: flex; align-items: start; gap: 12px;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" style="flex-shrink: 0; margin-top: 2px;">
+            <path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z" fill="var(--md-sys-color-tertiary)"/>
+            <path d="M10 17l-4-4 1.41-1.41L10 14.17l6.59-6.59L18 9l-8 8z" fill="var(--md-sys-color-on-tertiary-container)"/>
+          </svg>
+          <div style="flex: 1;">
+            <strong style="display: block; margin-bottom: 4px; color: var(--md-sys-color-on-tertiary-container);">This is NOT a login page</strong>
+            <p style="font-size: 13px; line-height: 1.5; color: var(--md-sys-color-on-tertiary-container); margin: 0;">
+              We NEVER ask for your GitHub/GitLab password. You create a token on GitHub.com or GitLab.com directly, then paste it here. All data stays on YOUR device and syncs directly to YOUR account.
+            </p>
+          </div>
+        </div>
+      </div>
 
       <!-- Provider Selection -->
       <div style="display: flex; align-items: center; justify-content: center; gap: 40px; margin-bottom: 32px;">
@@ -3006,14 +3022,15 @@
         </div>
 
         <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px;">
-          <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Step 2: Enter Your Token</h3>
+          <h3 style="font-size: 16px; margin-bottom: 8px; color: var(--md-sys-color-on-surface-variant);">Step 2: Paste Your Personal Access Token</h3>
+          <p style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 12px; opacity: 0.8;">(This is NOT your password - it's an API token from GitHub.com)</p>
           <input type="password"
                  id="tokenInput"
                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
                  style="width: 100%; padding: 12px; border: 2px solid var(--md-sys-color-outline); border-radius: 8px; font-size: 14px; font-family: 'Courier New', monospace; margin-bottom: 16px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface);">
           <button id="loginBtn"
                   style="width: 100%; padding: 12px 24px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer;">
-            Login with GitHub
+            Connect to GitHub
           </button>
           <div id="loginError" style="display: none; margin-top: 12px; padding: 12px; background: #fee; border-radius: 8px; color: #c00; font-size: 14px;"></div>
         </div>
@@ -3034,14 +3051,15 @@
         </div>
 
         <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px;">
-          <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Step 2: Enter Your Token</h3>
+          <h3 style="font-size: 16px; margin-bottom: 8px; color: var(--md-sys-color-on-surface-variant);">Step 2: Paste Your Personal Access Token</h3>
+          <p style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 12px; opacity: 0.8;">(This is NOT your password - it's an API token from GitLab.com)</p>
           <input type="password"
                  id="tokenInputGitlab"
                  placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
                  style="width: 100%; padding: 12px; border: 2px solid var(--md-sys-color-outline); border-radius: 8px; font-size: 14px; font-family: 'Courier New', monospace; margin-bottom: 16px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface);">
           <button id="loginBtnGitlab"
                   style="width: 100%; padding: 12px 24px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer;">
-            Login with GitLab
+            Connect to GitLab
           </button>
           <div id="loginErrorGitlab" style="display: none; margin-top: 12px; padding: 12px; background: #fee; border-radius: 8px; color: #c00; font-size: 14px;"></div>
         </div>
