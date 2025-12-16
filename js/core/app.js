@@ -207,23 +207,41 @@ class App {
       }
     };
 
-    // Helper to add both click and touch handlers
+    // Helper to add both click and touch handlers with debouncing
     const addToggleHandler = (element, handler) => {
       if (!element) return;
 
-      // Click handler for desktop
-      element.addEventListener('click', handler);
-
-      // Touch handler for mobile - use touchend to avoid conflicts with scrolling
-      element.addEventListener('touchend', (e) => {
-        e.preventDefault(); // Prevent ghost click
-        handler();
-      });
+      let touchHandled = false;
+      let clickTimeout = null;
 
       // Improve visual feedback
       element.style.userSelect = 'none';
       element.style.webkitUserSelect = 'none';
       element.style.webkitTapHighlightColor = 'transparent';
+      element.style.cursor = 'pointer';
+
+      // Touch handler for mobile
+      element.addEventListener('touchend', (e) => {
+        e.preventDefault(); // Prevent ghost click and scrolling
+        touchHandled = true;
+        handler();
+
+        // Reset flag after a delay to allow click events again
+        if (clickTimeout) clearTimeout(clickTimeout);
+        clickTimeout = setTimeout(() => {
+          touchHandled = false;
+        }, 500);
+      }, { passive: false });
+
+      // Click handler for desktop
+      element.addEventListener('click', (e) => {
+        // If touch was just handled, ignore the click
+        if (touchHandled) {
+          e.preventDefault();
+          return;
+        }
+        handler();
+      });
     };
 
     // Toggle handlers with touch support
