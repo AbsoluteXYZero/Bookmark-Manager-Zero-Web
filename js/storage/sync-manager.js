@@ -415,8 +415,9 @@ class SyncManager {
       const localVersion = await this.getLocalVersion();
       console.log('[SyncFromRemote] Local version:', localVersion);
 
-      if (remoteData.version > localVersion) {
-        console.log(`[SyncFromRemote] Remote version (${remoteData.version}) > Local version (${localVersion}), pulling changes...`);
+      // Sync if remote is newer OR if local is empty (version 0)
+      if (remoteData.version > localVersion || localVersion === 0) {
+        console.log(`[SyncFromRemote] Remote version (${remoteData.version}) >= Local version (${localVersion}), pulling changes...`);
 
         // Get current local data for diff
         const localData = await this.getLocalBookmarks();

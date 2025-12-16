@@ -442,9 +442,11 @@ class App {
     localStorage.removeItem('bmz_gist_id');
     localStorage.removeItem('bmz_snippet_id');
 
-    // Clear IndexedDB metadata (gist/snippet IDs)
+    // Clear IndexedDB metadata (gist/snippet IDs, version, bookmark tree)
     await dbManager.delete('metadata', 'gistId');
     await dbManager.delete('metadata', 'snippetId');
+    await dbManager.delete('metadata', 'localVersion');
+    await dbManager.delete('metadata', 'bookmarkTree');
 
     // Clear all bookmarks to force fresh sync
     await dbManager.clear('bookmarks');
@@ -470,9 +472,6 @@ class App {
         mainContent.classList.remove('hidden');
       }
 
-      // Clear all previous sync data to ensure fresh state
-      await this.clearAllSyncData();
-
       // Clean up any corrupted storage
       await this.cleanupLocalStorage();
 
@@ -491,6 +490,16 @@ class App {
         // Show gist setup modal (buttons should already work from initUI)
         await this.showGistSetup();
         return;
+      }
+
+      // Sync from remote to ensure we have latest data
+      console.log('[App] Syncing bookmarks from remote...');
+      try {
+        await syncManager.syncFromRemote();
+        await bookmarkManager.reload();
+        console.log('[App] Sync from remote complete');
+      } catch (error) {
+        console.warn('[App] Sync from remote failed, will use cached data:', error);
       }
 
       console.log('[App] Initializing sidebar...');
@@ -734,6 +743,23 @@ class App {
       // Continue with app initialization
       await syncManager.init();
 
+      // Clear local version to force sync from remote
+      console.log(`[Use${itemName}] Clearing local version to force sync...`);
+      await syncManager.setLocalVersion(0);
+
+      // Sync data from remote to local
+      console.log(`[Use${itemName}] Syncing from remote...`);
+      await syncManager.syncFromRemote();
+
+      // Reload bookmarks from local storage
+      console.log(`[Use${itemName}] Reloading bookmarks from local...`);
+      const tree = await bookmarkManager.reload();
+      console.log(`[Use${itemName}] Bookmarks loaded:`, {
+        hasRoots: !!tree?.roots,
+        rootKeys: tree?.roots ? Object.keys(tree.roots) : []
+      });
+
+      // Initialize sidebar to render the UI
       if (window.initSidebar) {
         await window.initSidebar();
       }
