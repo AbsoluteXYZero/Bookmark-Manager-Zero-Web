@@ -14,6 +14,7 @@ import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
 import uiManager from './ui.js';
 import scannerService from './scanner.js';
+import SyncTimer from './sync-timer.js';
 import { exportAsHTML } from '../import-export/html-exporter.js';
 import { exportAsJSON } from '../import-export/json-exporter.js';
 import { importFromHTML } from '../import-export/html-parser.js';
@@ -26,6 +27,7 @@ class App {
     this.isAuthenticated = false;
     this.isInitialized = false;
     this.currentUser = null;
+    this.syncTimer = null;
 
     // Expose provider switcher IMMEDIATELY for login screen onclick handlers
     // This must be available before any async initialization happens
@@ -482,6 +484,11 @@ class App {
       // Initialize sync manager
       await syncManager.init();
       console.log('Sync manager initialized');
+
+      // Initialize sync timer UI
+      this.syncTimer = new SyncTimer(syncManager);
+      this.syncTimer.restoreState();
+      console.log('Sync timer initialized');
 
       // Check if we have a gist set up
       const hasGist = await this.checkGistSetup();

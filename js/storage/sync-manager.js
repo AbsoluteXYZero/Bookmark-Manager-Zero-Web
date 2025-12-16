@@ -777,6 +777,26 @@ class SyncManager {
   }
 
   /**
+   * Subscribe to sync events (wrapper around window.addEventListener)
+   * @param {string} eventName - Event name without 'sync:' prefix
+   * @param {function} handler - Event handler function
+   */
+  on(eventName, handler) {
+    const wrappedHandler = (event) => handler(event.detail);
+    window.addEventListener(`sync:${eventName}`, wrappedHandler);
+    return wrappedHandler; // Return for potential cleanup
+  }
+
+  /**
+   * Unsubscribe from sync events (wrapper around window.removeEventListener)
+   * @param {string} eventName - Event name without 'sync:' prefix
+   * @param {function} handler - The wrapped handler returned from on()
+   */
+  off(eventName, handler) {
+    window.removeEventListener(`sync:${eventName}`, handler);
+  }
+
+  /**
    * Get sync status for UI
    */
   getSyncStatus() {
