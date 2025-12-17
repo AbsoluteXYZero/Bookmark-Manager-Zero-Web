@@ -1268,21 +1268,20 @@ class App {
         // Load the imported tree
         await bookmarkManager.replaceTree(bookmarkTree);
 
-        // Sync to Gist - explicitly call syncToRemote and log the result
-        console.log('[Import] Starting sync to remote after import...');
+        // Re-render UI first
+        const tree = bookmarkManager.getTree();
+        uiManager.renderBookmarks(tree);
+
+        // Force sync to remote after import (use forcePush=true to ensure sync happens)
+        console.log('[Import] Starting forced sync to remote after import...');
         try {
-          await syncManager.syncToRemote();
+          await syncManager.manualSync(true);
           console.log('[Import] Sync to remote completed successfully');
+          this.showToast('Bookmarks imported and synced successfully!', 'success');
         } catch (syncError) {
           console.error('[Import] Sync to remote failed:', syncError);
           this.showToast(`Import succeeded but sync failed: ${syncError.message}`, 'warning');
         }
-
-        // Re-render UI
-        const tree = bookmarkManager.getTree();
-        uiManager.renderBookmarks(tree);
-
-        this.showToast('Bookmarks imported successfully!', 'success');
       } catch (error) {
         console.error('Import failed:', error);
         this.showToast(`Import failed: ${error.message}`, 'error');

@@ -6010,8 +6010,9 @@ async function importBookmarks() {
         currentTree.lastModified = Date.now();
         currentTree.checksum = ''; // Will be recalculated when saved
 
-        // Save merged tree
+        // Save merged tree and mark for sync
         await syncManager.saveLocalBookmarks(currentTree);
+        await syncManager.markChanged(); // Trigger sync
 
         // Reload bookmark manager
         await bookmarkManager.reload();
@@ -6024,7 +6025,7 @@ async function importBookmarks() {
           '✓ Bookmarks imported successfully!\n\n' +
           `File: ${file.name}\n\n` +
           'The imported bookmarks have been merged with your existing bookmarks.\n' +
-          'Remember to sync with your Gist/Snippet to save changes online.'
+          'Syncing to remote storage...'
         );
 
         // Reset file input for next use

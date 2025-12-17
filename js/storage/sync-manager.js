@@ -20,6 +20,7 @@ class SyncManager {
     this.hasUnsyncedChanges = false;
     this.lastSyncTime = null;
     this.autoSyncEnabled = true;
+    this.minSyncInterval = 60000; // Minimum 60 seconds between syncs to avoid abuse detection
   }
 
   /**
@@ -131,13 +132,13 @@ class SyncManager {
       // Offline: allow edits but mark as pending
       await this.markPendingChanges(true);
       console.log('Offline mode: changes marked as pending');
-      return true;
+      return { offline: true };
     }
 
     const remoteId = this.getRemoteId();
     if (!remoteId) {
       console.warn('No remote ID - cannot acquire lock');
-      return false;
+      return { error: true };
     }
 
     try {
@@ -162,7 +163,9 @@ class SyncManager {
 
       await adapter.updateBookmarks(remoteId, remoteData, remoteData.version);
       console.log('Edit lock acquired for device:', this.deviceId);
-      return true;
+
+      // Return the remote data so caller doesn't need to fetch again
+      return { success: true, remoteData };
     } catch (error) {
       console.error('Failed to acquire lock:', error);
       throw error;
@@ -229,7 +232,7 @@ class SyncManager {
             }
           }, 5000);
         }
-      }, 1000); // Wait 1 second after last change
+      }, 30000); // Wait 30 seconds after last change to batch multiple edits and avoid abuse detection
     }
   }
 
@@ -255,6 +258,15 @@ class SyncManager {
       return;
     }
 
+    // Rate limiting: prevent syncing more frequently than minSyncInterval
+    const timeSinceLastSync = Date.now() - (this.lastSyncTime || 0);
+    if (this.lastSyncTime && timeSinceLastSync < this.minSyncInterval) {
+      const waitTime = Math.ceil((this.minSyncInterval - timeSinceLastSync) / 1000);
+      console.log(`[SyncToRemote] Rate limit: Last sync was ${Math.ceil(timeSinceLastSync / 1000)}s ago. Please wait ${waitTime}s before syncing again.`);
+      this.emitEvent('syncError', `Please wait ${waitTime} seconds before syncing again to avoid rate limits`);
+      return;
+    }
+
     console.log(`[SyncToRemote] All conditions passed. Provider: ${this.provider}, Remote ID: ${remoteId}`);
     this.isSyncing = true;
 
@@ -268,16 +280,20 @@ class SyncManager {
     try {
       console.log(`[SyncToRemote] Starting sync of local changes to ${this.provider}...`);
 
-      // Acquire lock
-      await this.acquireLock();
+      // Check rate limits before syncing
+      const adapter = this.getAdapter();
+      const rateLimitStatus = adapter.getRateLimitStatus();
+      if (rateLimitStatus.remaining !== null && rateLimitStatus.remaining < 10) {
+        const resetDate = new Date(rateLimitStatus.reset * 1000);
+        throw new Error(`API rate limit nearly exhausted (${rateLimitStatus.remaining} remaining). Sync will retry after ${resetDate.toLocaleTimeString()}`);
+      }
 
       // Load local bookmark tree
       const localBookmarks = await this.loadLocalBookmarks();
       const bookmarkCount = this.countBookmarksInTree(localBookmarks);
       console.log(`[SyncToRemote] Loaded local bookmarks: ${bookmarkCount} total bookmarks`);
 
-      // Get remote version
-      const adapter = this.getAdapter();
+      // Get remote version (single read, no locking to reduce API calls)
       const remoteData = await adapter.readBookmarks(remoteId);
       const localVersion = await this.getLocalVersion();
 
@@ -460,7 +476,14 @@ class SyncManager {
     try {
       console.log(`[SyncFromRemote] Starting sync for ${this.provider}:`, remoteId);
 
+      // Check rate limits before syncing
       const adapter = this.getAdapter();
+      const rateLimitStatus = adapter.getRateLimitStatus();
+      if (rateLimitStatus.remaining !== null && rateLimitStatus.remaining < 10) {
+        const resetDate = new Date(rateLimitStatus.reset * 1000);
+        throw new Error(`API rate limit nearly exhausted (${rateLimitStatus.remaining} remaining). Sync will retry after ${resetDate.toLocaleTimeString()}`);
+      }
+
       const remoteData = await adapter.readBookmarks(remoteId);
       const remoteBookmarkCount = this.countBookmarksInTree(remoteData);
       console.log('[SyncFromRemote] Remote data fetched:', {

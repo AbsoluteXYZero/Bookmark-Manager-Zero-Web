@@ -9,6 +9,13 @@ class GistAdapter {
   constructor() {
     this.apiBase = 'https://api.github.com';
     this.gistId = null;
+    this.rateLimit = {
+      remaining: null,
+      limit: null,
+      reset: null
+    };
+    this.userCache = null;
+    this.userCacheExpiry = 0;
   }
 
   /**
@@ -23,8 +30,91 @@ class GistAdapter {
     return {
       'Authorization': `token ${token}`,
       'Accept': 'application/vnd.github.v3+json',
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'User-Agent': 'Bookmark-Manager-Zero/1.0 (https://github.com/AbsoluteXYZero/bookmark-manager-zero)'
     };
+  }
+
+  /**
+   * Update rate limit info from response headers
+   */
+  updateRateLimitFromResponse(response) {
+    const remaining = response.headers.get('X-RateLimit-Remaining');
+    const limit = response.headers.get('X-RateLimit-Limit');
+    const reset = response.headers.get('X-RateLimit-Reset');
+
+    if (remaining !== null) this.rateLimit.remaining = parseInt(remaining, 10);
+    if (limit !== null) this.rateLimit.limit = parseInt(limit, 10);
+    if (reset !== null) this.rateLimit.reset = parseInt(reset, 10);
+
+    // Log warning if rate limit is getting low
+    if (this.rateLimit.remaining !== null && this.rateLimit.remaining < 100) {
+      const resetDate = new Date(this.rateLimit.reset * 1000);
+      console.warn(`[RateLimit] GitHub API rate limit low: ${this.rateLimit.remaining}/${this.rateLimit.limit} remaining (resets at ${resetDate.toLocaleTimeString()})`);
+    }
+  }
+
+  /**
+   * Check if we should proceed with API call based on rate limits
+   */
+  checkRateLimit() {
+    if (this.rateLimit.remaining !== null && this.rateLimit.remaining < 10) {
+      const resetDate = new Date(this.rateLimit.reset * 1000);
+      const now = Date.now();
+      const msUntilReset = (this.rateLimit.reset * 1000) - now;
+
+      if (msUntilReset > 0) {
+        throw new Error(`GitHub API rate limit nearly exhausted (${this.rateLimit.remaining} remaining). Resets at ${resetDate.toLocaleTimeString()}`);
+      }
+    }
+  }
+
+  /**
+   * Get rate limit status
+   */
+  getRateLimitStatus() {
+    return { ...this.rateLimit };
+  }
+
+  /**
+   * Exponential backoff with jitter for retry logic
+   * @param {Function} fn - The async function to retry
+   * @param {number} maxRetries - Maximum number of retries (default: 3)
+   * @param {number} baseDelay - Base delay in ms (default: 1000)
+   * @returns {Promise} - Result of the function
+   */
+  async retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+    let lastError;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+
+        // Don't retry on certain errors
+        if (error.message.includes('404') ||
+            error.message.includes('401') ||
+            error.message.includes('403')) {
+          throw error;
+        }
+
+        // If this was the last attempt, throw the error
+        if (attempt === maxRetries) {
+          throw error;
+        }
+
+        // Calculate delay with exponential backoff and jitter
+        const exponentialDelay = baseDelay * Math.pow(2, attempt);
+        const jitter = Math.random() * exponentialDelay * 0.3; // 30% jitter
+        const delay = exponentialDelay + jitter;
+
+        console.log(`[RetryBackoff] Attempt ${attempt + 1}/${maxRetries + 1} failed. Retrying in ${Math.round(delay)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError;
   }
 
 
@@ -33,26 +123,40 @@ class GistAdapter {
    */
   async getAllGists() {
     try {
+      // Check rate limits before making API calls
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
 
-      // First verify which user this token belongs to
-      console.log('[GetAllGists] Verifying authenticated user...');
-      const userResponse = await fetch(`${this.apiBase}/user`, { headers });
-      if (userResponse.ok) {
-        const userData = await userResponse.json();
-        console.log('[GetAllGists] Authenticated as:', userData.login, '(User ID:', userData.id + ')');
+      // Use cached user info if available (expires after 5 minutes)
+      const now = Date.now();
+      if (!this.userCache || now > this.userCacheExpiry) {
+        console.log('[GetAllGists] Fetching user info (cache expired or empty)...');
+        const userResponse = await fetch(`${this.apiBase}/user`, { headers });
+        this.updateRateLimitFromResponse(userResponse);
 
-        // Check token scopes from response headers
-        const scopes = userResponse.headers.get('X-OAuth-Scopes');
-        console.log('[GetAllGists] Token scopes:', scopes || 'Unable to retrieve scopes');
+        if (userResponse.ok) {
+          this.userCache = await userResponse.json();
+          this.userCacheExpiry = now + (5 * 60 * 1000); // Cache for 5 minutes
+          console.log('[GetAllGists] Authenticated as:', this.userCache.login, '(User ID:', this.userCache.id + ')');
+
+          // Check token scopes from response headers
+          const scopes = userResponse.headers.get('X-OAuth-Scopes');
+          console.log('[GetAllGists] Token scopes:', scopes || 'Unable to retrieve scopes');
+        } else {
+          console.error('[GetAllGists] Failed to verify user:', userResponse.status);
+        }
       } else {
-        console.error('[GetAllGists] Failed to verify user:', userResponse.status);
+        console.log('[GetAllGists] Using cached user info:', this.userCache.login);
       }
 
       // Fetch all gists (public and private) for the authenticated user
       // per_page=100 ensures we get up to 100 gists in one request
       console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists?per_page=100`);
       const response = await fetch(`${this.apiBase}/gists?per_page=100`, { headers });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
 
       console.log('[GetAllGists] Response status:', response.status, response.statusText);
 
@@ -73,29 +177,7 @@ class GistAdapter {
       }
 
       const gists = await response.json();
-      console.log('[GetAllGists] Retrieved', gists.length, 'gists');
-
-      // Debug: Log raw response for troubleshooting
-      if (gists.length === 0) {
-        console.log('[GetAllGists] Raw API response:', JSON.stringify(gists).substring(0, 500));
-
-        // Try alternative endpoint to check if gists exist
-        console.log('[GetAllGists] Trying alternative endpoint: /users/USERNAME/gists');
-        try {
-          const username = (await (await fetch(`${this.apiBase}/user`, { headers })).json()).login;
-          const altResponse = await fetch(`${this.apiBase}/users/${username}/gists?per_page=100`, { headers });
-          if (altResponse.ok) {
-            const altGists = await altResponse.json();
-            console.log('[GetAllGists] Alternative endpoint returned:', altGists.length, 'gists');
-            if (altGists.length > 0) {
-              console.warn('[GetAllGists] WARNING: Alternative endpoint found gists, but /gists endpoint did not!');
-              return altGists; // Use the alternative result
-            }
-          }
-        } catch (err) {
-          console.error('[GetAllGists] Alternative endpoint failed:', err);
-        }
-      }
+      console.log('[GetAllGists] Retrieved', gists.length, 'gists')
 
       // Log details about each gist
       if (gists.length > 0) {
@@ -234,6 +316,9 @@ class GistAdapter {
       const tree = bookmarkTree || defaultTree;
       tree.checksum = await this.calculateChecksum(tree);
 
+      // Check rate limits before creating
+      this.checkRateLimit();
+
       console.log('[CreateGist] Sending request to GitHub API...');
       const response = await fetch(`${this.apiBase}/gists`, {
         method: 'POST',
@@ -243,11 +328,14 @@ class GistAdapter {
           public: false,
           files: {
             'bookmarks.json': {
-              content: JSON.stringify(tree, null, 2)
+              content: JSON.stringify(tree)
             }
           }
         })
       });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
 
       console.log('[CreateGist] Response status:', response.status, response.statusText);
 
@@ -269,21 +357,6 @@ class GistAdapter {
       this.setGistId(gist.id);
 
       console.log('Created bookmark Gist:', this.gistId);
-
-      // Verify the gist appears in the list
-      console.log('[CreateGist] Verifying gist appears in list...');
-      try {
-        const allGists = await this.getAllGists();
-        const foundInList = allGists.some(g => g.id === gist.id);
-        if (foundInList) {
-          console.log('[CreateGist] ✓ Gist successfully appears in getAllGists()');
-        } else {
-          console.warn('[CreateGist] ⚠ WARNING: Newly created gist does NOT appear in getAllGists()!');
-          console.warn('[CreateGist] This suggests a GitHub API caching or permissions issue.');
-        }
-      } catch (err) {
-        console.error('[CreateGist] Failed to verify gist in list:', err);
-      }
 
       return gist.id;
     } catch (error) {
@@ -308,9 +381,15 @@ class GistAdapter {
     }
 
     try {
+      // Check rate limits before reading
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
       console.log('[ReadGist] Fetching from:', `${this.apiBase}/gists/${id}`);
       const response = await fetch(`${this.apiBase}/gists/${id}`, { headers });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
 
       console.log('[ReadGist] Response status:', response.status, response.statusText);
 
@@ -371,6 +450,9 @@ class GistAdapter {
         lastModified: Date.now()
       };
 
+      // Check rate limits before updating
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
       const response = await fetch(`${this.apiBase}/gists/${id}`, {
         method: 'PATCH',
@@ -378,11 +460,14 @@ class GistAdapter {
         body: JSON.stringify({
           files: {
             'bookmarks.json': {
-              content: JSON.stringify(dataWithMeta, null, 2)
+              content: JSON.stringify(dataWithMeta)
             }
           }
         })
       });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
 
       if (!response.ok) {
         throw new Error(`Failed to update Gist: ${response.status}`);

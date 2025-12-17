@@ -9,6 +9,13 @@ class SnippetAdapter {
   constructor() {
     this.apiBase = 'https://gitlab.com/api/v4';
     this.snippetId = null;
+    this.rateLimit = {
+      remaining: null,
+      limit: null,
+      reset: null
+    };
+    this.userCache = null;
+    this.userCacheExpiry = 0;
   }
 
   /**
@@ -22,8 +29,91 @@ class SnippetAdapter {
 
     return {
       'Authorization': `Bearer ${token}`,
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'User-Agent': 'Bookmark-Manager-Zero/1.0 (https://github.com/AbsoluteXYZero/bookmark-manager-zero)'
     };
+  }
+
+  /**
+   * Update rate limit info from response headers (GitLab uses RateLimit-* headers)
+   */
+  updateRateLimitFromResponse(response) {
+    const remaining = response.headers.get('RateLimit-Remaining');
+    const limit = response.headers.get('RateLimit-Limit');
+    const reset = response.headers.get('RateLimit-Reset');
+
+    if (remaining !== null) this.rateLimit.remaining = parseInt(remaining, 10);
+    if (limit !== null) this.rateLimit.limit = parseInt(limit, 10);
+    if (reset !== null) this.rateLimit.reset = parseInt(reset, 10);
+
+    // Log warning if rate limit is getting low
+    if (this.rateLimit.remaining !== null && this.rateLimit.remaining < 100) {
+      const resetDate = new Date(this.rateLimit.reset * 1000);
+      console.warn(`[RateLimit] GitLab API rate limit low: ${this.rateLimit.remaining}/${this.rateLimit.limit} remaining (resets at ${resetDate.toLocaleTimeString()})`);
+    }
+  }
+
+  /**
+   * Check if we should proceed with API call based on rate limits
+   */
+  checkRateLimit() {
+    if (this.rateLimit.remaining !== null && this.rateLimit.remaining < 10) {
+      const resetDate = new Date(this.rateLimit.reset * 1000);
+      const now = Date.now();
+      const msUntilReset = (this.rateLimit.reset * 1000) - now;
+
+      if (msUntilReset > 0) {
+        throw new Error(`GitLab API rate limit nearly exhausted (${this.rateLimit.remaining} remaining). Resets at ${resetDate.toLocaleTimeString()}`);
+      }
+    }
+  }
+
+  /**
+   * Get rate limit status
+   */
+  getRateLimitStatus() {
+    return { ...this.rateLimit };
+  }
+
+  /**
+   * Exponential backoff with jitter for retry logic
+   * @param {Function} fn - The async function to retry
+   * @param {number} maxRetries - Maximum number of retries (default: 3)
+   * @param {number} baseDelay - Base delay in ms (default: 1000)
+   * @returns {Promise} - Result of the function
+   */
+  async retryWithBackoff(fn, maxRetries = 3, baseDelay = 1000) {
+    let lastError;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        return await fn();
+      } catch (error) {
+        lastError = error;
+
+        // Don't retry on certain errors
+        if (error.message.includes('404') ||
+            error.message.includes('401') ||
+            error.message.includes('403')) {
+          throw error;
+        }
+
+        // If this was the last attempt, throw the error
+        if (attempt === maxRetries) {
+          throw error;
+        }
+
+        // Calculate delay with exponential backoff and jitter
+        const exponentialDelay = baseDelay * Math.pow(2, attempt);
+        const jitter = Math.random() * exponentialDelay * 0.3; // 30% jitter
+        const delay = exponentialDelay + jitter;
+
+        console.log(`[RetryBackoff] Attempt ${attempt + 1}/${maxRetries + 1} failed. Retrying in ${Math.round(delay)}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+
+    throw lastError;
   }
 
   /**
@@ -31,14 +121,73 @@ class SnippetAdapter {
    */
   async getAllSnippets() {
     try {
+      // Check rate limits before making API calls
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/snippets`, { headers });
+
+      // Use cached user info if available (expires after 5 minutes)
+      const now = Date.now();
+      if (!this.userCache || now > this.userCacheExpiry) {
+        console.log('[GetAllSnippets] Fetching user info (cache expired or empty)...');
+        const userResponse = await fetch(`${this.apiBase}/user`, { headers });
+        this.updateRateLimitFromResponse(userResponse);
+
+        if (userResponse.ok) {
+          this.userCache = await userResponse.json();
+          this.userCacheExpiry = now + (5 * 60 * 1000); // Cache for 5 minutes
+          console.log('[GetAllSnippets] Authenticated as:', this.userCache.username, '(User ID:', this.userCache.id + ')');
+        } else {
+          console.error('[GetAllSnippets] Failed to verify user:', userResponse.status);
+        }
+      } else {
+        console.log('[GetAllSnippets] Using cached user info:', this.userCache.username);
+      }
+
+      // Fetch all snippets for the authenticated user
+      // per_page=100 ensures we get up to 100 snippets in one request
+      console.log('[GetAllSnippets] Fetching from:', `${this.apiBase}/snippets?per_page=100`);
+      const response = await fetch(`${this.apiBase}/snippets?per_page=100`, { headers });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
+
+      console.log('[GetAllSnippets] Response status:', response.status, response.statusText);
+
+      // Check pagination headers
+      const linkHeader = response.headers.get('Link');
+      const totalCount = response.headers.get('X-Total-Count');
+      if (linkHeader) {
+        console.log('[GetAllSnippets] Pagination Link header:', linkHeader);
+      }
+      if (totalCount) {
+        console.log('[GetAllSnippets] Total count:', totalCount);
+      }
 
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[GetAllSnippets] Error response:', errorText);
         throw new Error(`Failed to fetch snippets: ${response.status}`);
       }
 
-      return await response.json();
+      const snippets = await response.json();
+      console.log('[GetAllSnippets] Retrieved', snippets.length, 'snippets')
+
+      // Log details about each snippet
+      if (snippets.length > 0) {
+        console.log('[GetAllSnippets] Snippet details:');
+        snippets.forEach((s, idx) => {
+          const fileName = s.file_name || 'unknown';
+          const visibility = s.visibility || 'unknown';
+          console.log(`  ${idx + 1}. ${s.id} - ${visibility} - File: ${fileName} - Title: "${s.title || 'none'}"`);
+        });
+      } else {
+        console.warn('[GetAllSnippets] No snippets found. Possible reasons:');
+        console.warn('  1. This GitLab account has no Snippets');
+        console.warn('  2. Token permissions issue (needs "api" scope)');
+      }
+
+      return snippets;
     } catch (error) {
       console.error('Failed to fetch snippets:', error);
       throw error;
@@ -161,6 +310,10 @@ class SnippetAdapter {
       const tree = bookmarkTree || defaultTree;
       tree.checksum = await this.calculateChecksum(tree);
 
+      // Check rate limits before creating
+      this.checkRateLimit();
+
+      console.log('[CreateSnippet] Sending request to GitLab API...');
       const response = await fetch(`${this.apiBase}/snippets`, {
         method: 'POST',
         headers,
@@ -170,21 +323,36 @@ class SnippetAdapter {
           files: [
             {
               file_path: 'bookmarks.json',
-              content: JSON.stringify(tree, null, 2)
+              content: JSON.stringify(tree)
             }
           ]
         })
       });
 
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
+
+      console.log('[CreateSnippet] Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Failed to create Snippet: ${response.status} - ${errorText}`);
+        const errorBody = await response.text();
+        console.error('[CreateSnippet] Error response:', errorBody);
+        throw new Error(`Failed to create Snippet: ${response.status} - ${errorBody}`);
       }
 
       const snippet = await response.json();
+      console.log('[CreateSnippet] Snippet created successfully:', {
+        id: snippet.id,
+        url: snippet.web_url,
+        title: snippet.title
+      });
+
       this.snippetId = snippet.id;
+      // Save to localStorage
+      this.setSnippetId(snippet.id);
 
       console.log('Created bookmark Snippet:', this.snippetId);
+
       return snippet.id;
     } catch (error) {
       console.error('Failed to create bookmark Snippet:', error);
@@ -197,22 +365,52 @@ class SnippetAdapter {
    */
   async readBookmarks(snippetId = null) {
     const id = snippetId || this.snippetId;
+    console.log('[ReadSnippet] Attempting to read Snippet:', {
+      providedId: snippetId,
+      storedId: this.snippetId,
+      usingId: id
+    });
+
     if (!id) {
       throw new Error('No Snippet ID provided');
     }
 
     try {
+      // Check rate limits before reading
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
+      console.log('[ReadSnippet] Fetching from:', `${this.apiBase}/snippets/${id}`);
       const response = await fetch(`${this.apiBase}/snippets/${id}`, { headers });
+
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
+
+      console.log('[ReadSnippet] Response status:', response.status, response.statusText);
 
       if (!response.ok) {
         if (response.status === 404) {
+          const errorText = await response.text();
+          console.error('[ReadSnippet] 404 Error - Snippet not found. Response:', errorText);
+
+          // Clear the invalid Snippet ID immediately
+          console.warn('[ReadSnippet] Clearing invalid Snippet ID:', id);
+          this.snippetId = null;
+          localStorage.removeItem('bmz_snippet_id');
+
           throw new Error('Bookmark Snippet not found');
         }
+        const errorText = await response.text();
+        console.error('[ReadSnippet] Error response:', errorText);
         throw new Error(`Failed to read Snippet: ${response.status}`);
       }
 
       const snippet = await response.json();
+      console.log('[ReadSnippet] Snippet fetched successfully:', {
+        id: snippet.id,
+        title: snippet.title,
+        filesCount: snippet.files?.length || 0
+      });
 
       // GitLab snippets have a 'files' array
       const bookmarkFile = snippet.files?.find(f => f.path === 'bookmarks.json' || f.file_name === 'bookmarks.json');
@@ -223,25 +421,36 @@ class SnippetAdapter {
       // GitLab API v4 doesn't include content directly, need to fetch it via API
       let content = bookmarkFile.content;
 
-      // If content is not in the response, fetch it using the API with authentication
+      // If content is not in the response, fetch the snippet with content included
       if (!content) {
-        // Use the authenticated API endpoint instead of raw_url to avoid CORS
-        const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
-        if (!fileResponse.ok) {
-          throw new Error(`Failed to fetch file content: ${fileResponse.status}`);
+        console.log('[ReadSnippet] Content not in response, refetching with content...');
+        // Fetch snippet again but request with content by using the raw endpoint for the specific file
+        // GitLab API: GET /snippets/:id/files/:ref/:file_path/raw
+        // For snippets without refs, we can try the snippet content endpoint
+        const contentResponse = await fetch(`${this.apiBase}/snippets/${id}?include_content=true`, { headers });
+        console.log('[ReadSnippet] Content fetch response status:', contentResponse.status);
+        if (!contentResponse.ok) {
+          throw new Error(`Failed to fetch snippet content: ${contentResponse.status}`);
         }
-        content = await fileResponse.text();
+        const snippetWithContent = await contentResponse.json();
+        const fileWithContent = snippetWithContent.files?.find(f => f.path === 'bookmarks.json' || f.file_name === 'bookmarks.json');
+        content = fileWithContent?.content;
+
+        if (!content) {
+          console.error('[ReadSnippet] Could not find content in snippet. Files:', snippetWithContent.files);
+          throw new Error('Snippet file content not available');
+        }
       }
 
       // If content is empty or just whitespace, return empty bookmark structure
       if (!content || content.trim() === '') {
-        console.log('Snippet file is empty, returning empty bookmark structure');
+        console.log('[ReadSnippet] Snippet file is empty, returning empty bookmark structure');
         return this.getEmptyBookmarkTree();
       }
 
       const bookmarkData = JSON.parse(content);
 
-      console.log('Read bookmarks from Snippet:', id);
+      console.log('[ReadSnippet] Bookmarks parsed successfully. Version:', bookmarkData.version);
       return bookmarkData;
     } catch (error) {
       console.error('Failed to read bookmarks from Snippet:', error);
@@ -254,6 +463,12 @@ class SnippetAdapter {
    */
   async updateBookmarks(snippetId = null, bookmarkTree, version = null) {
     const id = snippetId || this.snippetId;
+    console.log('[UpdateSnippet] Attempting to update Snippet:', {
+      providedId: snippetId,
+      storedId: this.snippetId,
+      usingId: id
+    });
+
     if (!id) {
       throw new Error('No Snippet ID provided');
     }
@@ -267,6 +482,11 @@ class SnippetAdapter {
         lastModified: Date.now()
       };
 
+      console.log('[UpdateSnippet] Updating with version:', dataWithMeta.version);
+
+      // Check rate limits before updating
+      this.checkRateLimit();
+
       const headers = await this.getHeaders();
       const response = await fetch(`${this.apiBase}/snippets/${id}`, {
         method: 'PUT',
@@ -276,19 +496,25 @@ class SnippetAdapter {
             {
               action: 'update',
               file_path: 'bookmarks.json',
-              content: JSON.stringify(dataWithMeta, null, 2)
+              content: JSON.stringify(dataWithMeta)
             }
           ]
         })
       });
 
+      // Update rate limit tracking
+      this.updateRateLimitFromResponse(response);
+
+      console.log('[UpdateSnippet] Response status:', response.status, response.statusText);
+
       if (!response.ok) {
         const errorText = await response.text();
+        console.error('[UpdateSnippet] Error response:', errorText);
         throw new Error(`Failed to update Snippet: ${response.status} - ${errorText}`);
       }
 
       const snippet = await response.json();
-      console.log('Updated bookmarks in Snippet:', id);
+      console.log('[UpdateSnippet] Updated bookmarks in Snippet:', id, '- New version:', dataWithMeta.version);
       return snippet;
     } catch (error) {
       console.error('Failed to update bookmarks in Snippet:', error);
