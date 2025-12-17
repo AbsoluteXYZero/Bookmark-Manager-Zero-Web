@@ -7,7 +7,6 @@
 import dbManager from '../storage/indexeddb.js';
 import authManager from '../auth/auth-manager.js';
 import oauthPAT from '../auth/oauth-pat.js';
-import gistAdapter from '../storage/gist-adapter.js';
 import snippetAdapter from '../storage/snippet-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
@@ -785,28 +784,20 @@ class App {
   /**
    * Use existing remote storage (gist or snippet)
    */
-  async useRemoteStorage(itemId, provider) {
+  async useRemoteStorage(itemId, provider = 'gitlab') {
     try {
-      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
-
-      // Verify the remote storage exists before saving the ID
-      console.log(`[UseRemoteStorage] Verifying ${itemName} ${itemId} exists...`);
-      const adapter = provider === 'gitlab' ? snippetAdapter : gistAdapter;
+      // Verify the snippet exists before saving the ID
+      console.log(`[UseRemoteStorage] Verifying snippet ${itemId} exists...`);
       try {
-        await adapter.readBookmarks(itemId);
-        console.log(`[UseRemoteStorage] ${itemName} verified successfully`);
+        await snippetAdapter.readBookmarks(itemId);
+        console.log(`[UseRemoteStorage] Snippet verified successfully`);
       } catch (error) {
-        console.error(`[UseRemoteStorage] Failed to verify ${itemName}:`, error);
-        throw new Error(`Cannot use this ${itemName}: ${error.message}`);
+        console.error(`[UseRemoteStorage] Failed to verify snippet:`, error);
+        throw new Error(`Cannot use this snippet: ${error.message}`);
       }
 
-      if (provider === 'gitlab') {
-        snippetAdapter.setSnippetId(itemId);
-        await syncManager.setSnippetId(itemId);
-      } else {
-        gistAdapter.setGistId(itemId);
-        await syncManager.setGistId(itemId);
-      }
+      snippetAdapter.setSnippetId(itemId);
+      await syncManager.setSnippetId(itemId);
 
       // Hide modal
       const modal = document.getElementById('gistSetupModal');
@@ -817,17 +808,17 @@ class App {
       await syncManager.init();
 
       // Clear local version to force sync from remote
-      console.log(`[Use${itemName}] Clearing local version to force sync...`);
+      console.log(`[Usesnippet] Clearing local version to force sync...`);
       await syncManager.setLocalVersion(0);
 
       // Sync data from remote to local
-      console.log(`[Use${itemName}] Syncing from remote...`);
+      console.log(`[Usesnippet] Syncing from remote...`);
       await syncManager.syncFromRemote();
 
       // Reload bookmarks from local storage
-      console.log(`[Use${itemName}] Reloading bookmarks from local...`);
+      console.log(`[Usesnippet] Reloading bookmarks from local...`);
       const tree = await bookmarkManager.reload();
-      console.log(`[Use${itemName}] Bookmarks loaded:`, {
+      console.log(`[Usesnippet] Bookmarks loaded:`, {
         hasRoots: !!tree?.roots,
         rootKeys: tree?.roots ? Object.keys(tree.roots) : []
       });
@@ -837,63 +828,50 @@ class App {
         await window.initSidebar();
       }
 
-      console.log(`Using ${itemName}:`, itemId);
+      console.log(`Using snippet:`, itemId);
     } catch (error) {
-      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
-      console.error(`Failed to use ${itemName}:`, error);
-      this.showGistSetupError(`Failed to use ${itemName}: ` + error.message);
+      console.error(`Failed to use snippet:`, error);
+      this.showGistSetupError(`Failed to use snippet: ` + error.message);
     }
   }
 
   /**
-   * Create new remote storage (gist or snippet)
+   * Create new remote storage (snippet)
    */
-  async createNewRemoteStorage(provider) {
+  async createNewRemoteStorage(provider = 'gitlab') {
     try {
-      const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
+      console.log(`[Createsnippet] Step 1: Creating snippet via adapter...`);
 
-      console.log(`[Create${itemName}] Step 1: Creating ${itemName} via adapter...`);
+      const itemId = await snippetAdapter.createBookmarkSnippet();
+      console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
 
-      let itemId;
-      if (provider === 'gitlab') {
-        itemId = await snippetAdapter.createBookmarkSnippet();
-        console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
+      console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
+      snippetAdapter.setSnippetId(itemId);
 
-        console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
-        snippetAdapter.setSnippetId(itemId);
-
-        // Save snippet ID to sync manager
-        console.log(`[CreateSnippet] Step 4: Saving snippet ID to sync manager...`);
-        await syncManager.setSnippetId(itemId);
-      } else {
-        itemId = await gistAdapter.createBookmarkGist();
-        console.log(`[CreateGist] Step 1 Complete: Gist created with ID:`, itemId);
-
-        // Save gist ID to sync manager (gistAdapter.setGistId is already called in createBookmarkGist)
-        console.log(`[CreateGist] Step 2: Saving gist ID to sync manager...`);
-        await syncManager.setGistId(itemId);
-      }
+      // Save snippet ID to sync manager
+      console.log(`[CreateSnippet] Step 4: Saving snippet ID to sync manager...`);
+      await syncManager.setSnippetId(itemId);
 
       // Hide modal
-      console.log(`[Create${itemName}] Step 3: Hiding modal...`);
+      console.log(`[Createsnippet] Step 3: Hiding modal...`);
       const modal = document.getElementById('gistSetupModal');
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
       // Set initial version to 1 (matching what we created)
-      console.log(`[Create${itemName}] Step 4.5: Setting initial version...`);
+      console.log(`[Createsnippet] Step 4.5: Setting initial version...`);
       await syncManager.setLocalVersion(1);
 
       // Initialize local bookmarks with empty structure
-      console.log(`[Create${itemName}] Step 4.7: Initializing local bookmarks...`);
+      console.log(`[Createsnippet] Step 4.7: Initializing local bookmarks...`);
       const emptyTree = syncManager.getEmptyBookmarkTree();
       await syncManager.saveLocalBookmarks(emptyTree);
-      console.log(`[Create${itemName}] Step 4.8: Local bookmarks initialized`);
+      console.log(`[Createsnippet] Step 4.8: Local bookmarks initialized`);
 
       // Reload bookmarks from local storage
-      console.log('[CreateGist] Step 6: Reloading bookmarks from local...');
+      console.log('[Createsnippet] Step 6: Reloading bookmarks from local...');
       const tree = await bookmarkManager.reload();
-      console.log('[CreateGist] Step 6 Complete: Tree loaded:', {
+      console.log('[Createsnippet] Step 6 Complete: Tree loaded:', {
         hasRoots: !!tree?.roots,
         rootKeys: tree?.roots ? Object.keys(tree.roots) : [],
         bookmark_bar: tree?.roots?.bookmark_bar,
@@ -903,18 +881,18 @@ class App {
       });
 
       // Initialize sidebar to render the UI
-      console.log('[CreateGist] Step 7: Initializing sidebar...');
+      console.log('[Createsnippet] Step 7: Initializing sidebar...');
       if (window.initSidebar) {
         await window.initSidebar();
-        console.log('[CreateGist] Step 7 Complete: Sidebar initialized');
+        console.log('[Createsnippet] Step 7 Complete: Sidebar initialized');
       } else {
-        console.warn('[CreateGist] window.initSidebar not found!');
+        console.warn('[Createsnippet] window.initSidebar not found!');
       }
 
-      console.log(`[Create${itemName}] All steps complete. ${itemName} ID:`, itemId);
+      console.log(`[Createsnippet] All steps complete. snippet ID:`, itemId);
     } catch (error) {
-      console.error('[CreateGist] Failed:', error);
-      this.showGistSetupError('Failed to create gist: ' + error.message);
+      console.error('[Createsnippet] Failed:', error);
+      this.showGistSetupError('Failed to create snippet: ' + error.message);
     }
   }
 
