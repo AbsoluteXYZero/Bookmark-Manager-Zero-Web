@@ -1,11 +1,9 @@
 // Bookmark Manager Zero - Web Adapted Script
-// Adapted from sidebar.js to work with Gist storage
+// Adapted from sidebar.js to work with GitLab Snippet storage
 
 // Import our web modules
 import dbManager from './storage/indexeddb.js';
 import authManager from './auth/auth-manager.js';
-import oauthDevice from './auth/oauth-device.js';
-import gistAdapter from './storage/gist-adapter.js';
 import syncManager from './storage/sync-manager.js';
 import bookmarkManager from './core/bookmarks.js';
 import blocklistService from './core/blocklist-service.js';
