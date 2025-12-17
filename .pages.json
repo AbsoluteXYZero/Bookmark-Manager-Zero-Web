@@ -1,0 +1,6 @@
+{
+  "build": {
+    "command": "chmod +x build.sh && ./build.sh",
+    "output_directory": "_site"
+  }
+}
