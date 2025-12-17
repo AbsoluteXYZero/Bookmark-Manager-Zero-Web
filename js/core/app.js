@@ -26,12 +26,6 @@ class App {
     this.isInitialized = false;
     this.currentUser = null;
 
-    // Expose provider switcher IMMEDIATELY for login screen onclick handlers
-    // This must be available before any async initialization happens
-    window.bmzSwitchProvider = (provider) => {
-      console.log('Provider switch requested:', provider);
-      this.switchToProvider(provider);
-    };
   }
 
   /**
@@ -112,36 +106,25 @@ class App {
       mainContent.classList.add('hidden');
     }
 
-    // Check for saved provider preference
-    const provider = await authManager.getPreference('syncProvider', 'github');
+    // Only GitLab is supported
+    const provider = 'gitlab';
     const token = await authManager.getToken(provider);
 
     if (token) {
       console.log('[Auth] Found saved token, verifying...');
       // Verify token is valid by fetching user info
       try {
-        let response;
-        if (provider === 'gitlab') {
-          response = await fetch('https://gitlab.com/api/v4/user', {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-        } else {
-          // GitHub - use 'token' not 'Bearer'
-          response = await fetch('https://api.github.com/user', {
-            headers: {
-              'Authorization': `token ${token}`,
-              'Accept': 'application/vnd.github.v3+json'
-            }
-          });
-        }
+        const response = await fetch('https://gitlab.com/api/v4/user', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
 
         if (response.ok) {
           this.currentUser = await response.json();
           this.isAuthenticated = true;
 
-          console.log('[Auth] Token valid, user:', this.currentUser.login || this.currentUser.username);
+          console.log('[Auth] Token valid, user:', this.currentUser.username);
 
           // Set the provider in oauthPAT so it's available
           oauthPAT.provider = provider;
@@ -188,113 +171,11 @@ class App {
     }, 0);
   }
 
-  /**
-   * Switch between GitHub and GitLab providers
-   */
-  switchToProvider(provider) {
-    const githubLogo = document.getElementById('githubLogo');
-    const gitlabLogo = document.getElementById('gitlabLogo');
-    const githubInstructions = document.getElementById('githubInstructions');
-    const gitlabInstructions = document.getElementById('gitlabInstructions');
-
-    if (!githubLogo || !gitlabLogo) {
-      return;
-    }
-
-    console.log('Switching to provider:', provider);
-
-    if (provider === 'github') {
-      // Highlight GitHub
-      githubLogo.style.background = 'var(--md-sys-color-primary)';
-      githubLogo.style.opacity = '1';
-      githubLogo.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-      githubLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-primary)';
-
-      // Dim GitLab
-      gitlabLogo.style.background = 'var(--md-sys-color-surface-variant)';
-      gitlabLogo.style.opacity = '0.6';
-      gitlabLogo.style.boxShadow = 'none';
-      gitlabLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-surface)';
-
-      // Show GitHub instructions
-      githubInstructions.style.display = 'block';
-      gitlabInstructions.style.display = 'none';
-    } else {
-      // Highlight GitLab
-      gitlabLogo.style.background = 'var(--md-sys-color-primary)';
-      gitlabLogo.style.opacity = '1';
-      gitlabLogo.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-      gitlabLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-primary)';
-
-      // Dim GitHub
-      githubLogo.style.background = 'var(--md-sys-color-surface-variant)';
-      githubLogo.style.opacity = '0.6';
-      githubLogo.style.boxShadow = 'none';
-      githubLogo.querySelector('svg').style.color = 'var(--md-sys-color-on-surface)';
-
-      // Show GitLab instructions
-      githubInstructions.style.display = 'none';
-      gitlabInstructions.style.display = 'block';
-    }
-  }
 
   /**
    * Set up login button handlers
    */
   setupLoginHandlers() {
-
-    // Set up GitHub login button handler
-    const loginBtn = document.getElementById('loginBtn');
-    const tokenInput = document.getElementById('tokenInput');
-    const loginError = document.getElementById('loginError');
-
-    if (loginBtn && tokenInput) {
-      // Handle Enter key in token input
-      tokenInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-          loginBtn.click();
-        }
-      });
-
-      loginBtn.onclick = async () => {
-        const token = tokenInput.value.trim();
-
-        if (!token) {
-          this.showLoginError('Please enter your Personal Access Token');
-          return;
-        }
-
-        // Show loading state
-        loginBtn.disabled = true;
-        loginBtn.textContent = 'Authenticating...';
-        if (loginError) loginError.style.display = 'none';
-
-        try {
-          // Authenticate with token
-          const authResult = await oauthPAT.authenticate(token);
-
-          console.log(`Authenticated with ${authResult.provider}:`, authResult.user.login || authResult.user.username);
-
-          // Store token securely with provider information
-          await authManager.storeToken(authResult.access_token, null, authResult.provider);
-
-          // Store provider preference
-          await authManager.storePreference('syncProvider', authResult.provider);
-
-          // Show success and load main app
-          await this.showMainApp();
-
-        } catch (error) {
-          console.error('Login failed:', error);
-          this.showLoginError(error.message || 'Authentication failed. Please check your token and try again.');
-
-          // Reset button
-          loginBtn.disabled = false;
-          loginBtn.textContent = 'Login with GitHub';
-        }
-      };
-    }
-
     // Set up GitLab login button handler
     const loginBtnGitlab = document.getElementById('loginBtnGitlab');
     const tokenInputGitlab = document.getElementById('tokenInputGitlab');
@@ -325,16 +206,16 @@ class App {
         if (loginErrorGitlab) loginErrorGitlab.style.display = 'none';
 
         try {
-          // Authenticate with token
+          // Authenticate with token (GitLab only)
           const authResult = await oauthPAT.authenticate(token);
 
-          console.log(`Authenticated with ${authResult.provider}:`, authResult.user.login || authResult.user.username);
+          console.log(`Authenticated with GitLab:`, authResult.user.username);
 
-          // Store token securely with provider information
-          await authManager.storeToken(authResult.access_token, null, authResult.provider);
+          // Store token securely
+          await authManager.storeToken(authResult.access_token, null, 'gitlab');
 
           // Store provider preference
-          await authManager.storePreference('syncProvider', authResult.provider);
+          await authManager.storePreference('syncProvider', 'gitlab');
 
           // Show success and load main app
           await this.showMainApp();
@@ -355,26 +236,14 @@ class App {
   }
 
   /**
-   * Show login error message
-   */
-  showLoginError(message) {
-    const loginError = document.getElementById('loginError');
-    if (loginError) {
-      loginError.textContent = message;
-      loginError.style.display = 'block';
-    }
-  }
-
-  /**
    * Logout user and return to login screen
-   * Clears all local data but does NOT delete remote gists/snippets
+   * Clears all local data but does NOT delete remote snippets
    */
   async logout() {
     try {
       console.log('Logging out...');
 
-      // Clear authentication for both providers
-      await authManager.clearToken('github');
+      // Clear authentication
       await authManager.clearToken('gitlab');
       oauthPAT.clear();
 
@@ -385,16 +254,11 @@ class App {
       // Clear provider preference
       await authManager.storePreference('syncProvider', null);
 
-      // Clear gist ID from localStorage and adapter
-      localStorage.removeItem('bmz_gist_id');
-      gistAdapter.gistId = null;
-
       // Clear snippet ID from localStorage and adapter
       localStorage.removeItem('bmz_snippet_id');
       snippetAdapter.snippetId = null;
 
       // Clear sync manager state
-      syncManager.gistId = null;
       syncManager.snippetId = null;
       syncManager.provider = null;
 
@@ -422,27 +286,23 @@ class App {
   }
 
   /**
-   * Clear all sync-related data (gist/snippet IDs and bookmarks)
+   * Clear all sync-related data (snippet IDs and bookmarks)
    * Call this when logging in to ensure fresh state
    */
   async clearAllSyncData() {
     console.log('[App] Clearing all sync data for fresh login...');
 
     // Clear sync manager state
-    syncManager.gistId = null;
     syncManager.snippetId = null;
     syncManager.provider = null;
 
     // Clear adapter state
-    gistAdapter.gistId = null;
     snippetAdapter.snippetId = null;
 
     // Clear localStorage
-    localStorage.removeItem('bmz_gist_id');
     localStorage.removeItem('bmz_snippet_id');
 
-    // Clear IndexedDB metadata (gist/snippet IDs, version, bookmark tree)
-    await dbManager.delete('metadata', 'gistId');
+    // Clear IndexedDB metadata (snippet IDs, version, bookmark tree)
     await dbManager.delete('metadata', 'snippetId');
     await dbManager.delete('metadata', 'localVersion');
     await dbManager.delete('metadata', 'bookmarkTree');
@@ -529,45 +389,24 @@ class App {
   }
 
   /**
-   * Check if we have a gist/snippet set up
-   * Checks for saved gist/snippet ID based on current provider
+   * Check if we have a snippet set up
+   * Checks for saved snippet ID
    */
   async checkGistSetup() {
-    const provider = await authManager.getPreference('syncProvider', 'github');
-
-    if (provider === 'gitlab') {
-      // Check for GitLab snippet
-      const savedSnippetId = snippetAdapter.loadSavedSnippetId();
-      if (savedSnippetId) {
-        console.log('Found saved snippet ID:', savedSnippetId);
-        // Verify we can read from it
-        try {
-          await snippetAdapter.readBookmarks(savedSnippetId);
-          snippetAdapter.snippetId = savedSnippetId;
-          syncManager.setProvider('gitlab');
-          syncManager.snippetId = savedSnippetId;
-          return true;
-        } catch (error) {
-          console.warn('Saved snippet ID is invalid, clearing:', error);
-          localStorage.removeItem('bmz_snippet_id');
-        }
-      }
-    } else {
-      // Check for GitHub gist
-      const savedGistId = gistAdapter.loadSavedGistId();
-      if (savedGistId) {
-        console.log('Found saved gist ID:', savedGistId);
-        // Verify we can read from it
-        try {
-          await gistAdapter.readBookmarks(savedGistId);
-          gistAdapter.gistId = savedGistId;
-          syncManager.setProvider('github');
-          syncManager.gistId = savedGistId;
-          return true;
-        } catch (error) {
-          console.warn('Saved gist ID is invalid, clearing:', error);
-          localStorage.removeItem('bmz_gist_id');
-        }
+    // Only GitLab snippets are supported
+    const savedSnippetId = snippetAdapter.loadSavedSnippetId();
+    if (savedSnippetId) {
+      console.log('Found saved snippet ID:', savedSnippetId);
+      // Verify we can read from it
+      try {
+        await snippetAdapter.readBookmarks(savedSnippetId);
+        snippetAdapter.snippetId = savedSnippetId;
+        syncManager.setProvider('gitlab');
+        syncManager.snippetId = savedSnippetId;
+        return true;
+      } catch (error) {
+        console.warn('Saved snippet ID is invalid, clearing:', error);
+        localStorage.removeItem('bmz_snippet_id');
       }
     }
 
@@ -576,7 +415,7 @@ class App {
   }
 
   /**
-   * Show gist/snippet setup modal (supports both GitHub and GitLab)
+   * Show snippet setup modal (GitLab only)
    */
   async showGistSetup() {
     const modal = document.getElementById('gistSetupModal');
@@ -586,10 +425,10 @@ class App {
     const existingGistInfo = document.getElementById('existingGistInfo');
     const gistList = document.getElementById('gistList');
 
-    // Get the current provider from stored preference or oauth
-    const provider = oauthPAT.getProvider() || await authManager.getPreference('syncProvider', 'github');
-    const adapter = provider === 'gitlab' ? snippetAdapter : gistAdapter;
-    const itemName = provider === 'gitlab' ? 'Snippet' : 'Gist';
+    // Only GitLab is supported
+    const provider = 'gitlab';
+    const adapter = snippetAdapter;
+    const itemName = 'Snippet';
 
     console.log(`Setting up ${itemName} for provider: ${provider}`);
 
@@ -599,13 +438,11 @@ class App {
     multipleGistsSection.style.display = 'none';
 
     try {
-      // FIRST check if we have a saved gist/snippet ID in localStorage
-      const savedId = provider === 'gitlab' ?
-        localStorage.getItem('bmz_snippet_id') :
-        localStorage.getItem('bmz_gist_id');
+      // FIRST check if we have a saved snippet ID in localStorage
+      const savedId = localStorage.getItem('bmz_snippet_id');
 
       if (savedId) {
-        console.log(`[GistSetup] Found saved ${itemName} ID in localStorage:`, savedId);
+        console.log(`[SnippetSetup] Found saved ${itemName} ID in localStorage:`, savedId);
         // Try to use the saved ID directly
         try {
           await this.useRemoteStorage(savedId, provider);
@@ -613,58 +450,26 @@ class App {
           modal.classList.add('hidden');
           return; // Success! Don't show the setup modal
         } catch (err) {
-          console.warn(`[GistSetup] Saved ${itemName} ID is invalid:`, err);
+          console.warn(`[SnippetSetup] Saved ${itemName} ID is invalid:`, err);
           // Clear the invalid ID and continue to show setup options
-          if (provider === 'gitlab') {
-            localStorage.removeItem('bmz_snippet_id');
-          } else {
-            localStorage.removeItem('bmz_gist_id');
-          }
+          localStorage.removeItem('bmz_snippet_id');
         }
       }
 
-      // Get all remote items (gists or snippets)
-      const items = provider === 'gitlab' ?
-        await adapter.getAllSnippets() :
-        await adapter.getAllGists();
+      // Get all remote snippets
+      const items = await adapter.getAllSnippets();
 
-      console.log(`[GistSetup] Found ${items.length} total ${itemName}s`);
-
-      // Log details of each item for debugging
-      items.forEach((item, idx) => {
-        if (provider === 'github') {
-          console.log(`[GistSetup] Gist ${idx}:`, {
-            id: item.id,
-            description: item.description,
-            files: Object.keys(item.files),
-            hasBookmarksJson: !!item.files['bookmarks.json']
-          });
-        }
-      });
+      console.log(`[SnippetSetup] Found ${items.length} total ${itemName}s`);
 
       // Filter for bookmark-like items
       const bookmarkItems = items.filter(item => {
-        if (provider === 'gitlab') {
-          // GitLab snippet filtering
-          return item.title?.includes('BMZ') ||
-                 item.title?.includes('Bookmark Manager Zero') ||
-                 item.file_name === 'bookmarks.json';
-        } else {
-          // GitHub gist filtering
-          const matches = item.files['bookmarks.json'] ||
-                 item.description?.includes('BMZ') ||
-                 item.description?.includes('Bookmark Manager Zero') ||
-                 item.description?.includes('bookmark');
-
-          if (matches) {
-            console.log(`[GistSetup] Gist ${item.id} matched as bookmark gist`);
-          }
-
-          return matches;
-        }
+        // GitLab snippet filtering
+        return item.title?.includes('BMZ') ||
+               item.title?.includes('Bookmark Manager Zero') ||
+               item.file_name === 'bookmarks.json';
       });
 
-      console.log(`[GistSetup] Found ${bookmarkItems.length} bookmark ${itemName}s`);
+      console.log(`[SnippetSetup] Found ${bookmarkItems.length} bookmark ${itemName}s`);
 
       if (bookmarkItems.length === 0) {
         // No items found - show create option
@@ -677,17 +482,10 @@ class App {
         existingGistSection.style.display = 'block';
         const item = bookmarkItems[0];
 
-        // Format based on provider
-        let fileCount, lastUpdated, description;
-        if (provider === 'gitlab') {
-          fileCount = item.files?.length || 1;
-          lastUpdated = new Date(item.updated_at).toLocaleDateString();
-          description = item.title || 'Untitled Snippet';
-        } else {
-          fileCount = Object.keys(item.files).length;
-          lastUpdated = new Date(item.updated_at).toLocaleDateString();
-          description = item.description || 'Untitled Gist';
-        }
+        // Format snippet info
+        const fileCount = item.files?.length || 1;
+        const lastUpdated = new Date(item.updated_at).toLocaleDateString();
+        const description = item.title || 'Untitled Snippet';
 
         existingGistInfo.textContent = `${description} • ${fileCount} files • Updated ${lastUpdated}`;
 
@@ -707,16 +505,9 @@ class App {
         gistList.innerHTML = '';
 
         bookmarkItems.forEach(item => {
-          let fileCount, lastUpdated, description;
-          if (provider === 'gitlab') {
-            fileCount = item.files?.length || 1;
-            lastUpdated = new Date(item.updated_at).toLocaleDateString();
-            description = item.title || 'Untitled Snippet';
-          } else {
-            fileCount = Object.keys(item.files).length;
-            lastUpdated = new Date(item.updated_at).toLocaleDateString();
-            description = item.description || 'Untitled Gist';
-          }
+          const fileCount = item.files?.length || 1;
+          const lastUpdated = new Date(item.updated_at).toLocaleDateString();
+          const description = item.title || 'Untitled Snippet';
 
           const itemDiv = document.createElement('div');
           itemDiv.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
@@ -759,7 +550,7 @@ class App {
         }
       });
 
-      // Setup logout button in gist setup modal
+      // Setup logout button in snippet setup modal
       const gistSetupLogoutBtn = document.getElementById('gistSetupLogoutBtn');
       if (gistSetupLogoutBtn) {
         gistSetupLogoutBtn.onclick = async () => {

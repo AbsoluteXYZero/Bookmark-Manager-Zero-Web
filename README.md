@@ -4,7 +4,7 @@
 
 # Bookmark Manager Zero
 
-**A fully static web application for managing bookmarks with GitHub Gist or GitLab Snippet synchronization.**
+**A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
 [![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website/releases)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
@@ -18,9 +18,9 @@
 
 ## Overview
 
-Bookmark Manager Zero is a fully static web application for managing bookmarks with GitHub Gist or GitLab Snippet synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension installation.
+Bookmark Manager Zero is a fully static web application for managing bookmarks with GitLab Snippet synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension installation.
 
-Unlike the browser extensions that work with native browser bookmarks, the website stores your bookmarks in a **private GitHub Gist or GitLab Snippet** in your own account. This means your data stays under your control, syncs across devices, and can be accessed from any device with a web browser—with your choice of Git provider.
+Unlike the browser extensions that work with native browser bookmarks, the website stores your bookmarks in a **private GitLab Snippet** in your own account. This means your data stays under your control, syncs across devices, and can be accessed from any device with a web browser.
 
 Changes sync **bi-directionally and automatically**: edits made on one device automatically appear on all your other devices. Don't worry about accidental changes—the built-in undo feature lets you quickly restore recently deleted bookmarks.
 
@@ -49,13 +49,11 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 ## Features
 
 ### Core Functionality
-- ✅ **Dual Storage Options** - Choose GitHub Gist or GitLab Snippet storage (your data, your provider)
-- ✅ **GitHub Gist Support** - Store bookmarks in YOUR private GitHub Gist
-- ✅ **GitLab Snippet Support** - Alternative storage via YOUR private GitLab Snippet
+- ✅ **GitLab Snippet Storage** - Store bookmarks in YOUR private GitLab Snippet
 - ✅ **Auto-Sync** - Automatic polling every 60 seconds checks for remote changes
 - ✅ **Smart Notifications** - Additions auto-sync with toast; deletions require confirmation
 - ✅ **Change Preview** - "View Changes" button shows detailed diff before syncing
-- ✅ **PAT Authentication** - Secure Personal Access Token authentication for both GitHub and GitLab
+- ✅ **PAT Authentication** - Secure Personal Access Token authentication for GitLab
 - ✅ **Modern Material Design UI** - Clean, intuitive interface with multiple themes
 - ✅ **100% Static** - No backend, hosted entirely on GitHub Pages
 - ✅ **Offline Support** - Works offline with IndexedDB caching
@@ -147,25 +145,12 @@ python -m http.server 8000
 ### First-Time Setup
 
 1. **Visit the website** at [https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/](https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/)
-2. **Choose your storage provider** (GitHub or GitLab):
-
-   **Option A: GitHub Gist**
-   - Click the gear icon (Settings)
-   - Go to "GitHub Gist Sync" section
-   - Generate a Personal Access Token at GitHub (scope: `gist`)
-   - Paste your token to authenticate
-   - Token is automatically detected as GitHub based on `ghp_` or `github_pat_` prefix
-   - Token is encrypted with AES-256-GCM before storage
-   - Create a new Gist or select an existing Gist from the dropdown
-
-   **Option B: GitLab Snippet**
-   - Click the gear icon (Settings)
-   - Go to "GitLab Snippet Sync" section
+2. **Set up GitLab Snippet storage**:
    - Generate a Personal Access Token at GitLab (scope: `api`)
    - Paste your token to authenticate
-   - Token is automatically detected as GitLab based on `glpat-` prefix
+   - Token must start with `glpat-` prefix
    - Token is encrypted with AES-256-GCM before storage
-   - Create a new Snippet or select an existing Snippet from the dropdown
+   - Create a new Snippet or select an existing Snippet from the list
 
 3. **Start managing bookmarks!**
 
@@ -180,16 +165,14 @@ python -m http.server 8000
 
 ### Sync Management
 
-- **Auto-Sync:** Enabled by default, checks Gist/Snippet every 60 seconds
+- **Auto-Sync:** Enabled by default, checks Snippet every 60 seconds
   - New bookmarks from other devices auto-sync with notification
   - Deletions require user confirmation (shows "View Changes" button)
-  - Works with both GitHub Gists and GitLab Snippets
 - **Manual Sync:**
-  - Click "Push to Gist/Snippet" to upload local changes
-  - Click "Pull from Gist/Snippet" to download remote changes
+  - Click "Push to Snippet" to upload local changes
+  - Click "Pull from Snippet" to download remote changes
 - **Change Preview:** Click "View Changes" to see detailed diff before syncing
 - **Edit Lock Notifications:** See when another device is editing
-- **Switch Providers:** Can switch between GitHub and GitLab at any time in settings
 
 ### Search & Filter
 
@@ -209,7 +192,7 @@ python -m http.server 8000
   - Works with exports from Chrome, Firefox, Edge, Safari
 - **Export Bookmarks:**
   - Settings → Export Bookmarks
-  - Choose HTML (cross-browser) or JSON (GitHub Gist format)
+  - Choose HTML (cross-browser) or JSON (GitLab Snippet format)
 
 ### Mobile Support
 
@@ -221,8 +204,6 @@ python -m http.server 8000
 ### Settings
 
 Click the gear icon to access:
-- **Storage Provider Selection:** Choose GitHub Gist or GitLab Snippet (auto-detected from token)
-- **GitHub Gist Sync:** Authenticate with Personal Access Token, create/select Gist, auto-sync settings
 - **GitLab Snippet Sync:** Authenticate with Personal Access Token, create/select Snippet, auto-sync settings
 - **Display Options:** Toggle title, URL, status indicators, previews
 - **View Mode:** Switch between list and grid layouts
@@ -250,12 +231,11 @@ Click the theme icon to access:
 
 Bookmark Manager Zero respects your privacy:
 
-- **All data stored in YOUR Git provider** - Bookmarks stored in your own GitHub Gist or GitLab Snippet (website owner cannot access your data)
+- **All data stored in YOUR GitLab Snippet** - Bookmarks stored in your own private GitLab Snippet (website owner cannot access your data)
 - **Tokens encrypted in browser** - AES-256-GCM encryption with browser fingerprint-derived key
 - **No tracking or analytics**
 - **No advertisements**
 - **Open source** - audit the code yourself
-- **Provider choice** - Choose the Git platform you trust
 
 See [PRIVACY.md](PRIVACY.md) for complete privacy policy.
 
@@ -273,16 +253,9 @@ The website can optionally use external services for enhanced features. **All ca
 - **Yandex Safe Browsing** - Geographic threat diversity (100K requests/day free)
 - **VirusTotal** - Comprehensive threat scanning from 70+ AV engines (500 requests/day free)
 
-### Git Provider Services (choose one for sync)
+### Git Provider Services (GitLab Sync)
 
-**GitHub (Option A):**
-- **GitHub Gists API** - Stores your bookmarks in a private Gist
-- **GitHub Personal Access Token** - Simple token-based authentication
-- Required scope: `gist` (full control of gists)
-- Tokens encrypted with AES-256-GCM before storage
-- Auto-detected from `ghp_` or `github_pat_` prefix
-
-**GitLab (Option B):**
+**GitLab:**
 - **GitLab Snippets API** - Stores your bookmarks in a private Snippet
 - **GitLab Personal Access Token** - Simple token-based authentication
 - Required scope: `api` (full API access for snippet operations)
@@ -410,8 +383,8 @@ Users can whitelist specific URLs to:
 ## Technology Stack
 
 - **Frontend**: Vanilla JavaScript (no frameworks)
-- **Storage**: GitHub Gists API / GitLab Snippets API + IndexedDB
-- **Authentication**: Personal Access Token (PAT) with auto-detection (GitHub/GitLab)
+- **Storage**: GitLab Snippets API + IndexedDB
+- **Authentication**: Personal Access Token (PAT) for GitLab
 - **Hosting**: GitHub Pages
 - **Security**: AES-256-GCM encryption for tokens and API keys
 - **UI**: Material Design 3 color system, CSS Grid & Flexbox
@@ -429,7 +402,6 @@ Users can whitelist specific URLs to:
 │   │   └── ui.js                # UI components and interactions
 │   ├── storage/
 │   │   ├── indexeddb.js         # Local IndexedDB storage
-│   │   ├── gist-adapter.js      # GitHub Gist sync adapter
 │   │   ├── snippet-adapter.js   # GitLab Snippet sync adapter
 │   │   └── sync-manager.js      # Multi-device sync management
 │   ├── import-export/
@@ -438,7 +410,8 @@ Users can whitelist specific URLs to:
 │   │   ├── html-exporter.js     # HTML bookmark export
 │   │   └── json-exporter.js     # JSON bookmark export
 │   ├── auth/
-│   │   └── auth-manager.js      # GitHub OAuth Device Code Flow
+│   │   ├── auth-manager.js      # GitLab PAT authentication
+│   │   └── oauth-pat.js         # GitLab token handler
 │   └── mobile/
 │       └── touch-handler.js     # Touch gesture support
 ├── workers/
@@ -453,7 +426,7 @@ Users can whitelist specific URLs to:
 ### Key Technologies
 - Vanilla JavaScript (no frameworks)
 - Material Design 3 color system
-- GitHub Gists API / GitLab Snippets API
+- GitLab Snippets API
 - Personal Access Token (PAT) authentication with auto-detection
 - AES-256-GCM encryption
 - CSS Grid & Flexbox
@@ -536,8 +509,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ### Design & Platform
 - **Material Design 3** - Color system by Google
 - **GitHub Pages** - Free static hosting
-- **GitHub Gists** - Simple, private data storage option
-- **GitLab Snippets** - Alternative private data storage option
+- **GitLab Snippets** - Simple, private data storage
 
 ### Security & Malware Detection
 - **[URLhaus](https://urlhaus.abuse.ch/)** - Dual coverage: Active + Historical malware URLs

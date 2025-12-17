@@ -418,28 +418,25 @@ class SnippetAdapter {
         throw new Error('Snippet does not contain bookmarks.json');
       }
 
+      console.log('[ReadSnippet] Found bookmarks.json file:', {
+        path: bookmarkFile.path,
+        file_name: bookmarkFile.file_name
+      });
+
       // GitLab API v4 doesn't include content directly, need to fetch it via API
       let content = bookmarkFile.content;
 
-      // If content is not in the response, fetch the snippet with content included
+      // If content is not in the response, fetch it using the API with authentication
       if (!content) {
-        console.log('[ReadSnippet] Content not in response, refetching with content...');
-        // Fetch snippet again but request with content by using the raw endpoint for the specific file
-        // GitLab API: GET /snippets/:id/files/:ref/:file_path/raw
-        // For snippets without refs, we can try the snippet content endpoint
-        const contentResponse = await fetch(`${this.apiBase}/snippets/${id}?include_content=true`, { headers });
-        console.log('[ReadSnippet] Content fetch response status:', contentResponse.status);
-        if (!contentResponse.ok) {
-          throw new Error(`Failed to fetch snippet content: ${contentResponse.status}`);
+        console.log('[ReadSnippet] Content not in response, fetching via API...');
+        // Use the authenticated API endpoint instead of raw_url to avoid CORS
+        const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
+        if (!fileResponse.ok) {
+          console.warn('[ReadSnippet] API raw endpoint failed with status:', fileResponse.status);
+          throw new Error(`Failed to fetch file content: ${fileResponse.status}`);
         }
-        const snippetWithContent = await contentResponse.json();
-        const fileWithContent = snippetWithContent.files?.find(f => f.path === 'bookmarks.json' || f.file_name === 'bookmarks.json');
-        content = fileWithContent?.content;
-
-        if (!content) {
-          console.error('[ReadSnippet] Could not find content in snippet. Files:', snippetWithContent.files);
-          throw new Error('Snippet file content not available');
-        }
+        content = await fileResponse.text();
+        console.log('[ReadSnippet] Fetched content length:', content?.length);
       }
 
       // If content is empty or just whitespace, return empty bookmark structure
