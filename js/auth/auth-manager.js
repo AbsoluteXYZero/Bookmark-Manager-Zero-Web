@@ -1,6 +1,6 @@
 /**
  * Authentication Manager for Bookmark Manager Zero
- * Handles GitHub OAuth token management with AES-256-GCM encryption
+ * Handles GitLab OAuth token management with AES-256-GCM encryption
  * Adapted from background.js encryption utilities
  */
 
@@ -89,9 +89,8 @@ class AuthManager {
 
   /**
    * Store encrypted token in IndexedDB
-   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async storeToken(token, userPassword = null, provider = 'github') {
+  async storeToken(token, userPassword = null, provider = 'gitlab') {
     const encrypted = await this.encryptToken(token, userPassword);
     const key = `${provider}_token`;
     await dbManager.put('settings', {
@@ -99,40 +98,32 @@ class AuthManager {
       value: encrypted
     });
 
-    if (provider === 'github') {
-      this.token = token;
-    }
+    this.token = token;
     console.log(`${provider} token stored securely`);
   }
 
   /**
    * Retrieve and decrypt token from IndexedDB
-   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async loadToken(userPassword = null, provider = 'github') {
+  async loadToken(userPassword = null, provider = 'gitlab') {
     const key = `${provider}_token`;
     const record = await dbManager.get('settings', key);
 
     if (!record) return null;
 
     const token = await this.decryptToken(record.value, userPassword);
-
-    if (provider === 'github') {
-      this.token = token;
-    }
+    this.token = token;
     return token;
   }
 
   /**
    * Remove token from storage
-   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async clearToken(provider = 'github') {
+  async clearToken(provider = 'gitlab') {
     const key = `${provider}_token`;
     await dbManager.delete('settings', key);
 
-    // Always clear in-memory state regardless of provider
-    // This ensures no stale tokens remain in memory
+    // Clear in-memory state
     this.token = null;
     this.user = null;
 
@@ -141,10 +132,9 @@ class AuthManager {
 
   /**
    * Get current token (from memory or storage)
-   * Supports multiple providers: 'github' (default) or 'gitlab'
    */
-  async getToken(provider = 'github') {
-    if (provider === 'github' && this.token) {
+  async getToken(provider = 'gitlab') {
+    if (this.token) {
       return this.token;
     }
     return await this.loadToken(null, provider);
@@ -159,22 +149,21 @@ class AuthManager {
   }
 
   /**
-   * Fetch user information from GitHub
+   * Fetch user information from GitLab
    */
   async fetchUserInfo() {
     const token = await this.getToken();
     if (!token) throw new Error('No authentication token');
 
     try {
-      const response = await fetch('https://api.github.com/user', {
+      const response = await fetch('https://gitlab.com/api/v4/user', {
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Accept': 'application/vnd.github+json'
+          'Authorization': `Bearer ${token}`
         }
       });
 
       if (!response.ok) {
-        throw new Error(`GitHub API error: ${response.status}`);
+        throw new Error(`GitLab API error: ${response.status}`);
       }
 
       this.user = await response.json();
@@ -186,7 +175,7 @@ class AuthManager {
   }
 
   /**
-   * Get cached user info or fetch from GitHub
+   * Get cached user info or fetch from GitLab
    */
   async getUserInfo() {
     if (this.user) return this.user;
@@ -194,7 +183,7 @@ class AuthManager {
   }
 
   /**
-   * Validate token with GitHub API
+   * Validate token with GitLab API
    */
   async validateToken() {
     try {
@@ -280,7 +269,7 @@ class AuthManager {
       return {
         authenticated: true,
         user: {
-          login: user.login,
+          login: user.username || user.login,
           name: user.name,
           avatar: user.avatar_url,
           email: user.email

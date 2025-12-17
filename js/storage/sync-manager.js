@@ -1,19 +1,17 @@
 /**
  * Sync Manager
- * Handles bidirectional sync between IndexedDB and remote storage (GitHub Gist or GitLab Snippet)
- * Implements edit locking to prevent concurrent modifications across devices
+ * Handles bidirectional sync between IndexedDB and remote storage (GitLab Snippet)
+ * Implements version-based conflict detection to prevent data loss
  */
 
 import dbManager from './indexeddb.js';
-import gistAdapter from './gist-adapter.js';
 import snippetAdapter from './snippet-adapter.js';
 import authManager from '../auth/auth-manager.js';
 
 class SyncManager {
   constructor() {
-    this.gistId = null;
     this.snippetId = null;
-    this.provider = null; // 'github' or 'gitlab'
+    this.provider = 'gitlab'; // Always GitLab
     this.deviceId = authManager.getDeviceId();
     this.syncInterval = null;
     this.isSyncing = false;
@@ -24,61 +22,37 @@ class SyncManager {
   }
 
   /**
-   * Get the appropriate adapter based on current provider
+   * Get the GitLab snippet adapter
    */
   getAdapter() {
-    if (this.provider === 'gitlab') {
-      return snippetAdapter;
-    }
-    // Default to GitHub
-    return gistAdapter;
+    return snippetAdapter;
   }
 
   /**
-   * Get the current remote ID (gist or snippet)
+   * Get the current remote ID (snippet)
    */
   getRemoteId() {
-    if (this.provider === 'gitlab') {
-      return this.snippetId;
-    }
-    return this.gistId;
+    return this.snippetId;
   }
 
   /**
-   * Set the current provider
+   * Set the current provider (always gitlab)
    */
   async setProvider(provider) {
-    this.provider = provider;
-    await dbManager.put('metadata', { key: 'syncProvider', value: provider });
-    console.log('Sync provider set to:', provider);
+    this.provider = 'gitlab';
+    await dbManager.put('metadata', { key: 'syncProvider', value: 'gitlab' });
+    console.log('Sync provider set to: gitlab');
   }
 
   /**
    * Initialize sync manager
-   * Loads provider, Gist/Snippet ID from metadata and starts auto-sync
+   * Loads Snippet ID from metadata and sets up sync
    */
   async init() {
     try {
-      // Load sync provider
-      const providerRecord = await dbManager.get('metadata', 'syncProvider');
-      if (providerRecord) {
-        this.provider = providerRecord.value;
-        console.log('Loaded sync provider from storage:', this.provider);
-      }
-
-      // Load Gist ID from metadata
-      const gistIdRecord = await dbManager.get('metadata', 'gistId');
-      if (gistIdRecord) {
-        this.gistId = gistIdRecord.value;
-        gistAdapter.setGistId(this.gistId);
-        console.log('Loaded Gist ID from storage:', this.gistId);
-
-        // If no provider set but we have a gist ID, assume GitHub
-        if (!this.provider) {
-          this.provider = 'github';
-          await this.setProvider('github');
-        }
-      }
+      // Always use GitLab
+      this.provider = 'gitlab';
+      await this.setProvider('gitlab');
 
       // Load Snippet ID from metadata
       const snippetIdRecord = await dbManager.get('metadata', 'snippetId');
@@ -86,12 +60,6 @@ class SyncManager {
         this.snippetId = snippetIdRecord.value;
         snippetAdapter.setSnippetId(this.snippetId);
         console.log('Loaded Snippet ID from storage:', this.snippetId);
-
-        // If no provider set but we have a snippet ID, assume GitLab
-        if (!this.provider) {
-          this.provider = 'gitlab';
-          await this.setProvider('gitlab');
-        }
       }
 
       // Load last sync time
@@ -322,23 +290,16 @@ class SyncManager {
     } catch (error) {
       console.error('Sync to remote failed:', error);
 
-      // If the error is a 404 (Gist/Snippet not found), stop syncing
+      // If the error is a 404 (Snippet not found), stop syncing
       if (error.message && error.message.includes('not found')) {
         console.warn('[SyncToRemote] Remote not found (404), aborting sync and clearing stored ID');
         this.hasUnsyncedChanges = false; // Clear the flag to prevent retry loops
 
-        // Clear the stored ID
-        if (this.provider === 'github') {
-          localStorage.removeItem('bmz_gist_id');
-          await dbManager.delete('metadata', 'gistId');
-          this.gistId = null;
-          gistAdapter.gistId = null;
-        } else if (this.provider === 'gitlab') {
-          localStorage.removeItem('bmz_snippet_id');
-          await dbManager.delete('metadata', 'snippetId');
-          this.snippetId = null;
-          snippetAdapter.snippetId = null;
-        }
+        // Clear the stored snippet ID
+        localStorage.removeItem('bmz_snippet_id');
+        await dbManager.delete('metadata', 'snippetId');
+        this.snippetId = null;
+        snippetAdapter.snippetId = null;
 
         // Emit event to notify UI that setup is needed
         this.emitEvent('syncError', {
@@ -558,21 +519,14 @@ class SyncManager {
     } catch (error) {
       console.error('[SyncFromRemote] Sync failed:', error);
 
-      // If the error is a 404 (Gist/Snippet not found), clear the stored ID
+      // If the error is a 404 (Snippet not found), clear the stored ID
       if (error.message && error.message.includes('not found')) {
         console.warn('[SyncFromRemote] Remote not found (404), clearing stored ID');
 
-        if (this.provider === 'github') {
-          localStorage.removeItem('bmz_gist_id');
-          await dbManager.delete('metadata', 'gistId');
-          this.gistId = null;
-          gistAdapter.gistId = null;
-        } else if (this.provider === 'gitlab') {
-          localStorage.removeItem('bmz_snippet_id');
-          await dbManager.delete('metadata', 'snippetId');
-          this.snippetId = null;
-          snippetAdapter.snippetId = null;
-        }
+        localStorage.removeItem('bmz_snippet_id');
+        await dbManager.delete('metadata', 'snippetId');
+        this.snippetId = null;
+        snippetAdapter.snippetId = null;
 
         // Emit event to notify UI that setup is needed
         this.emitEvent('syncError', {
@@ -666,44 +620,11 @@ class SyncManager {
   }
 
   /**
-   * Set Gist ID (GitHub)
-   */
-  async setGistId(gistId) {
-    this.gistId = gistId;
-    this.provider = 'github';
-
-    // Clear GitLab snippet data when switching to GitHub
-    // (This handles manual provider switches after login)
-    if (this.snippetId) {
-      this.snippetId = null;
-      snippetAdapter.snippetId = null;
-      localStorage.removeItem('bmz_snippet_id');
-      await dbManager.delete('metadata', 'snippetId');
-      console.log('Cleared GitLab snippet data during provider switch');
-    }
-
-    gistAdapter.setGistId(gistId);
-    await dbManager.put('metadata', { key: 'gistId', value: gistId });
-    await this.setProvider('github');
-    console.log('Gist ID saved:', gistId);
-  }
-
-  /**
    * Set Snippet ID (GitLab)
    */
   async setSnippetId(snippetId) {
     this.snippetId = snippetId;
     this.provider = 'gitlab';
-
-    // Clear GitHub gist data when switching to GitLab
-    // (This handles manual provider switches after login)
-    if (this.gistId) {
-      this.gistId = null;
-      gistAdapter.gistId = null;
-      localStorage.removeItem('bmz_gist_id');
-      await dbManager.delete('metadata', 'gistId');
-      console.log('Cleared GitHub gist data during provider switch');
-    }
 
     snippetAdapter.setSnippetId(snippetId);
     await dbManager.put('metadata', { key: 'snippetId', value: snippetId });
