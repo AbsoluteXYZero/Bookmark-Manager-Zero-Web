@@ -7700,7 +7700,7 @@ function setupEventListeners() {
   // Help & Documentation
   const helpDocsBtn = document.getElementById('helpDocsBtn');
   helpDocsBtn.addEventListener('click', () => {
-    const readmeUrl = 'https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Firefox/blob/main/README.md';
+    const readmeUrl = 'https://bmz.absolutezero.fyi/';
     window.open(readmeUrl, '_blank');
     closeAllMenus();
   });
