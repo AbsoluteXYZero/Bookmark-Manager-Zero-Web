@@ -264,6 +264,30 @@ The website can optionally use external services for enhanced features. **All ca
 
 All external service usage is disclosed in [PRIVACY.md](PRIVACY.md).
 
+## Important Notice: GitLab API Usage
+
+**User Responsibility:**
+- You are responsible for your own GitLab API usage when using this application
+- The application makes API calls only when you perform sync operations (manual sync or when you add/edit/delete bookmarks)
+- Monitor your API usage through your GitLab account settings if needed
+
+**How GitLab Snippets Are Used:**
+- This application uses GitLab Snippets as intended by GitLab: for storing structured data
+- Your bookmarks are stored in a private Snippet in your own GitLab account
+- Snippets are a legitimate GitLab feature designed for storing code, configuration, and structured data
+- The application uses standard GitLab Snippets API endpoints documented in the official GitLab API
+
+**API Usage Considerations:**
+- **Event-driven sync**: API calls are made only when you add/edit/delete bookmarks or manually sync
+- **No automatic polling**: The application does not poll GitLab automatically to prevent rate limiting
+- **Manual sync**: Use the "Pull from Snippet" button to check for changes from other devices
+- **Rate limits**: GitLab has API rate limits; typical bookmark usage stays well within limits
+
+**Best Practices:**
+- Use manual "Pull from Snippet" to check for changes from other devices when needed
+- The application automatically syncs when you make changes (add/edit/delete bookmarks)
+- For very large collections (>5000 bookmarks), edits will naturally sync less frequently
+
 ## How Link & Safety Checking Works
 
 This section provides technical details on how the website determines link status and safety for anyone interested in the methodology.
