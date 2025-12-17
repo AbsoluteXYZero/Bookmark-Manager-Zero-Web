@@ -34,13 +34,38 @@ class GistAdapter {
   async getAllGists() {
     try {
       const headers = await this.getHeaders();
+
+      // First verify which user this token belongs to
+      console.log('[GetAllGists] Verifying authenticated user...');
+      const userResponse = await fetch(`${this.apiBase}/user`, { headers });
+      if (userResponse.ok) {
+        const userData = await userResponse.json();
+        console.log('[GetAllGists] Authenticated as:', userData.login, '(User ID:', userData.id + ')');
+      }
+
+      console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists`);
       const response = await fetch(`${this.apiBase}/gists`, { headers });
 
+      console.log('[GetAllGists] Response status:', response.status, response.statusText);
+
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[GetAllGists] Error response:', errorText);
         throw new Error(`Failed to fetch gists: ${response.status}`);
       }
 
-      return await response.json();
+      const gists = await response.json();
+      console.log('[GetAllGists] Retrieved', gists.length, 'gists');
+
+      // If we got 0 gists, let's try to understand why
+      if (gists.length === 0) {
+        console.warn('[GetAllGists] No gists found. Possible reasons:');
+        console.warn('  1. This GitHub account has no Gists');
+        console.warn('  2. All Gists are secret and require different API endpoint');
+        console.warn('  3. Token permissions issue');
+      }
+
+      return gists;
     } catch (error) {
       console.error('Failed to fetch gists:', error);
       throw error;
@@ -163,6 +188,7 @@ class GistAdapter {
       const tree = bookmarkTree || defaultTree;
       tree.checksum = await this.calculateChecksum(tree);
 
+      console.log('[CreateGist] Sending request to GitHub API...');
       const response = await fetch(`${this.apiBase}/gists`, {
         method: 'POST',
         headers,
@@ -177,12 +203,24 @@ class GistAdapter {
         })
       });
 
+      console.log('[CreateGist] Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Failed to create Gist: ${response.status}`);
+        const errorBody = await response.text();
+        console.error('[CreateGist] Error response:', errorBody);
+        throw new Error(`Failed to create Gist: ${response.status} - ${errorBody}`);
       }
 
       const gist = await response.json();
+      console.log('[CreateGist] Gist created successfully:', {
+        id: gist.id,
+        url: gist.html_url,
+        files: Object.keys(gist.files)
+      });
+
       this.gistId = gist.id;
+      // Save to localStorage
+      this.setGistId(gist.id);
 
       console.log('Created bookmark Gist:', this.gistId);
       return gist.id;
@@ -197,22 +235,40 @@ class GistAdapter {
    */
   async readBookmarks(gistId = null) {
     const id = gistId || this.gistId;
+    console.log('[ReadGist] Attempting to read Gist:', {
+      providedId: gistId,
+      storedId: this.gistId,
+      usingId: id
+    });
+
     if (!id) {
       throw new Error('No Gist ID provided');
     }
 
     try {
       const headers = await this.getHeaders();
+      console.log('[ReadGist] Fetching from:', `${this.apiBase}/gists/${id}`);
       const response = await fetch(`${this.apiBase}/gists/${id}`, { headers });
+
+      console.log('[ReadGist] Response status:', response.status, response.statusText);
 
       if (!response.ok) {
         if (response.status === 404) {
+          const errorText = await response.text();
+          console.error('[ReadGist] 404 Error - Gist not found. Response:', errorText);
           throw new Error('Bookmark Gist not found');
         }
+        const errorText = await response.text();
+        console.error('[ReadGist] Error response:', errorText);
         throw new Error(`Failed to read Gist: ${response.status}`);
       }
 
       const gist = await response.json();
+      console.log('[ReadGist] Gist fetched successfully:', {
+        id: gist.id,
+        files: Object.keys(gist.files),
+        description: gist.description
+      });
 
       if (!gist.files['bookmarks.json']) {
         throw new Error('Gist does not contain bookmarks.json');
@@ -221,7 +277,7 @@ class GistAdapter {
       const content = gist.files['bookmarks.json'].content;
       const bookmarkData = JSON.parse(content);
 
-      console.log('Read bookmarks from Gist:', id);
+      console.log('[ReadGist] Bookmarks parsed successfully. Version:', bookmarkData.version);
       return bookmarkData;
     } catch (error) {
       console.error('Failed to read bookmarks from Gist:', error);
@@ -325,13 +381,20 @@ class GistAdapter {
   async getAllGists() {
     try {
       const headers = await this.getHeaders();
+      console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists`);
       const response = await fetch(`${this.apiBase}/gists`, { headers });
 
+      console.log('[GetAllGists] Response status:', response.status, response.statusText);
+
       if (!response.ok) {
+        const errorText = await response.text();
+        console.error('[GetAllGists] Error response:', errorText);
         throw new Error(`Failed to fetch gists: ${response.status}`);
       }
 
-      return await response.json();
+      const gists = await response.json();
+      console.log('[GetAllGists] Retrieved', gists.length, 'gists');
+      return gists;
     } catch (error) {
       console.error('Failed to fetch all gists:', error);
       throw error;

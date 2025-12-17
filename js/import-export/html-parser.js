@@ -18,6 +18,11 @@ function parseHTMLBookmarks(htmlContent) {
     throw new Error('Invalid bookmark file: No bookmark list found');
   }
 
+  // Check for H1 header to determine default container
+  const h1 = doc.querySelector('H1');
+  const h1Text = h1 ? h1.textContent.trim().toLowerCase() : '';
+  console.log('[HTML Import] H1 header found:', h1Text || 'none');
+
   // Create root structure matching BMZ format with all 4 standard folders
   const bookmarkTree = {
     roots: {
@@ -55,46 +60,91 @@ function parseHTMLBookmarks(htmlContent) {
   // Parse the DL structure recursively
   const parsedNodes = parseDL(mainDL);
 
-  // Intelligently distribute parsed nodes to appropriate root folders
-  // Based on folder names and attributes from Chrome/Firefox exports
-  for (const node of parsedNodes) {
-    if (node.type === 'folder') {
-      const title = node.title.toLowerCase();
+  // Debug: Log the number of top-level nodes found
+  console.log(`[HTML Import] Found ${parsedNodes.length} top-level nodes`);
 
-      // Check for PERSONAL_TOOLBAR_FOLDER attribute (highest priority)
-      // This is the Netscape standard way to mark the toolbar folder
-      if (node.isPersonalToolbar) {
-        bookmarkTree.roots.bookmark_bar.children = node.children || [];
-        bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
-      }
-      // Match Chrome's "Bookmarks bar" or Firefox's "Bookmarks Toolbar"
-      else if (title.includes('toolbar') || title.includes('bookmarks bar') || title.includes('favorites bar')) {
-        bookmarkTree.roots.bookmark_bar.children = node.children || [];
-        bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
-      }
-      // Match Firefox's "Bookmarks Menu"
-      else if (title.includes('bookmarks menu') || title === 'menu') {
-        bookmarkTree.roots.menu.children = node.children || [];
-        bookmarkTree.roots.menu.title = node.title; // Preserve original name
-      }
-      // Match Chrome's "Other bookmarks" or Firefox's "Other Bookmarks" / "Unfiled Bookmarks"
-      else if (title.includes('other bookmarks') || title.includes('unfiled')) {
-        bookmarkTree.roots.other.children = node.children || [];
-        bookmarkTree.roots.other.title = node.title; // Preserve original name
-      }
-      // Match "Mobile bookmarks" or "Mobile Bookmarks"
-      else if (title.includes('mobile')) {
-        bookmarkTree.roots.mobile.children = node.children || [];
-        bookmarkTree.roots.mobile.title = node.title; // Preserve original name
-      }
-      // Unrecognized folder - add to "Other Bookmarks"
-      else {
-        bookmarkTree.roots.other.children.push(node);
-      }
+  // Separate folders from bookmarks
+  const folders = [];
+  const orphanedBookmarks = [];
+
+  parsedNodes.forEach((node, idx) => {
+    if (node.type === 'folder') {
+      const childCount = node.children ? node.children.length : 0;
+      console.log(`[HTML Import] Node ${idx}: Folder "${node.title}" with ${childCount} children`);
+      folders.push(node);
     } else {
-      // Top-level bookmark (not in a folder) - add to "Other Bookmarks"
-      bookmarkTree.roots.other.children.push(node);
+      console.log(`[HTML Import] Node ${idx}: Bookmark "${node.title}" (orphaned)`);
+      orphanedBookmarks.push(node);
     }
+  });
+
+  console.log(`[HTML Import] Summary: ${folders.length} folders, ${orphanedBookmarks.length} orphaned bookmarks`);
+
+  // Track if we've found each root folder type to avoid duplicates
+  let foundToolbar = false;
+  let foundMenu = false;
+  let foundOther = false;
+  let foundMobile = false;
+
+  // Determine default container based on H1 header
+  // If H1 says "Bookmarks Menu", unmatched content goes to menu
+  // Otherwise it goes to other
+  const defaultContainer = h1Text.includes('bookmarks menu') ? 'menu' : 'other';
+  console.log(`[HTML Import] Default container for unmatched content: ${defaultContainer}`);
+
+  // Process folders first - match them to root folders
+  for (const node of folders) {
+    const title = node.title.toLowerCase();
+
+    // Check for PERSONAL_TOOLBAR_FOLDER attribute (highest priority)
+    // This is the Netscape standard way to mark the toolbar folder
+    if (node.isPersonalToolbar && !foundToolbar) {
+      console.log(`[HTML Import] Matched "${node.title}" to Bookmarks Bar (PERSONAL_TOOLBAR_FOLDER)`);
+      bookmarkTree.roots.bookmark_bar.children = node.children || [];
+      bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
+      foundToolbar = true;
+    }
+    // Match Chrome's "Bookmarks bar" or Firefox's "Bookmarks Toolbar"
+    else if ((title.includes('toolbar') || title.includes('bookmarks bar') || title.includes('favorites bar')) && !foundToolbar) {
+      console.log(`[HTML Import] Matched "${node.title}" to Bookmarks Bar (name match)`);
+      bookmarkTree.roots.bookmark_bar.children = node.children || [];
+      bookmarkTree.roots.bookmark_bar.title = node.title; // Preserve original name
+      foundToolbar = true;
+    }
+    // Match Firefox's "Bookmarks Menu"
+    else if ((title.includes('bookmarks menu') || title === 'menu') && !foundMenu) {
+      console.log(`[HTML Import] Matched "${node.title}" to Bookmarks Menu`);
+      bookmarkTree.roots.menu.children = node.children || [];
+      bookmarkTree.roots.menu.title = node.title; // Preserve original name
+      foundMenu = true;
+    }
+    // Match Chrome's "Other bookmarks" or Firefox's "Other Bookmarks" / "Unfiled Bookmarks"
+    else if ((title.includes('other bookmarks') || title.includes('unfiled')) && !foundOther) {
+      console.log(`[HTML Import] Matched "${node.title}" to Other Bookmarks`);
+      bookmarkTree.roots.other.children = node.children || [];
+      bookmarkTree.roots.other.title = node.title; // Preserve original name
+      foundOther = true;
+    }
+    // Match "Mobile bookmarks" or "Mobile Bookmarks"
+    else if (title.includes('mobile') && !foundMobile) {
+      console.log(`[HTML Import] Matched "${node.title}" to Mobile Bookmarks`);
+      bookmarkTree.roots.mobile.children = node.children || [];
+      bookmarkTree.roots.mobile.title = node.title; // Preserve original name
+      foundMobile = true;
+    }
+    // Unrecognized folder - add to default container (menu or other based on H1)
+    else {
+      const containerName = defaultContainer === 'menu' ? 'Bookmarks Menu' : 'Other Bookmarks';
+      console.log(`[HTML Import] Adding unrecognized folder "${node.title}" to ${containerName}`);
+      bookmarkTree.roots[defaultContainer].children.push(node);
+    }
+  }
+
+  // Add any orphaned bookmarks to default container
+  if (orphanedBookmarks.length > 0) {
+    const containerName = defaultContainer === 'menu' ? 'Bookmarks Menu' : 'Other Bookmarks';
+    console.log(`[HTML Import] Adding ${orphanedBookmarks.length} orphaned bookmarks to ${containerName}`);
+    bookmarkTree.roots[defaultContainer].children.push(...orphanedBookmarks);
   }
 
   return bookmarkTree;

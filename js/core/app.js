@@ -608,6 +608,20 @@ class App {
         await adapter.getAllSnippets() :
         await adapter.getAllGists();
 
+      console.log(`[GistSetup] Found ${items.length} total ${itemName}s`);
+
+      // Log details of each item for debugging
+      items.forEach((item, idx) => {
+        if (provider === 'github') {
+          console.log(`[GistSetup] Gist ${idx}:`, {
+            id: item.id,
+            description: item.description,
+            files: Object.keys(item.files),
+            hasBookmarksJson: !!item.files['bookmarks.json']
+          });
+        }
+      });
+
       // Filter for bookmark-like items
       const bookmarkItems = items.filter(item => {
         if (provider === 'gitlab') {
@@ -617,12 +631,20 @@ class App {
                  item.file_name === 'bookmarks.json';
         } else {
           // GitHub gist filtering
-          return item.files['bookmarks.json'] ||
+          const matches = item.files['bookmarks.json'] ||
                  item.description?.includes('BMZ') ||
                  item.description?.includes('Bookmark Manager Zero') ||
                  item.description?.includes('bookmark');
+
+          if (matches) {
+            console.log(`[GistSetup] Gist ${item.id} matched as bookmark gist`);
+          }
+
+          return matches;
         }
       });
+
+      console.log(`[GistSetup] Found ${bookmarkItems.length} bookmark ${itemName}s`);
 
       if (bookmarkItems.length === 0) {
         // No items found - show create option
@@ -717,6 +739,18 @@ class App {
         }
       });
 
+      // Setup logout button in gist setup modal
+      const gistSetupLogoutBtn = document.getElementById('gistSetupLogoutBtn');
+      if (gistSetupLogoutBtn) {
+        gistSetupLogoutBtn.onclick = async () => {
+          // Close the modal first
+          modal.classList.add('hidden');
+          modal.style.display = 'none';
+          // Logout
+          await this.logout();
+        };
+      }
+
       // Show modal
       modal.style.display = 'flex';
       modal.classList.remove('hidden');
@@ -803,11 +837,8 @@ class App {
         itemId = await gistAdapter.createBookmarkGist();
         console.log(`[CreateGist] Step 1 Complete: Gist created with ID:`, itemId);
 
-        console.log(`[CreateGist] Step 2: Setting gist ID in adapter...`);
-        gistAdapter.setGistId(itemId);
-
-        // Save gist ID to sync manager
-        console.log(`[CreateGist] Step 4: Saving gist ID to sync manager...`);
+        // Save gist ID to sync manager (gistAdapter.setGistId is already called in createBookmarkGist)
+        console.log(`[CreateGist] Step 2: Saving gist ID to sync manager...`);
         await syncManager.setGistId(itemId);
       }
 
@@ -817,13 +848,15 @@ class App {
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
-      // Clear local version to force sync
-      console.log(`[Create${itemName}] Step 4.5: Clearing local version to force sync...`);
-      await syncManager.setLocalVersion(0);
+      // Set initial version to 1 (matching what we created)
+      console.log(`[Create${itemName}] Step 4.5: Setting initial version...`);
+      await syncManager.setLocalVersion(1);
 
-      // Sync the new gist data from remote to local
-      console.log('[CreateGist] Step 5: Syncing from remote...');
-      await syncManager.syncFromRemote();
+      // Initialize local bookmarks with empty structure
+      console.log(`[Create${itemName}] Step 4.7: Initializing local bookmarks...`);
+      const emptyTree = syncManager.getEmptyBookmarkTree();
+      await syncManager.saveLocalBookmarks(emptyTree);
+      console.log(`[Create${itemName}] Step 4.8: Local bookmarks initialized`);
 
       // Reload bookmarks from local storage
       console.log('[CreateGist] Step 6: Reloading bookmarks from local...');
@@ -846,7 +879,7 @@ class App {
         console.warn('[CreateGist] window.initSidebar not found!');
       }
 
-      console.log('[CreateGist] All steps complete. Gist ID:', gistId);
+      console.log(`[Create${itemName}] All steps complete. ${itemName} ID:`, itemId);
     } catch (error) {
       console.error('[CreateGist] Failed:', error);
       this.showGistSetupError('Failed to create gist: ' + error.message);
@@ -1156,7 +1189,7 @@ class App {
         }
 
         // Load the imported tree
-        await bookmarkManager.loadTree(bookmarkTree);
+        await bookmarkManager.replaceTree(bookmarkTree);
 
         // Sync to Gist
         await syncManager.syncToRemote();

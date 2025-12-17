@@ -474,6 +474,30 @@ class SyncManager {
       }
     } catch (error) {
       console.error('[SyncFromRemote] Sync failed:', error);
+
+      // If the error is a 404 (Gist/Snippet not found), clear the stored ID
+      if (error.message && error.message.includes('not found')) {
+        console.warn('[SyncFromRemote] Remote not found (404), clearing stored ID');
+
+        if (this.provider === 'github') {
+          localStorage.removeItem('bmz_gist_id');
+          await dbManager.delete('metadata', 'gistId');
+          this.gistId = null;
+          gistAdapter.gistId = null;
+        } else if (this.provider === 'gitlab') {
+          localStorage.removeItem('bmz_snippet_id');
+          await dbManager.delete('metadata', 'snippetId');
+          this.snippetId = null;
+          snippetAdapter.snippetId = null;
+        }
+
+        // Emit event to notify UI that setup is needed
+        this.emitEvent('syncError', {
+          error: 'Remote storage not found. Please set up sync again.',
+          requiresSetup: true
+        });
+      }
+
       return false;
     } finally {
       this.isSyncing = false;
