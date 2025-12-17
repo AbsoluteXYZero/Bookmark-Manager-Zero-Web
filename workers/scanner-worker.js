@@ -425,6 +425,63 @@ async function checkVirusTotal(url) {
 
     console.log(`[VirusTotal] Starting check for ${url}`);
 
+    // First, try to get existing cached report (faster, doesn't create new scan)
+    const urlId = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+
+    try {
+      const reportController = new AbortController();
+      const reportTimeout = setTimeout(() => reportController.abort(), 8000);
+
+      const reportResponse = await fetch(
+        `https://www.virustotal.com/api/v3/urls/${urlId}`,
+        {
+          method: 'GET',
+          signal: reportController.signal,
+          headers: {
+            'x-apikey': apiKey
+          }
+        }
+      );
+
+      clearTimeout(reportTimeout);
+
+      if (reportResponse.ok) {
+        const reportData = await reportResponse.json();
+        const stats = reportData.data?.attributes?.last_analysis_stats;
+
+        if (stats) {
+          console.log(`[VirusTotal] Using cached report - Stats:`, stats);
+
+          const malicious = stats.malicious || 0;
+          const suspicious = stats.suspicious || 0;
+
+          console.log(`[VirusTotal] Analysis complete - Malicious: ${malicious}, Suspicious: ${suspicious}`);
+
+          if (malicious >= 2) {
+            console.log(`[VirusTotal] Result: UNSAFE`);
+            return 'unsafe';
+          }
+
+          if (malicious >= 1 || suspicious >= 2) {
+            console.log(`[VirusTotal] Result: WARNING`);
+            return 'warning';
+          }
+
+          console.log(`[VirusTotal] Result: SAFE`);
+          return 'safe';
+        } else {
+          console.log(`[VirusTotal] Cached report found but no stats available`);
+        }
+      } else {
+        console.log(`[VirusTotal] Cached report GET failed with status: ${reportResponse.status}`);
+      }
+    } catch (reportError) {
+      console.log(`[VirusTotal] Error fetching cached report:`, reportError.message);
+    }
+
+    console.log(`[VirusTotal] No cached report available, submitting new scan...`);
+
+    // No cached report found, submit new scan
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 10000);
 
@@ -461,7 +518,7 @@ async function checkVirusTotal(url) {
     // Poll for analysis results with retries
     let analysisData;
     let attempts = 0;
-    const maxAttempts = 5;
+    const maxAttempts = 15; // Increased from 5 to 15 (30 seconds total)
 
     while (attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 2000));
@@ -721,53 +778,6 @@ self.addEventListener('message', async (e) => {
         action: 'initComplete',
         data: { success: true }
       });
-      break;
-
-    case 'checkLink':
-      try {
-        const status = await checkLinkStatus(data.url);
-        self.postMessage({
-          action: 'linkResult',
-          data: {
-            url: data.url,
-            id: data.id,
-            status: status
-          }
-        });
-      } catch (error) {
-        self.postMessage({
-          action: 'linkError',
-          data: {
-            url: data.url,
-            id: data.id,
-            error: error.message
-          }
-        });
-      }
-      break;
-
-    case 'checkSafety':
-      try {
-        const result = await checkSafetyStatus(data.url);
-        self.postMessage({
-          action: 'safetyResult',
-          data: {
-            url: data.url,
-            id: data.id,
-            status: result.status,
-            sources: result.sources
-          }
-        });
-      } catch (error) {
-        self.postMessage({
-          action: 'safetyError',
-          data: {
-            url: data.url,
-            id: data.id,
-            error: error.message
-          }
-        });
-      }
       break;
 
     case 'scanBookmark':

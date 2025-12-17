@@ -11,6 +11,7 @@ import storageAdapter from './storage/storage-adapter.js';
 import scannerService from './core/scanner.js';
 import { parseHTMLBookmarks } from './import-export/html-parser.js';
 import { parseJSONBookmarks } from './import-export/json-parser.js';
+import { encryptApiKey, decryptApiKey } from './utils/encryption.js';
 
 // ============================================================================
 // BROWSER API COMPATIBILITY LAYER
@@ -39,14 +40,9 @@ const browser = {
           // Use the actual blocklist service
           return await blocklistService.ensureBlocklistReady();
 
-        case 'checkLinkStatus':
-          // Call the checkLinkStatus function directly (defined later in this file)
-          // We need to use a forward reference here
-          return { status: await window._webCheckLinkStatus(message.url, message.bypassCache) };
-
-        case 'checkURLSafety':
-          // Call the checkSafetyStatus function directly (defined later in this file)
-          return await window._webCheckSafetyStatus(message.url, message.bypassCache);
+        // NOTE: Removed dead code - 'checkLinkStatus' and 'checkURLSafety' handlers
+        // These were never called and used broken no-cors fetch mode
+        // All scanning now happens via scanner service and Web Worker
 
         default:
           console.warn('[Browser API] Unhandled sendMessage action:', message.action);
@@ -371,64 +367,8 @@ function showPrivateModeIndicator() {
 // ENCRYPTION UTILITIES
 // ============================================================================
 
-// Encryption utilities inlined to avoid module loading issues
-async function getDerivedKey() {
-  // Use origin and browser info for key derivation (consistent with extensions)
-  const appId = window.location.origin;
-  const browserInfo = `${navigator.userAgent}-${navigator.language}-${appId}`;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(browserInfo);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  return await crypto.subtle.importKey(
-    'raw',
-    hashBuffer,
-    { name: 'AES-GCM', length: 256 },
-    false,
-    ['encrypt', 'decrypt']
-  );
-}
-
-async function encryptApiKey(plaintext) {
-  if (!plaintext) return null;
-  try {
-    const key = await getDerivedKey();
-    const encoder = new TextEncoder();
-    const data = encoder.encode(plaintext);
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      data
-    );
-    const combined = new Uint8Array(iv.length + encrypted.byteLength);
-    combined.set(iv, 0);
-    combined.set(new Uint8Array(encrypted), iv.length);
-    return btoa(String.fromCharCode(...combined));
-  } catch (error) {
-    console.error('Encryption failed:', error);
-    return null;
-  }
-}
-
-async function decryptApiKey(encrypted) {
-  if (!encrypted) return null;
-  try {
-    const key = await getDerivedKey();
-    const combined = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
-    const iv = combined.slice(0, 12);
-    const data = combined.slice(12);
-    const decrypted = await crypto.subtle.decrypt(
-      { name: 'AES-GCM', iv },
-      key,
-      data
-    );
-    const decoder = new TextDecoder();
-    return decoder.decode(decrypted);
-  } catch (error) {
-    console.error('Decryption failed:', error);
-    return null;
-  }
-}
+// Encryption utilities now imported from shared utils/encryption.js module
+// Functions: encryptApiKey(), decryptApiKey()
 
 async function storeEncryptedApiKey(keyName, apiKey) {
   const encrypted = await encryptApiKey(apiKey);
@@ -1647,8 +1587,8 @@ async function loadBookmarks() {
     };
     bookmarkTree = restoreStatuses(bookmarkTree);
 
-    // Load cached scan results from IndexedDB for all bookmarks
-    await restoreCachedStatusesToBookmarkTree();
+    // Cache restoration now happens in scanner.js during scannerService.init()
+    // This runs after initSidebar() completes and operates on the same bookmark objects
 
     // Clear checked bookmarks when loading fresh data
     checkedBookmarks.clear();
@@ -1657,56 +1597,6 @@ async function loadBookmarks() {
   } catch (error) {
     console.error('[loadBookmarks] Error:', error);
     showError('Failed to load bookmarks');
-  }
-}
-
-// Restore cached scan results from IndexedDB to bookmarkTree
-async function restoreCachedStatusesToBookmarkTree() {
-  if (!window.scannerService) {
-    console.log('[Cache Restore] Scanner service not available');
-    return;
-  }
-
-  console.log('[Cache Restore] Loading cached statuses into bookmarkTree...');
-  let linkRestored = 0;
-  let safetyRestored = 0;
-
-  // Recursively restore statuses to all bookmarks
-  const restoreNode = async (node) => {
-    if (node.url && !node.linkStatus && !node.safetyStatus) {
-      // Load cached link status
-      const cachedLink = await window.scannerService.getCachedResult(node.url, 'link');
-      if (cachedLink) {
-        node.linkStatus = cachedLink;
-        linkRestored++;
-      }
-
-      // Load cached safety status
-      const cachedSafety = await window.scannerService.getCachedResult(node.url, 'safety');
-      if (cachedSafety) {
-        node.safetyStatus = cachedSafety.status;
-        node.safetySources = cachedSafety.sources || [];
-        safetyRestored++;
-      }
-    }
-
-    // Recursively process children
-    if (node.children) {
-      for (const child of node.children) {
-        await restoreNode(child);
-      }
-    }
-  };
-
-  // Process all root folders
-  for (const root of bookmarkTree) {
-    await restoreNode(root);
-  }
-
-  if (linkRestored > 0 || safetyRestored > 0) {
-    console.log(`[Cache Restore] Restored ${linkRestored} link + ${safetyRestored} safety statuses to bookmarkTree`);
-  } else {
-    console.log('[Cache Restore] No cached statuses found');
   }
 }
 
@@ -1784,22 +1674,30 @@ async function rescanAllBookmarks() {
 
     const batch = bookmarksToCheck.slice(i, i + BATCH_SIZE);
 
-    // Check each bookmark in the batch in parallel
+    // Check each bookmark in the batch - use scanner service (Web Worker) instead of main thread
     const batchPromises = batch.map(async (node) => {
-      const results = {};
+      // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
+      if (window.scannerService && window.scannerService.worker) {
+        await window.scannerService.scanBookmark(node, true); // Bypass cache for rescan
+        return { id: node.id };
+      } else {
+        // Worker not available - log warning and skip scanning
+        console.warn('[Rescan All] Scanner worker not available, skipping bookmark:', node.url);
+        const results = {};
 
-      if (linkCheckingEnabled) {
-        results.linkStatus = await checkLinkStatus(node.url, true); // Bypass cache for rescan
-      }
-      if (safetyCheckingEnabled) {
-        const safetyStatusResult = await checkSafetyStatus(node.url, true); // Bypass cache for rescan
-        results.safetyStatus = safetyStatusResult.status;
-        results.safetySources = safetyStatusResult.sources || [];
-      }
+        // Set status to unknown since we can't properly check without worker
+        if (linkCheckingEnabled) {
+          results.linkStatus = 'unknown';
+        }
+        if (safetyCheckingEnabled) {
+          results.safetyStatus = 'unknown';
+          results.safetySources = ['Scanner unavailable'];
+        }
 
-      // Update the node in the tree
-      updateBookmarkInTree(node.id, results);
-      return results;
+        // Update the node in the tree
+        updateBookmarkInTree(node.id, results);
+        return results;
+      }
     });
 
     // Wait for all checks in the batch to complete
@@ -1902,22 +1800,30 @@ async function autoCheckBookmarkStatuses() {
       updateBookmarkInTree(item.id, updates);
     });
 
-    // Check this batch - conditionally check link status and/or safety based on settings
+    // Check this batch - use scanner service (Web Worker) instead of main thread
     const checkPromises = batch.map(async (item) => {
       try {
-        const result = { id: item.id };
+        // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
+        if (window.scannerService && window.scannerService.worker) {
+          await window.scannerService.scanBookmark(item, false); // Don't bypass cache for auto-scan
+          // scanBookmark will update the bookmark object and DOM, so just return the ID
+          return { id: item.id };
+        } else {
+          // Worker not available - log warning and skip scanning
+          console.warn('[Auto-Check] Scanner worker not available, skipping bookmark:', item.url);
+          const result = { id: item.id };
 
-        if (linkCheckingEnabled) {
-          result.linkStatus = await checkLinkStatus(item.url);
+          // Set status to unknown since we can't properly check without worker
+          if (linkCheckingEnabled) {
+            result.linkStatus = 'unknown';
+          }
+          if (safetyCheckingEnabled) {
+            result.safetyStatus = 'unknown';
+            result.safetySources = ['Scanner unavailable'];
+          }
+
+          return result;
         }
-
-        if (safetyCheckingEnabled) {
-          const safetyResult = await checkSafetyStatus(item.url);
-          result.safetyStatus = safetyResult.status;
-          result.safetySources = safetyResult.sources;
-        }
-
-        return result;
       } catch (error) {
         console.error(`Error checking bookmark ${item.id} (${item.url}):`, error);
         const errorResult = { id: item.id };
@@ -3024,13 +2930,15 @@ function createBookmarkElement(bookmark) {
 
   // Add click handler for bookmark (open in current tab)
   bookmarkDiv.addEventListener('click', (e) => {
+    console.log('[Bookmark Click] Target:', e.target.className, 'Closest menu:', e.target.closest('.bookmark-menu-btn'));
+
     // Don't open if clicking on menu, actions, preview, status indicators, or checkbox
     if (e.target.closest('.bookmark-menu-btn') ||
         e.target.closest('.bookmark-actions') ||
         e.target.closest('.bookmark-preview-container') ||
         e.target.closest('.status-indicators') ||
-        e.target.closest('.bookmark-top-row') ||
         e.target.closest('.item-checkbox')) {
+      console.log('[Bookmark Click] Ignored - clicked on interactive element');
       return;
     }
     // Don't open if in multi-select mode
@@ -3038,6 +2946,7 @@ function createBookmarkElement(bookmark) {
       return;
     }
     // Open in active tab
+    console.log('[Bookmark Click] Opening URL:', bookmark.url);
     if (isPreviewMode) {
       openBookmarkUrl(bookmark.url, true);
     } else {
@@ -3047,18 +2956,24 @@ function createBookmarkElement(bookmark) {
 
   // Add menu toggle handler
   const menuBtn = bookmarkDiv.querySelector('.bookmark-menu-btn');
-  const handleMenuToggle = (e) => {
-    e.preventDefault(); // Prevent default behavior and synthetic click events
-    e.stopPropagation(); // Stop event from bubbling up
-    e.stopImmediatePropagation(); // Stop other handlers on same element
-    toggleBookmarkMenu(bookmarkDiv);
-    return false;
-  };
-  menuBtn.addEventListener('click', handleMenuToggle, true); // Use capture phase
-  menuBtn.addEventListener('touchend', handleMenuToggle, true); // Use capture phase
-  menuBtn.addEventListener('touchstart', (e) => {
-    e.stopPropagation(); // Also stop touchstart from bubbling
-  }, true);
+  if (!menuBtn) {
+    console.error('[createBookmarkElement] Menu button not found for bookmark:', bookmark.title);
+  } else {
+    const handleMenuToggle = (e) => {
+      console.log('[Menu Button] Clicked! Target:', e.target.className);
+      e.preventDefault(); // Prevent default behavior and synthetic click events
+      e.stopPropagation(); // Stop event from bubbling up
+      e.stopImmediatePropagation(); // Stop other handlers on same element
+      toggleBookmarkMenu(bookmarkDiv);
+      return false;
+    };
+    menuBtn.addEventListener('click', handleMenuToggle, true); // Use capture phase
+    menuBtn.addEventListener('touchend', handleMenuToggle, true); // Use capture phase
+    menuBtn.addEventListener('touchstart', (e) => {
+      console.log('[Menu Button] Touch start');
+      e.stopPropagation(); // Also stop touchstart from bubbling
+    }, true);
+  }
 
   // Add right-click context menu support
   bookmarkDiv.addEventListener('contextmenu', (e) => {
@@ -3784,9 +3699,9 @@ function toggleFolder(folderId, folderElement) {
 
     if (shouldScanFolder(folderId)) {
       console.log(`[Folder Scan Cache] "${folderTitle}" needs scanning (cache expired or never scanned)`);
-      setTimeout(() => {
-        autoCheckBookmarkStatuses();
-        // Save timestamp after successful scan
+      setTimeout(async () => {
+        await autoCheckBookmarkStatuses();
+        // Save timestamp after successful scan completes
         saveFolderScanTimestamp(folderId);
       }, 100);
     } else {
@@ -3807,13 +3722,30 @@ function toggleFolder(folderId, folderElement) {
           const promise = loadCachedStatusesForFolder(folderId);
           console.log('[Folder Toggle] Got promise:', promise);
 
-          promise.then(() => {
-            console.log('[Folder Toggle] Cache load complete, rendering...');
-            renderBookmarks(); // Re-render to show the loaded statuses
-          }).catch(err => {
-            console.error('[Folder Toggle] Cache load failed:', err);
-            renderBookmarks(); // Render anyway even if cache load fails
+          // Add timeout to prevent UI hang if cache loading fails
+          const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Cache load timeout')), 5000);
           });
+
+          Promise.race([promise, timeoutPromise])
+            .then((result) => {
+              console.log('[Folder Toggle] Cache load complete, rendering...');
+              console.log('[Folder Toggle] Cache result:', result);
+
+              // If nothing was loaded from cache, trigger a scan
+              if (result && result.total === 0) {
+                console.log('[Folder Toggle] Cache was empty, triggering auto-scan...');
+                setTimeout(() => {
+                  autoCheckBookmarkStatuses();
+                }, 100);
+              }
+
+              renderBookmarks(); // Re-render to show the loaded statuses
+            })
+            .catch(err => {
+              console.error('[Folder Toggle] Cache load failed:', err);
+              renderBookmarks(); // Render anyway even if cache load fails
+            });
         } catch (err) {
           console.error('[Folder Toggle] Error calling loadCachedStatusesForFolder:', err);
           renderBookmarks();
@@ -3898,6 +3830,9 @@ async function loadCachedStatusesForFolder(folderId) {
   }
 
   console.log(`[Cache Load] COMPLETE - Loaded ${linkLoaded} link + ${safetyLoaded} safety statuses for "${folder.title}"`);
+
+  // Return count of loaded statuses
+  return { linkLoaded, safetyLoaded, total: linkLoaded + safetyLoaded };
 }
 
 // Toggle bookmark menu
@@ -4653,175 +4588,9 @@ function closeAllMenus() {
   });
 }
 
-// Check link status using fetch (web version)
-async function checkLinkStatus(url, bypassCache = false) {
-  if (isPreviewMode) {
-    // Simulate checking in preview mode
-    return new Promise(resolve => {
-      setTimeout(() => {
-        // Random status for demo
-        const statuses = ['live', 'live', 'live', 'dead'];
-        resolve(statuses[Math.floor(Math.random() * statuses.length)]);
-      }, 500);
-    });
-  }
-
-  try {
-    // Use HEAD request to check if URL is accessible
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
-
-    const response = await fetch(url, {
-      method: 'HEAD',
-      mode: 'no-cors', // Allow cross-origin requests
-      signal: controller.signal,
-      cache: bypassCache ? 'reload' : 'default'
-    });
-
-    clearTimeout(timeoutId);
-
-    // Note: With no-cors mode, we can't read the status code
-    // The fetch will succeed if the URL is reachable, fail otherwise
-    // So we just return 'live' if fetch succeeded
-    return 'live';
-  } catch (error) {
-    // Check error type to determine status
-    if (error.name === 'AbortError') {
-      return 'dead'; // Timeout = dead
-    }
-
-    // For other errors (network error, DNS error, etc.), mark as dead
-    console.error('Error checking link status:', error);
-    return 'dead';
-  }
-}
-
-// Check URL safety with heuristic-based security check
-// Uses pattern matching and domain reputation checks
-// Checks for: HTTPS, suspicious patterns, URL shorteners, known safe domains
-async function checkSafetyStatus(url, bypassCache = false) {
-  // Check if URL is whitelisted
-  try {
-    const hostname = new URL(url).hostname;
-    if (whitelistedUrls.has(hostname)) {
-      const result = { status: 'safe', sources: ['Whitelisted by user'] };
-      trackSafetyChange(url, result.status, result.sources);
-      return result;
-    }
-  } catch (error) {
-    console.error('Error parsing URL for whitelist check:', error);
-  }
-
-  if (isPreviewMode) {
-    // Simulate checking in preview mode
-    return new Promise(resolve => {
-      setTimeout(() => {
-        // Mostly safe, some warnings, rare unsafe for demo
-        const random = Math.random();
-        if (random < 0.6) {
-          resolve({ status: 'safe', sources: [] });
-        } else if (random < 0.85) {
-          // Simulate various warning patterns
-          const warningPatterns = [
-            ['HTTP Only (Unencrypted)'],
-            ['URL Shortener'],
-            ['Suspicious TLD'],
-            ['IP Address'],
-            ['HTTP Only (Unencrypted)', 'Suspicious TLD']
-          ];
-          resolve({
-            status: 'warning',
-            sources: warningPatterns[Math.floor(Math.random() * warningPatterns.length)]
-          });
-        } else {
-          resolve({ status: 'unsafe', sources: ['Malware Database Match'] });
-        }
-      }, 800);
-    });
-  }
-
-  try {
-    const parsedUrl = new URL(url);
-    const sources = [];
-    let status = 'safe';
-
-    // FIRST: Check against blocklists (most important)
-    const blocklistResult = blocklistService.checkAgainstBlocklist(url);
-    if (blocklistResult.blocked) {
-      // Found in blocklist - UNSAFE
-      status = 'unsafe';
-      sources.push(...blocklistResult.sources);
-      const result = { status, sources };
-      trackSafetyChange(url, result.status, result.sources);
-      return result;
-    }
-
-    // SECOND: Heuristic checks for warnings
-    // Check 1: HTTPS
-    if (parsedUrl.protocol !== 'https:') {
-      sources.push('HTTP Only (Unencrypted)');
-      status = 'warning';
-    }
-
-    // Check 2: IP address instead of domain
-    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(parsedUrl.hostname)) {
-      sources.push('IP Address');
-      status = 'warning';
-    }
-
-    // Check 3: Suspicious TLDs
-    const suspiciousTLDs = ['.tk', '.ml', '.ga', '.cf', '.gq', '.zip', '.mov'];
-    if (suspiciousTLDs.some(tld => parsedUrl.hostname.endsWith(tld))) {
-      sources.push('Suspicious TLD');
-      status = 'warning';
-    }
-
-    // Check 4: URL shorteners
-    const shorteners = ['bit.ly', 'tinyurl.com', 'goo.gl', 't.co', 'ow.ly', 'is.gd'];
-    if (shorteners.some(s => parsedUrl.hostname.includes(s))) {
-      sources.push('URL Shortener');
-      if (status === 'safe') status = 'warning';
-    }
-
-    // Check 5: Excessive subdomains (possible phishing)
-    const subdomains = parsedUrl.hostname.split('.');
-    if (subdomains.length > 4) {
-      sources.push('Excessive Subdomains');
-      status = 'warning';
-    }
-
-    // Check 6: Suspicious patterns in URL
-    const suspiciousPatterns = [
-      /login/i, /verify/i, /secure/i, /account/i, /update/i, /confirm/i
-    ];
-    const hasSuspiciousPattern = suspiciousPatterns.some(p => p.test(parsedUrl.pathname));
-    const hasNumbersInDomain = /\d/.test(parsedUrl.hostname);
-
-    if (hasSuspiciousPattern && hasNumbersInDomain) {
-      sources.push('Suspicious Patterns');
-      status = 'warning';
-    }
-
-    // If no issues found, mark as safe
-    if (sources.length === 0) {
-      sources.push('Blocklist Check Passed');
-      status = 'safe';
-    }
-
-    const result = { status, sources };
-
-    // Track status change
-    trackSafetyChange(url, result.status, result.sources);
-    return result;
-  } catch (error) {
-    console.error('Error checking URL safety:', error);
-    return { status: 'unknown', sources: [] };
-  }
-}
-
-// Export functions to window for browser API compatibility layer
-window._webCheckLinkStatus = checkLinkStatus;
-window._webCheckSafetyStatus = checkSafetyStatus;
+// NOTE: checkLinkStatus and checkSafetyStatus functions removed - dead code
+// All scanning now happens via scanner service and Web Worker (scanner-worker.js)
+// Browser API compatibility layer above (lines 43-50) was never actually called
 window.updateBookmarkInTree = updateBookmarkInTree;
 window.updateBookmarkStatusInDOM = updateBookmarkStatusInDOM;
 window.renderBookmarks = renderBookmarks;

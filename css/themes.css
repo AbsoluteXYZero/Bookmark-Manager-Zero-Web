@@ -1140,10 +1140,12 @@
       font-size: 16px;
       color: var(--md-sys-color-on-surface-variant);
       cursor: pointer;
-      padding: 4px 6px;
+      padding: 8px 12px; /* Increased padding for larger clickable area */
+      margin: -4px -6px; /* Negative margin to maintain visual spacing */
       border-radius: 6px;
       transition: all 0.2s;
       flex-shrink: 0;
+      position: relative;
     }
 
     .bookmark-menu-btn:hover {

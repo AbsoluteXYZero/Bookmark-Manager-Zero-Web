@@ -45,8 +45,8 @@ class TouchHandler {
     const bookmarkItem = target.closest('.bookmark-item, .folder-item');
     if (!bookmarkItem) return;
 
-    // Ignore if touching hamburger menu or preview image
-    if (target.closest('.hamburger-menu') || target.closest('.preview-image')) {
+    // Ignore if touching menu button or preview image
+    if (target.closest('.bookmark-menu-btn') || target.closest('.preview-image')) {
       return;
     }
 

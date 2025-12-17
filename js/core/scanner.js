@@ -8,6 +8,7 @@ import dbManager from '../storage/indexeddb.js';
 import bookmarkManager from './bookmarks.js';
 import uiManager from './ui.js';
 import blocklistService from './blocklist-service.js';
+import { decryptApiKey } from '../utils/encryption.js';
 
 class ScannerService {
   constructor() {
@@ -146,63 +147,14 @@ class ScannerService {
   }
 
   /**
-   * Get derived encryption key
-   */
-  async getDerivedKey() {
-    const password = window.location.origin;
-    const encoder = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(password),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveKey']
-    );
-    return await crypto.subtle.deriveKey(
-      {
-        name: 'PBKDF2',
-        salt: encoder.encode('bookmark-manager-salt'),
-        iterations: 100000,
-        hash: 'SHA-256'
-      },
-      keyMaterial,
-      { name: 'AES-GCM', length: 256 },
-      false,
-      ['encrypt', 'decrypt']
-    );
-  }
-
-  /**
-   * Decrypt API key
-   */
-  async decryptApiKey(encrypted) {
-    if (!encrypted) return null;
-    try {
-      const key = await this.getDerivedKey();
-      const combined = Uint8Array.from(atob(encrypted), c => c.charCodeAt(0));
-      const iv = combined.slice(0, 12);
-      const data = combined.slice(12);
-      const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        data
-      );
-      const decoder = new TextDecoder();
-      return decoder.decode(decrypted);
-    } catch (error) {
-      console.error('Decryption failed:', error);
-      return null;
-    }
-  }
-
-  /**
    * Get decrypted API key from storage
+   * Uses shared encryption utilities
    */
   async getDecryptedApiKey(keyName) {
     try {
       const encrypted = localStorage.getItem(keyName);
       if (encrypted) {
-        return await this.decryptApiKey(encrypted);
+        return await decryptApiKey(encrypted);
       }
       return null;
     } catch (error) {

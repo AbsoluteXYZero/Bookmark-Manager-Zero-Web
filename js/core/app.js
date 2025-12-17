@@ -106,7 +106,27 @@ class App {
       mainContent.classList.add('hidden');
     }
 
-    // Only GitLab is supported
+    // Check if user is in local mode
+    const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
+
+    if (isLocalMode) {
+      console.log('[Auth] Local mode detected');
+      // Check if there are bookmarks in local storage
+      const hasBookmarks = await dbManager.getAllBookmarks();
+      if (hasBookmarks && hasBookmarks.length > 0) {
+        console.log('[Auth] Found local bookmarks, loading app...');
+        this.isAuthenticated = true;
+        await this.showMainApp();
+        return;
+      } else {
+        // No bookmarks found, show login to import
+        console.log('[Auth] No local bookmarks found');
+        this.showLoginScreen();
+        return;
+      }
+    }
+
+    // Check for GitLab token
     const provider = 'gitlab';
     const token = await authManager.getToken(provider);
 
@@ -156,7 +176,12 @@ class App {
     const loginScreen = document.getElementById('loginScreen');
     if (loginScreen) {
       loginScreen.classList.remove('hidden');
+      // Clear any inline display style that may have been set to prevent flash
+      loginScreen.style.display = '';
     }
+
+    // Add show-login class to html element to make login screen visible
+    document.documentElement.classList.add('show-login');
 
     // Only set up handlers once - check if already initialized
     if (this._loginHandlersInitialized) {
@@ -176,6 +201,94 @@ class App {
    * Set up login button handlers
    */
   setupLoginHandlers() {
+    // Set up mode toggle buttons
+    const localModeBtn = document.getElementById('localModeBtn');
+    const gitlabModeBtn = document.getElementById('gitlabModeBtn');
+    const localInstructions = document.getElementById('localInstructions');
+    const gitlabInstructions = document.getElementById('gitlabInstructions');
+
+    if (localModeBtn && gitlabModeBtn) {
+      localModeBtn.onclick = () => {
+        // Update button styles
+        localModeBtn.style.background = 'var(--md-sys-color-primary)';
+        localModeBtn.style.color = 'var(--md-sys-color-on-primary)';
+        localModeBtn.style.borderColor = 'var(--md-sys-color-primary)';
+        gitlabModeBtn.style.background = 'var(--md-sys-color-surface-variant)';
+        gitlabModeBtn.style.color = 'var(--md-sys-color-on-surface-variant)';
+        gitlabModeBtn.style.borderColor = 'var(--md-sys-color-outline)';
+
+        // Show/hide instructions
+        if (localInstructions) localInstructions.style.display = 'block';
+        if (gitlabInstructions) gitlabInstructions.style.display = 'none';
+      };
+
+      gitlabModeBtn.onclick = () => {
+        // Update button styles
+        gitlabModeBtn.style.background = 'var(--md-sys-color-primary)';
+        gitlabModeBtn.style.color = 'var(--md-sys-color-on-primary)';
+        gitlabModeBtn.style.borderColor = 'var(--md-sys-color-primary)';
+        localModeBtn.style.background = 'var(--md-sys-color-surface-variant)';
+        localModeBtn.style.color = 'var(--md-sys-color-on-surface-variant)';
+        localModeBtn.style.borderColor = 'var(--md-sys-color-outline)';
+
+        // Show/hide instructions
+        if (gitlabInstructions) gitlabInstructions.style.display = 'block';
+        if (localInstructions) localInstructions.style.display = 'none';
+      };
+    }
+
+    // Set up local mode file import
+    const selectFileBtn = document.getElementById('selectFileBtn');
+    const localModeFileInput = document.getElementById('localModeFileInput');
+    const localModeError = document.getElementById('localModeError');
+
+    if (selectFileBtn && localModeFileInput) {
+      selectFileBtn.onclick = () => {
+        localModeFileInput.click();
+      };
+
+      localModeFileInput.onchange = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        try {
+          if (localModeError) localModeError.style.display = 'none';
+          selectFileBtn.disabled = true;
+          selectFileBtn.textContent = 'Importing...';
+
+          const text = await file.text();
+          let bookmarks;
+
+          if (file.name.endsWith('.json')) {
+            bookmarks = await importFromJSON(text);
+          } else if (file.name.endsWith('.html')) {
+            bookmarks = await importFromHTML(text);
+          } else {
+            throw new Error('Unsupported file format. Please use .html or .json files.');
+          }
+
+          // Store bookmarks in local storage
+          await dbManager.saveAllBookmarks(bookmarks);
+
+          // Store a flag indicating local mode
+          await authManager.storePreference('syncProvider', 'local');
+          localStorage.setItem('bmz_local_mode', 'true');
+
+          // Show success and load main app
+          await this.showMainApp();
+
+        } catch (error) {
+          console.error('Import failed:', error);
+          if (localModeError) {
+            localModeError.textContent = error.message || 'Failed to import bookmarks. Please check the file and try again.';
+            localModeError.style.display = 'block';
+          }
+          selectFileBtn.disabled = false;
+          selectFileBtn.textContent = 'Select Bookmarks File';
+        }
+      };
+    }
+
     // Set up GitLab login button handler
     const loginBtnGitlab = document.getElementById('loginBtnGitlab');
     const tokenInputGitlab = document.getElementById('tokenInputGitlab');
@@ -266,6 +379,9 @@ class App {
       await dbManager.clear('bookmarks');
       await dbManager.clear('metadata');
 
+      // Clear local mode flag
+      localStorage.removeItem('bmz_local_mode');
+
       // Keep settings (like theme, API keys) but clear auth-related data
       // Settings are user preferences, not user data
 
@@ -324,6 +440,9 @@ class App {
       const loginScreen = document.getElementById('loginScreen');
       const mainContent = document.getElementById('mainContent');
 
+      // Remove show-login class from html element
+      document.documentElement.classList.remove('show-login');
+
       if (loginScreen) {
         loginScreen.classList.add('hidden');
       }
@@ -333,6 +452,15 @@ class App {
 
       // Clean up any corrupted storage
       await this.cleanupLocalStorage();
+
+      // Check if we're in local mode
+      const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
+
+      // Show/hide Connect GitLab button based on mode
+      const connectGitlabBtn = document.getElementById('connectGitlabBtn');
+      if (connectGitlabBtn) {
+        connectGitlabBtn.style.display = isLocalMode ? 'flex' : 'none';
+      }
 
       // Initialize bookmark manager
       await bookmarkManager.init();
@@ -346,23 +474,28 @@ class App {
       // Changes sync automatically when you add/edit/delete bookmarks or folders
       console.log('Event-driven sync ready');
 
-      // Check if we have a gist set up
-      const hasGist = await this.checkGistSetup();
+      // Skip gist setup and remote sync if in local mode
+      if (!isLocalMode) {
+        // Check if we have a gist set up
+        const hasGist = await this.checkGistSetup();
 
-      if (!hasGist) {
-        // Show gist setup modal (buttons should already work from initUI)
-        await this.showGistSetup();
-        return;
-      }
+        if (!hasGist) {
+          // Show gist setup modal (buttons should already work from initUI)
+          await this.showGistSetup();
+          return;
+        }
 
-      // Sync from remote to ensure we have latest data
-      console.log('[App] Syncing bookmarks from remote...');
-      try {
-        await syncManager.syncFromRemote();
-        await bookmarkManager.reload();
-        console.log('[App] Sync from remote complete');
-      } catch (error) {
-        console.warn('[App] Sync from remote failed, will use cached data:', error);
+        // Sync from remote to ensure we have latest data
+        console.log('[App] Syncing bookmarks from remote...');
+        try {
+          await syncManager.syncFromRemote();
+          await bookmarkManager.reload();
+          console.log('[App] Sync from remote complete');
+        } catch (error) {
+          console.warn('[App] Sync from remote failed, will use cached data:', error);
+        }
+      } else {
+        console.log('[App] Local mode - skipping remote sync');
       }
 
       console.log('[App] Initializing sidebar...');
@@ -699,6 +832,136 @@ class App {
   }
 
   /**
+   * Show Connect GitLab modal for local mode users
+   */
+  showConnectGitlabModal() {
+    const modal = document.getElementById('connectGitlabModal');
+    if (modal) {
+      modal.classList.remove('hidden');
+      modal.style.display = 'flex';
+
+      // Clear any previous errors
+      const errorDiv = document.getElementById('connectGitlabError');
+      if (errorDiv) {
+        errorDiv.style.display = 'none';
+      }
+
+      // Clear input
+      const tokenInput = document.getElementById('connectGitlabTokenInput');
+      if (tokenInput) {
+        tokenInput.value = '';
+      }
+    }
+  }
+
+  /**
+   * Setup Connect GitLab modal handlers
+   */
+  setupConnectGitlabModal() {
+    const modal = document.getElementById('connectGitlabModal');
+    const cancelBtn = document.getElementById('connectGitlabCancelBtn');
+    const confirmBtn = document.getElementById('connectGitlabConfirmBtn');
+    const tokenInput = document.getElementById('connectGitlabTokenInput');
+    const errorDiv = document.getElementById('connectGitlabError');
+
+    if (!modal || !cancelBtn || !confirmBtn || !tokenInput) return;
+
+    // Cancel button - close modal
+    cancelBtn.onclick = () => {
+      modal.classList.add('hidden');
+      modal.style.display = 'none';
+    };
+
+    // Handle Enter key in token input
+    tokenInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') {
+        confirmBtn.click();
+      }
+    });
+
+    // Confirm button - authenticate and migrate
+    confirmBtn.onclick = async () => {
+      const token = tokenInput.value.trim();
+
+      if (!token) {
+        if (errorDiv) {
+          errorDiv.textContent = 'Please enter your Personal Access Token';
+          errorDiv.style.display = 'block';
+        }
+        return;
+      }
+
+      try {
+        // Show loading state
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = 'Connecting...';
+        if (errorDiv) errorDiv.style.display = 'none';
+
+        // Authenticate with token
+        const authResult = await oauthPAT.authenticate(token);
+        console.log(`Authenticated with GitLab:`, authResult.user.username);
+
+        // Store token securely
+        await authManager.storeToken(authResult.access_token, null, 'gitlab');
+
+        // Store provider preference
+        await authManager.storePreference('syncProvider', 'gitlab');
+
+        // Set the provider in oauthPAT
+        oauthPAT.provider = 'gitlab';
+        oauthPAT.token = authResult.access_token;
+        oauthPAT.user = authResult.user;
+
+        this.currentUser = authResult.user;
+        this.isAuthenticated = true;
+
+        // Clear local mode flag - user is now in GitLab mode
+        localStorage.removeItem('bmz_local_mode');
+
+        // Close modal
+        modal.classList.add('hidden');
+        modal.style.display = 'none';
+
+        // Show success message
+        this.showToast('GitLab connected successfully! Your bookmarks will now sync to the cloud.', 'success');
+
+        // Initialize sync manager and create/use gist
+        await syncManager.init();
+
+        // Check for existing gist or create new one
+        const hasGist = await this.checkGistSetup();
+
+        if (!hasGist) {
+          // Show gist setup to let user create or select snippet
+          await this.showGistSetup();
+        } else {
+          // Sync local bookmarks to GitLab
+          console.log('[App] Syncing local bookmarks to GitLab...');
+          await syncManager.syncToRemote();
+          this.showToast('Local bookmarks synced to GitLab successfully!', 'success');
+        }
+
+        // Hide Connect GitLab button now that we're in GitLab mode
+        const connectGitlabBtn = document.getElementById('connectGitlabBtn');
+        if (connectGitlabBtn) {
+          connectGitlabBtn.style.display = 'none';
+        }
+
+      } catch (error) {
+        console.error('GitLab connection failed:', error);
+        if (errorDiv) {
+          errorDiv.textContent = error.message || 'Authentication failed. Please check your token and try again.';
+          errorDiv.style.display = 'block';
+        }
+
+        // Reset button
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = 'Connect GitLab';
+      }
+    };
+  }
+
+  /**
    * Load bookmarks from Gist or local storage
    */
   async loadBookmarks() {
@@ -841,6 +1104,17 @@ class App {
         await this.logout();
       });
     }
+
+    // Connect GitLab button (for local mode users)
+    const connectGitlabBtn = document.getElementById('connectGitlabBtn');
+    if (connectGitlabBtn) {
+      connectGitlabBtn.addEventListener('click', () => {
+        this.showConnectGitlabModal();
+      });
+    }
+
+    // Connect GitLab modal handlers
+    this.setupConnectGitlabModal();
 
     // Rescan all button
     const rescanAllBtn = document.getElementById('rescanAllBtn');
