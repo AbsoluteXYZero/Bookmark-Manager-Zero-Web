@@ -105,7 +105,7 @@ class OAuthPAT {
     const user = await response.json();
 
     // Verify token has gist scope by trying to list gists
-    const gistResponse = await fetch('https://api.github.com/gists', {
+    const gistResponse = await fetch('https://api.github.com/gists?per_page=100', {
       headers: {
         'Authorization': `token ${token}`,
         'Accept': 'application/vnd.github.v3+json'

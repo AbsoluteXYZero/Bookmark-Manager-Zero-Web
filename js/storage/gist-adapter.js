@@ -41,12 +41,30 @@ class GistAdapter {
       if (userResponse.ok) {
         const userData = await userResponse.json();
         console.log('[GetAllGists] Authenticated as:', userData.login, '(User ID:', userData.id + ')');
+
+        // Check token scopes from response headers
+        const scopes = userResponse.headers.get('X-OAuth-Scopes');
+        console.log('[GetAllGists] Token scopes:', scopes || 'Unable to retrieve scopes');
+      } else {
+        console.error('[GetAllGists] Failed to verify user:', userResponse.status);
       }
 
-      console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists`);
-      const response = await fetch(`${this.apiBase}/gists`, { headers });
+      // Fetch all gists (public and private) for the authenticated user
+      // per_page=100 ensures we get up to 100 gists in one request
+      console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists?per_page=100`);
+      const response = await fetch(`${this.apiBase}/gists?per_page=100`, { headers });
 
       console.log('[GetAllGists] Response status:', response.status, response.statusText);
+
+      // Check pagination headers
+      const linkHeader = response.headers.get('Link');
+      const totalCount = response.headers.get('X-Total-Count');
+      if (linkHeader) {
+        console.log('[GetAllGists] Pagination Link header:', linkHeader);
+      }
+      if (totalCount) {
+        console.log('[GetAllGists] Total count:', totalCount);
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -57,12 +75,40 @@ class GistAdapter {
       const gists = await response.json();
       console.log('[GetAllGists] Retrieved', gists.length, 'gists');
 
-      // If we got 0 gists, let's try to understand why
+      // Debug: Log raw response for troubleshooting
       if (gists.length === 0) {
+        console.log('[GetAllGists] Raw API response:', JSON.stringify(gists).substring(0, 500));
+
+        // Try alternative endpoint to check if gists exist
+        console.log('[GetAllGists] Trying alternative endpoint: /users/USERNAME/gists');
+        try {
+          const username = (await (await fetch(`${this.apiBase}/user`, { headers })).json()).login;
+          const altResponse = await fetch(`${this.apiBase}/users/${username}/gists?per_page=100`, { headers });
+          if (altResponse.ok) {
+            const altGists = await altResponse.json();
+            console.log('[GetAllGists] Alternative endpoint returned:', altGists.length, 'gists');
+            if (altGists.length > 0) {
+              console.warn('[GetAllGists] WARNING: Alternative endpoint found gists, but /gists endpoint did not!');
+              return altGists; // Use the alternative result
+            }
+          }
+        } catch (err) {
+          console.error('[GetAllGists] Alternative endpoint failed:', err);
+        }
+      }
+
+      // Log details about each gist
+      if (gists.length > 0) {
+        console.log('[GetAllGists] Gist details:');
+        gists.forEach((g, idx) => {
+          const fileNames = Object.keys(g.files).join(', ');
+          const visibility = g.public ? 'public' : 'private';
+          console.log(`  ${idx + 1}. ${g.id} - ${visibility} - Files: ${fileNames} - Desc: "${g.description || 'none'}"`);
+        });
+      } else {
         console.warn('[GetAllGists] No gists found. Possible reasons:');
         console.warn('  1. This GitHub account has no Gists');
-        console.warn('  2. All Gists are secret and require different API endpoint');
-        console.warn('  3. Token permissions issue');
+        console.warn('  2. Token permissions issue (needs "gist" scope)');
       }
 
       return gists;
@@ -223,6 +269,22 @@ class GistAdapter {
       this.setGistId(gist.id);
 
       console.log('Created bookmark Gist:', this.gistId);
+
+      // Verify the gist appears in the list
+      console.log('[CreateGist] Verifying gist appears in list...');
+      try {
+        const allGists = await this.getAllGists();
+        const foundInList = allGists.some(g => g.id === gist.id);
+        if (foundInList) {
+          console.log('[CreateGist] ✓ Gist successfully appears in getAllGists()');
+        } else {
+          console.warn('[CreateGist] ⚠ WARNING: Newly created gist does NOT appear in getAllGists()!');
+          console.warn('[CreateGist] This suggests a GitHub API caching or permissions issue.');
+        }
+      } catch (err) {
+        console.error('[CreateGist] Failed to verify gist in list:', err);
+      }
+
       return gist.id;
     } catch (error) {
       console.error('Failed to create bookmark Gist:', error);
@@ -256,6 +318,12 @@ class GistAdapter {
         if (response.status === 404) {
           const errorText = await response.text();
           console.error('[ReadGist] 404 Error - Gist not found. Response:', errorText);
+
+          // Clear the invalid Gist ID immediately
+          console.warn('[ReadGist] Clearing invalid Gist ID:', id);
+          this.gistId = null;
+          localStorage.removeItem('bmz_gist_id');
+
           throw new Error('Bookmark Gist not found');
         }
         const errorText = await response.text();
@@ -371,32 +439,6 @@ class GistAdapter {
       }
     } catch (error) {
       console.error('Failed to delete Gist:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get all user's Gists (for debugging)
-   */
-  async getAllGists() {
-    try {
-      const headers = await this.getHeaders();
-      console.log('[GetAllGists] Fetching from:', `${this.apiBase}/gists`);
-      const response = await fetch(`${this.apiBase}/gists`, { headers });
-
-      console.log('[GetAllGists] Response status:', response.status, response.statusText);
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('[GetAllGists] Error response:', errorText);
-        throw new Error(`Failed to fetch gists: ${response.status}`);
-      }
-
-      const gists = await response.json();
-      console.log('[GetAllGists] Retrieved', gists.length, 'gists');
-      return gists;
-    } catch (error) {
-      console.error('Failed to fetch all gists:', error);
       throw error;
     }
   }

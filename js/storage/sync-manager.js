@@ -99,10 +99,17 @@ class SyncManager {
         this.lastSyncTime = lastSyncRecord.value;
       }
 
-      // Start auto-sync if online
-      if (navigator.onLine && this.autoSyncEnabled) {
-        this.startAutoSync();
+      // Restore hasUnsyncedChanges from persistent storage
+      const hasPending = await this.hasPendingChanges();
+      if (hasPending) {
+        console.log('[Init] Restored hasUnsyncedChanges from storage: true');
+        this.hasUnsyncedChanges = true;
       }
+
+      // Auto-sync is disabled - we only sync on user actions (add/edit/delete bookmarks)
+      // This prevents rate limiting and account flagging
+      // Use the manual sync button to pull changes from other devices if needed
+      console.log('[Init] Timer-based auto-sync disabled - using event-driven sync only');
 
       // Listen for online/offline events
       window.addEventListener('online', () => this.handleOnline());
@@ -189,6 +196,7 @@ class SyncManager {
    * Mark that local changes need to be synced
    */
   async markChanged() {
+    console.log('[MarkChanged] Setting hasUnsyncedChanges = true');
     this.hasUnsyncedChanges = true;
     await this.markPendingChanges(true);
 
@@ -199,6 +207,12 @@ class SyncManager {
         clearTimeout(this.syncDebounceTimer);
       }
       this.syncDebounceTimer = setTimeout(async () => {
+        // Check if we still have a valid remote ID before syncing
+        if (!this.getRemoteId()) {
+          console.log('[MarkChanged] No remote ID, skipping sync');
+          return;
+        }
+
         try {
           await this.syncToRemote();
           this.emitEvent('syncSuccess', 'Changes synced to remote');
@@ -207,7 +221,7 @@ class SyncManager {
           this.emitEvent('syncError', error.message || 'Failed to sync changes');
           // Retry after 5 seconds
           setTimeout(() => {
-            if (this.hasUnsyncedChanges && navigator.onLine) {
+            if (this.hasUnsyncedChanges && navigator.onLine && this.getRemoteId()) {
               this.syncToRemote().catch(err => {
                 console.error('Retry sync failed:', err);
                 this.emitEvent('syncError', 'Sync retry failed. Changes will sync when connection improves.');
@@ -223,58 +237,100 @@ class SyncManager {
    * Sync local changes to remote (push)
    */
   async syncToRemote() {
+    console.log('[SyncToRemote] Called, checking conditions...');
+
     if (this.isSyncing) {
-      console.log('Sync already in progress, skipping...');
+      console.log('[SyncToRemote] Sync already in progress, skipping...');
       return;
     }
 
     if (!navigator.onLine) {
-      console.log('Offline, cannot sync to remote');
+      console.log('[SyncToRemote] Offline, cannot sync to remote');
       return;
     }
 
     const remoteId = this.getRemoteId();
     if (!remoteId) {
-      console.log('No remote ID, cannot sync');
+      console.log('[SyncToRemote] No remote ID, cannot sync');
       return;
     }
 
+    console.log(`[SyncToRemote] All conditions passed. Provider: ${this.provider}, Remote ID: ${remoteId}`);
     this.isSyncing = true;
 
+    // Cancel any pending debounced sync since we're doing an explicit sync now
+    if (this.syncDebounceTimer) {
+      clearTimeout(this.syncDebounceTimer);
+      this.syncDebounceTimer = null;
+      console.log('[SyncToRemote] Cancelled pending debounced sync');
+    }
+
     try {
-      console.log(`Syncing local changes to ${this.provider}...`);
+      console.log(`[SyncToRemote] Starting sync of local changes to ${this.provider}...`);
 
       // Acquire lock
       await this.acquireLock();
 
       // Load local bookmark tree
       const localBookmarks = await this.loadLocalBookmarks();
+      const bookmarkCount = this.countBookmarksInTree(localBookmarks);
+      console.log(`[SyncToRemote] Loaded local bookmarks: ${bookmarkCount} total bookmarks`);
 
       // Get remote version
       const adapter = this.getAdapter();
       const remoteData = await adapter.readBookmarks(remoteId);
       const localVersion = await this.getLocalVersion();
 
+      console.log(`[SyncToRemote] Version check - Local: ${localVersion}, Remote: ${remoteData.version}`);
+
       // Check for conflicts
       if (remoteData.version > localVersion) {
-        console.warn('Remote has newer changes! Conflict detected.');
+        console.warn('[SyncToRemote] Remote has newer changes! Conflict detected.');
         throw new Error('Sync conflict: Remote has newer changes. Please reload and try again.');
       }
 
       // Push local changes
       const newVersion = remoteData.version + 1;
+      console.log(`[SyncToRemote] Pushing ${bookmarkCount} bookmarks to remote with version ${newVersion}...`);
       await adapter.updateBookmarks(remoteId, localBookmarks, newVersion);
 
       // Update local metadata
       await this.setLocalVersion(newVersion);
       await this.markPendingChanges(false);
+      console.log('[SyncToRemote] Setting hasUnsyncedChanges = false');
       this.hasUnsyncedChanges = false;
       this.lastSyncTime = Date.now();
       await dbManager.put('metadata', { key: 'lastSync', value: this.lastSyncTime });
 
-      console.log('Sync to remote complete, version:', newVersion);
+      console.log(`[SyncToRemote] Sync complete! Version ${newVersion} with ${bookmarkCount} bookmarks pushed to remote`);
     } catch (error) {
       console.error('Sync to remote failed:', error);
+
+      // If the error is a 404 (Gist/Snippet not found), stop syncing
+      if (error.message && error.message.includes('not found')) {
+        console.warn('[SyncToRemote] Remote not found (404), aborting sync and clearing stored ID');
+        this.hasUnsyncedChanges = false; // Clear the flag to prevent retry loops
+
+        // Clear the stored ID
+        if (this.provider === 'github') {
+          localStorage.removeItem('bmz_gist_id');
+          await dbManager.delete('metadata', 'gistId');
+          this.gistId = null;
+          gistAdapter.gistId = null;
+        } else if (this.provider === 'gitlab') {
+          localStorage.removeItem('bmz_snippet_id');
+          await dbManager.delete('metadata', 'snippetId');
+          this.snippetId = null;
+          snippetAdapter.snippetId = null;
+        }
+
+        // Emit event to notify UI that setup is needed
+        this.emitEvent('syncError', {
+          error: 'Remote storage not found. Please set up sync again.',
+          requiresSetup: true
+        });
+      }
+
       throw error;
     } finally {
       this.isSyncing = false;
@@ -406,14 +462,18 @@ class SyncManager {
 
       const adapter = this.getAdapter();
       const remoteData = await adapter.readBookmarks(remoteId);
+      const remoteBookmarkCount = this.countBookmarksInTree(remoteData);
       console.log('[SyncFromRemote] Remote data fetched:', {
         hasRoots: !!remoteData?.roots,
         rootKeys: remoteData?.roots ? Object.keys(remoteData.roots) : [],
-        version: remoteData?.version
+        version: remoteData?.version,
+        bookmarkCount: remoteBookmarkCount
       });
 
+      const localData = await this.loadLocalBookmarks();
+      const localBookmarkCount = this.countBookmarksInTree(localData);
       const localVersion = await this.getLocalVersion();
-      console.log('[SyncFromRemote] Local version:', localVersion);
+      console.log('[SyncFromRemote] Local version:', localVersion, 'Local bookmarks:', localBookmarkCount);
 
       // Sync if remote is newer OR if local is empty (version 0)
       if (remoteData.version > localVersion || localVersion === 0) {
@@ -629,6 +689,26 @@ class SyncManager {
   }
 
   /**
+   * Count total bookmarks in a tree (for logging)
+   */
+  countBookmarksInTree(tree) {
+    if (!tree || !tree.roots) return 0;
+
+    let count = 0;
+    const countInNode = (node) => {
+      if (node.type === 'bookmark' || node.url) {
+        count++;
+      }
+      if (node.children) {
+        node.children.forEach(child => countInNode(child));
+      }
+    };
+
+    Object.values(tree.roots).forEach(root => countInNode(root));
+    return count;
+  }
+
+  /**
    * Get empty bookmark tree structure
    */
   getEmptyBookmarkTree() {
@@ -674,19 +754,31 @@ class SyncManager {
   }
 
   /**
-   * Start auto-sync (poll every 60 seconds when online)
+   * Start auto-sync (poll every 5 minutes when online)
    */
   startAutoSync() {
     if (this.syncInterval) {
       return; // Already running
     }
 
-    console.log('Starting auto-sync...');
+    // Use 5 minutes (300000ms) to avoid rate limiting and account flagging
+    const syncIntervalMs = 300000; // 5 minutes
+    console.log('Starting auto-sync (every 5 minutes)...');
+
     this.syncInterval = setInterval(async () => {
       if (navigator.onLine && !this.isSyncing) {
+        // Check if we have a remote ID configured before trying to sync
+        const remoteId = this.getRemoteId();
+        if (!remoteId) {
+          console.log('[AutoSync] Skipping - no remote storage configured');
+          return;
+        }
+
         try {
           // First, push any local changes if needed
+          console.log(`[AutoSync] hasUnsyncedChanges: ${this.hasUnsyncedChanges}`);
           if (this.hasUnsyncedChanges) {
+            console.log('[AutoSync] Unsynced changes detected, pushing to remote...');
             await this.syncToRemote();
           }
           // Then, pull remote changes
@@ -696,15 +788,16 @@ class SyncManager {
           this.emitEvent('syncError', 'Auto-sync failed: ' + error.message);
         }
       }
-    }, 60000); // Every 60 seconds
+    }, syncIntervalMs);
   }
 
   /**
    * Manual sync trigger - bidirectional
+   * @param {boolean} forcePush - Force push local changes even if hasUnsyncedChanges is false
    */
-  async manualSync() {
+  async manualSync(forcePush = false) {
     if (this.isSyncing) {
-      console.log('Sync already in progress');
+      console.log('[ManualSync] Sync already in progress');
       return;
     }
 
@@ -720,8 +813,11 @@ class SyncManager {
     }
 
     try {
+      console.log(`[ManualSync] Starting (forcePush: ${forcePush}, hasUnsyncedChanges: ${this.hasUnsyncedChanges})`);
+
       // Push local changes first
-      if (this.hasUnsyncedChanges) {
+      if (this.hasUnsyncedChanges || forcePush) {
+        console.log('[ManualSync] Pushing local changes to remote...');
         await this.syncToRemote();
       }
       // Then pull remote changes

@@ -95,6 +95,7 @@ function parseHTMLBookmarks(htmlContent) {
   // Process folders first - match them to root folders
   for (const node of folders) {
     const title = node.title.toLowerCase();
+    console.log(`[HTML Import] Processing folder: "${node.title}" (lowercase: "${title}")`);
 
     // Check for PERSONAL_TOOLBAR_FOLDER attribute (highest priority)
     // This is the Netscape standard way to mark the toolbar folder
@@ -135,7 +136,7 @@ function parseHTMLBookmarks(htmlContent) {
     // Unrecognized folder - add to default container (menu or other based on H1)
     else {
       const containerName = defaultContainer === 'menu' ? 'Bookmarks Menu' : 'Other Bookmarks';
-      console.log(`[HTML Import] Adding unrecognized folder "${node.title}" to ${containerName}`);
+      console.log(`[HTML Import] Adding unrecognized folder "${node.title}" to ${containerName} (foundToolbar=${foundToolbar}, foundMenu=${foundMenu}, foundOther=${foundOther}, foundMobile=${foundMobile})`);
       bookmarkTree.roots[defaultContainer].children.push(node);
     }
   }
@@ -146,6 +147,10 @@ function parseHTMLBookmarks(htmlContent) {
     console.log(`[HTML Import] Adding ${orphanedBookmarks.length} orphaned bookmarks to ${containerName}`);
     bookmarkTree.roots[defaultContainer].children.push(...orphanedBookmarks);
   }
+
+  // Final summary
+  console.log(`[HTML Import] Final folder match status: Toolbar=${foundToolbar}, Menu=${foundMenu}, Other=${foundOther}, Mobile=${foundMobile}`);
+  console.log(`[HTML Import] Bookmark counts - Bar: ${bookmarkTree.roots.bookmark_bar.children.length}, Menu: ${bookmarkTree.roots.menu.children.length}, Other: ${bookmarkTree.roots.other.children.length}, Mobile: ${bookmarkTree.roots.mobile.children.length}`);
 
   return bookmarkTree;
 }

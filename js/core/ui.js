@@ -257,7 +257,8 @@ class UIManager {
     if (this.displayOptions.favicon && bookmark.url) {
       const faviconUrl = this.getFaviconUrl(bookmark.url);
       if (faviconUrl) {
-        faviconHtml = `<img class="bookmark-favicon" src="${this.escapeHtml(faviconUrl)}" alt="" onerror="this.style.display='none'" />`;
+        // Use onerror to silently hide broken favicons without console errors
+        faviconHtml = `<img class="bookmark-favicon" src="${this.escapeHtml(faviconUrl)}" alt="" onerror="this.style.display='none';this.onerror=null;" loading="lazy" />`;
       }
     }
 

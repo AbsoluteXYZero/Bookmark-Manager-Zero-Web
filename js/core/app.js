@@ -14,7 +14,6 @@ import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
 import uiManager from './ui.js';
 import scannerService from './scanner.js';
-import SyncTimer from './sync-timer.js';
 import { exportAsHTML } from '../import-export/html-exporter.js';
 import { exportAsJSON } from '../import-export/json-exporter.js';
 import { importFromHTML } from '../import-export/html-parser.js';
@@ -27,7 +26,6 @@ class App {
     this.isAuthenticated = false;
     this.isInitialized = false;
     this.currentUser = null;
-    this.syncTimer = null;
 
     // Expose provider switcher IMMEDIATELY for login screen onclick handlers
     // This must be available before any async initialization happens
@@ -485,10 +483,9 @@ class App {
       await syncManager.init();
       console.log('Sync manager initialized');
 
-      // Initialize sync timer UI
-      this.syncTimer = new SyncTimer(syncManager);
-      this.syncTimer.restoreState();
-      console.log('Sync timer initialized');
+      // Sync timer removed - using event-driven sync only
+      // Changes sync automatically when you add/edit/delete bookmarks or folders
+      console.log('Event-driven sync ready');
 
       // Check if we have a gist set up
       const hasGist = await this.checkGistSetup();
@@ -603,6 +600,30 @@ class App {
     multipleGistsSection.style.display = 'none';
 
     try {
+      // FIRST check if we have a saved gist/snippet ID in localStorage
+      const savedId = provider === 'gitlab' ?
+        localStorage.getItem('bmz_snippet_id') :
+        localStorage.getItem('bmz_gist_id');
+
+      if (savedId) {
+        console.log(`[GistSetup] Found saved ${itemName} ID in localStorage:`, savedId);
+        // Try to use the saved ID directly
+        try {
+          await this.useRemoteStorage(savedId, provider);
+          modal.style.display = 'none';
+          modal.classList.add('hidden');
+          return; // Success! Don't show the setup modal
+        } catch (err) {
+          console.warn(`[GistSetup] Saved ${itemName} ID is invalid:`, err);
+          // Clear the invalid ID and continue to show setup options
+          if (provider === 'gitlab') {
+            localStorage.removeItem('bmz_snippet_id');
+          } else {
+            localStorage.removeItem('bmz_gist_id');
+          }
+        }
+      }
+
       // Get all remote items (gists or snippets)
       const items = provider === 'gitlab' ?
         await adapter.getAllSnippets() :
@@ -767,6 +788,17 @@ class App {
   async useRemoteStorage(itemId, provider) {
     try {
       const itemName = provider === 'gitlab' ? 'snippet' : 'gist';
+
+      // Verify the remote storage exists before saving the ID
+      console.log(`[UseRemoteStorage] Verifying ${itemName} ${itemId} exists...`);
+      const adapter = provider === 'gitlab' ? snippetAdapter : gistAdapter;
+      try {
+        await adapter.readBookmarks(itemId);
+        console.log(`[UseRemoteStorage] ${itemName} verified successfully`);
+      } catch (error) {
+        console.error(`[UseRemoteStorage] Failed to verify ${itemName}:`, error);
+        throw new Error(`Cannot use this ${itemName}: ${error.message}`);
+      }
 
       if (provider === 'gitlab') {
         snippetAdapter.setSnippetId(itemId);
@@ -998,6 +1030,41 @@ class App {
       });
     }
 
+    // Manual sync button
+    const manualSyncBtn = document.getElementById('manualSyncBtn');
+    if (manualSyncBtn) {
+      manualSyncBtn.addEventListener('click', async (e) => {
+        console.log('[ManualSync] Button clicked');
+
+        // Check if Shift key is held for force push
+        const forcePush = e.shiftKey;
+        if (forcePush) {
+          console.log('[ManualSync] Shift-click detected - forcing push to remote');
+          if (!confirm('Force push local bookmarks to remote? This will overwrite the remote with your local data.')) {
+            return;
+          }
+        }
+
+        // Show loading state
+        manualSyncBtn.disabled = true;
+        const originalContent = manualSyncBtn.innerHTML;
+        manualSyncBtn.innerHTML = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="animation: spin 1s linear infinite;"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>';
+
+        try {
+          // Force sync to remote if Shift is held
+          await syncManager.manualSync(forcePush);
+          this.showToast('Sync completed successfully', 'success');
+        } catch (error) {
+          console.error('[ManualSync] Failed:', error);
+          this.showToast(`Sync failed: ${error.message}`, 'error');
+        } finally {
+          // Restore button state
+          manualSyncBtn.disabled = false;
+          manualSyncBtn.innerHTML = originalContent;
+        }
+      });
+    }
+
     // Logout button
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
@@ -1038,6 +1105,16 @@ class App {
         }
       });
     });
+
+    // Suppress favicon 404 errors in console
+    window.addEventListener('error', (e) => {
+      // Suppress image loading errors (favicons)
+      if (e.target && e.target.tagName === 'IMG' && e.target.classList.contains('bookmark-favicon')) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
+    }, true);
 
     // Close menus when clicking outside
     document.addEventListener('click', () => {
@@ -1191,8 +1268,15 @@ class App {
         // Load the imported tree
         await bookmarkManager.replaceTree(bookmarkTree);
 
-        // Sync to Gist
-        await syncManager.syncToRemote();
+        // Sync to Gist - explicitly call syncToRemote and log the result
+        console.log('[Import] Starting sync to remote after import...');
+        try {
+          await syncManager.syncToRemote();
+          console.log('[Import] Sync to remote completed successfully');
+        } catch (syncError) {
+          console.error('[Import] Sync to remote failed:', syncError);
+          this.showToast(`Import succeeded but sync failed: ${syncError.message}`, 'warning');
+        }
 
         // Re-render UI
         const tree = bookmarkManager.getTree();
