@@ -19,6 +19,7 @@ class ScannerService {
     this.totalCount = 0;
     this.cacheExpiryDays = 7;
     this.workerInitialized = false;
+    this.urlsBeingScanned = new Set(); // Track URLs currently being scanned to prevent duplicates
   }
 
   /**
@@ -243,6 +244,9 @@ class ScannerService {
   async handleScanComplete(data) {
     const { id, url, linkStatus, safetyStatus, safetySources } = data;
 
+    // Remove from tracking set
+    this.urlsBeingScanned.delete(url);
+
     // Cache both results
     await this.cacheResult(url, linkStatus, 'link');
     await this.cacheResult(url, { status: safetyStatus, sources: safetySources }, 'safety');
@@ -273,6 +277,12 @@ class ScannerService {
    */
   handleScanError(data) {
     console.error('Scan error for', data.url, ':', data.error);
+
+    // Remove from tracking set
+    if (data.url) {
+      this.urlsBeingScanned.delete(data.url);
+    }
+
     this.scannedCount++;
     this.updateProgress();
     this.processQueue();
@@ -328,6 +338,14 @@ class ScannerService {
   async scanBookmark(bookmark, bypassCache = false) {
     if (!this.worker || !bookmark.url) return;
 
+    // Skip if this URL is already being scanned
+    if (this.urlsBeingScanned.has(bookmark.url)) {
+      console.log(`[Scanner] Skipping duplicate scan for ${bookmark.url}`);
+      this.scannedCount++;
+      this.updateProgress();
+      return;
+    }
+
     // Check cache first
     if (!bypassCache) {
       const cachedLink = await this.getCachedResult(bookmark.url, 'link');
@@ -353,9 +371,16 @@ class ScannerService {
           window.updateBookmarkStatusInDOM(bookmark.id, cachedLink, cachedSafety.status, cachedSafety.sources, bookmark.url);
         }
 
+        // Update progress counter
+        this.scannedCount++;
+        this.updateProgress();
+
         return;
       }
     }
+
+    // Mark URL as being scanned
+    this.urlsBeingScanned.add(bookmark.url);
 
     // Send to worker
     this.worker.postMessage({
@@ -380,6 +405,9 @@ class ScannerService {
     this.scannedCount = 0;
     this.bypassCache = bypassCache;
 
+    // Clear tracking set at start of new scan
+    this.urlsBeingScanned.clear();
+
     // Get all bookmarks
     const allBookmarks = bookmarkManager.getAllBookmarks();
     this.totalCount = allBookmarks.length;
@@ -398,9 +426,12 @@ class ScannerService {
    */
   processQueue() {
     if (this.scanQueue.length === 0) {
-      this.isScanning = false;
-      console.log('Scan complete');
-      this.updateProgress('Scan complete');
+      // Only log completion once
+      if (this.isScanning) {
+        this.isScanning = false;
+        console.log('Scan complete');
+        this.updateProgress('Scan complete');
+      }
       return;
     }
 
@@ -456,10 +487,14 @@ class ScannerService {
 
     console.log(`Scanning ${bookmarksInFolder.length} bookmarks in folder "${folder.title}"`);
 
+    // Clear tracking set at start of folder scan
+    this.urlsBeingScanned.clear();
+
     this.scanQueue = [...bookmarksInFolder];
     this.totalCount = bookmarksInFolder.length;
     this.scannedCount = 0;
     this.isScanning = true;
+    this.bypassCache = bypassCache;
 
     this.processQueue();
   }
@@ -470,6 +505,8 @@ class ScannerService {
   stopScan() {
     this.scanQueue = [];
     this.isScanning = false;
+    // Clear tracking set when scan is stopped
+    this.urlsBeingScanned.clear();
     this.updateProgress('Scan stopped');
   }
 }

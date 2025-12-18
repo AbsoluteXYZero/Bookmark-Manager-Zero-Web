@@ -378,6 +378,13 @@ let apiKeys = {
   virusTotalApiKey: null
 };
 
+// Track rate-limited APIs
+let rateLimitedApis = {
+  google: false,
+  yandex: false,
+  virustotal: false
+};
+
 // Store blocklist data passed from main thread
 let blocklist = new Set();
 let domainSourceMap = new Map();
