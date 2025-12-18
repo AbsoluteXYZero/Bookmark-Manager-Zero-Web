@@ -97,26 +97,68 @@ async function checkLinkStatus(url) {
   };
 
   try {
-    // Try HEAD request first
-    const response = await fetch(url, {
-      method: 'HEAD',
-      signal: controller.signal,
-      credentials: 'omit',
-      redirect: 'follow',
-      headers: headers
-    });
+    // Try fetch with cors mode first to get redirect info
+    // Fall back to no-cors if CORS blocks us
+    let response;
+    let usedCors = false;
+
+    try {
+      const corsController = new AbortController();
+      const corsTimeout = setTimeout(() => corsController.abort(), 10000);
+
+      response = await fetch(url, {
+        method: 'HEAD',
+        signal: corsController.signal,
+        mode: 'cors',
+        credentials: 'omit',
+        redirect: 'follow',
+        headers: headers
+      });
+      clearTimeout(corsTimeout);
+      usedCors = true;
+    } catch (corsError) {
+      // CORS blocked, try no-cors mode with fresh controller
+      const noCorsController = new AbortController();
+      const noCorsTimeout = setTimeout(() => noCorsController.abort(), 10000);
+
+      response = await fetch(url, {
+        method: 'HEAD',
+        signal: noCorsController.signal,
+        mode: 'no-cors',
+        credentials: 'omit',
+        redirect: 'follow',
+        headers: headers
+      });
+      clearTimeout(noCorsTimeout);
+    }
+
     clearTimeout(timeoutId);
 
-    // Check if redirected to parking domain
-    if (response.redirected || response.url !== url) {
-      const finalHost = new URL(response.url).hostname.toLowerCase();
-      if (!isParkingExempt(finalHost) && PARKING_DOMAINS.some(domain => finalHost.includes(domain))) {
-        return 'parked';
+    // Check if redirected to parking domain (only works with cors mode)
+    if (usedCors && response.url) {
+      try {
+        const finalHost = new URL(response.url).hostname.toLowerCase();
+        const originalHost = new URL(url).hostname.toLowerCase();
+
+        // Only flag if redirected to a DIFFERENT domain that's a known parking service
+        if (finalHost !== originalHost &&
+            !isParkingExempt(finalHost) &&
+            PARKING_DOMAINS.some(domain => finalHost.includes(domain))) {
+          return 'parked';
+        }
+      } catch (e) {
+        // URL parsing failed, continue with live status
+      }
+
+      // Check response status (only available in cors mode)
+      // 404, 410, 451 indicate the content is gone
+      if (response.status === 404 || response.status === 410 || response.status === 451) {
+        return 'dead';
       }
     }
 
-    // Check for successful status codes
-    if (response.ok || (response.status >= 300 && response.status < 400)) {
+    // Site is reachable - check for successful status codes
+    if (usedCors && (response.ok || (response.status >= 300 && response.status < 400))) {
       const urlHost = new URL(url).hostname.toLowerCase();
       if (isParkingExempt(urlHost)) {
         return 'live';
@@ -190,26 +232,28 @@ async function checkLinkStatus(url) {
       return 'live';
     }
 
-    // Check for Cloudflare
-    const serverHeader = response.headers.get('server');
-    const cfRay = response.headers.get('cf-ray');
-    if (serverHeader?.toLowerCase().includes('cloudflare') || cfRay) {
-      return 'live';
+    // Check for Cloudflare (only available in cors mode)
+    if (usedCors) {
+      const serverHeader = response.headers.get('server');
+      const cfRay = response.headers.get('cf-ray');
+      if (serverHeader?.toLowerCase().includes('cloudflare') || cfRay) {
+        return 'live';
+      }
+
+      // Status codes that indicate live but blocking
+      const liveButBlocking = [401, 403, 405, 406, 429];
+      if (liveButBlocking.includes(response.status)) {
+        return 'live';
+      }
+
+      // 5xx - try GET fallback
+      if (response.status >= 500) {
+        throw new Error(`HTTP ${response.status}`);
+      }
     }
 
-    // Status codes that indicate live but blocking
-    const liveButBlocking = [401, 403, 405, 406, 429];
-    if (liveButBlocking.includes(response.status)) {
-      return 'live';
-    }
-
-    // 5xx or 404 - try GET fallback
-    if (response.status >= 500 || response.status === 404) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    // 410 (Gone), 451 (Legal) - truly dead
-    return 'dead';
+    // Site is reachable and not parked
+    return 'live';
 
   } catch (error) {
     clearTimeout(timeoutId);
@@ -219,34 +263,85 @@ async function checkLinkStatus(url) {
       return 'live';
     }
 
+    // NetworkError usually means CORS (site exists but blocks us)
+    if (error.message?.includes('NetworkError') ||
+        error.message?.includes('CORS')) {
+      return 'live';
+    }
+
     // Try GET fallback
     try {
-      const fallbackController = new AbortController();
-      const fallbackTimeout = setTimeout(() => fallbackController.abort(), 8000);
+      let fallbackResponse;
+      let usedCorsFallback = false;
 
-      const fallbackResponse = await fetch(url, {
-        method: 'GET',
-        signal: fallbackController.signal,
-        credentials: 'omit',
-        redirect: 'follow',
-        headers: headers
-      });
-      clearTimeout(fallbackTimeout);
+      try {
+        const corsController = new AbortController();
+        const corsTimeout = setTimeout(() => corsController.abort(), 8000);
 
-      // Check Cloudflare
-      const fbServerHeader = fallbackResponse.headers.get('server');
-      const fbCfRay = fallbackResponse.headers.get('cf-ray');
-      if (fbServerHeader?.toLowerCase().includes('cloudflare') || fbCfRay) {
-        return 'live';
+        fallbackResponse = await fetch(url, {
+          method: 'GET',
+          signal: corsController.signal,
+          mode: 'cors',
+          credentials: 'omit',
+          redirect: 'follow',
+          headers: headers
+        });
+        clearTimeout(corsTimeout);
+        usedCorsFallback = true;
+      } catch (corsError) {
+        // CORS blocked, try no-cors mode with fresh controller
+        const noCorsController = new AbortController();
+        const noCorsTimeout = setTimeout(() => noCorsController.abort(), 8000);
+
+        fallbackResponse = await fetch(url, {
+          method: 'GET',
+          signal: noCorsController.signal,
+          mode: 'no-cors',
+          credentials: 'omit',
+          redirect: 'follow',
+          headers: headers
+        });
+        clearTimeout(noCorsTimeout);
       }
 
-      if (fallbackResponse.ok) {
-        return 'live';
+      // Check if redirected to parking domain (only works with cors mode)
+      if (usedCorsFallback && fallbackResponse.url) {
+        try {
+          const finalHost = new URL(fallbackResponse.url).hostname.toLowerCase();
+          const originalHost = new URL(url).hostname.toLowerCase();
+
+          if (finalHost !== originalHost &&
+              !isParkingExempt(finalHost) &&
+              PARKING_DOMAINS.some(domain => finalHost.includes(domain))) {
+            return 'parked';
+          }
+        } catch (e) {
+          // URL parsing failed, continue with live status
+        }
+
+        // Check response status (only available in cors mode)
+        // 404, 410, 451 indicate the content is gone
+        if (fallbackResponse.status === 404 || fallbackResponse.status === 410 || fallbackResponse.status === 451) {
+          return 'dead';
+        }
       }
 
-      return 'dead';
+      // Check Cloudflare (only available in cors mode)
+      if (usedCorsFallback) {
+        const fbServerHeader = fallbackResponse.headers.get('server');
+        const fbCfRay = fallbackResponse.headers.get('cf-ray');
+        if (fbServerHeader?.toLowerCase().includes('cloudflare') || fbCfRay) {
+          return 'live';
+        }
+
+        if (fallbackResponse.ok) {
+          return 'live';
+        }
+      }
+
+      return 'live';
     } catch (fallbackError) {
-      // Timeout = slow server
+      // Timeout = slow server (live)
       if (fallbackError.name === 'AbortError') {
         return 'live';
       }
@@ -257,7 +352,7 @@ async function checkLinkStatus(url) {
         return 'live';
       }
 
-      // Everything failed - likely dead
+      // Both HEAD and GET failed - link is likely dead
       return 'dead';
     }
   }
