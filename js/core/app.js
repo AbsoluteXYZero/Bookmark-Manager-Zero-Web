@@ -470,10 +470,6 @@ class App {
       await syncManager.init();
       console.log('Sync manager initialized');
 
-      // Sync timer removed - using event-driven sync only
-      // Changes sync automatically when you add/edit/delete bookmarks or folders
-      console.log('Event-driven sync ready');
-
       // Skip gist setup and remote sync if in local mode
       if (!isLocalMode) {
         // Check if we have a gist set up
@@ -486,13 +482,28 @@ class App {
         }
 
         // Sync from remote to ensure we have latest data
-        console.log('[App] Syncing bookmarks from remote...');
-        try {
-          await syncManager.syncFromRemote();
-          await bookmarkManager.reload();
-          console.log('[App] Sync from remote complete');
-        } catch (error) {
-          console.warn('[App] Sync from remote failed, will use cached data:', error);
+        // Prevent duplicate sync operations
+        if (!this._syncInProgress) {
+          this._syncInProgress = true;
+          console.log('[App] Syncing bookmarks from remote...');
+          try {
+            // Check if we already have the latest data from checkGistSetup()
+            // We can check if local bookmarks are already loaded and match the remote
+            const localTree = bookmarkManager.getTree();
+            const hasLocalBookmarks = localTree && localTree.roots && Object.keys(localTree.roots).length > 0;
+
+            if (hasLocalBookmarks) {
+              console.log('[App] Already have bookmarks loaded, skipping sync');
+            } else {
+              await syncManager.syncFromRemote();
+              await bookmarkManager.reload();
+            }
+            console.log('[App] Sync from remote complete');
+          } catch (error) {
+            console.warn('[App] Sync from remote failed, will use cached data:', error);
+          } finally {
+            this._syncInProgress = false;
+          }
         }
       } else {
         console.log('[App] Local mode - skipping remote sync');
@@ -500,19 +511,24 @@ class App {
 
       console.log('[App] Initializing sidebar...');
       // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
-      if (window.initSidebar) {
+      // Prevent duplicate initialization
+      if (window.initSidebar && !this._sidebarInitialized) {
         await window.initSidebar();
+        this._sidebarInitialized = true;
       }
 
+      // Initialize services with delays to prevent overwhelming the system
       console.log('[App] Initializing blocklist service...');
-      // Initialize blocklist service after bookmarks are loaded
       await blocklistService.init();
       console.log('Blocklist service initialized');
 
+      // Initialize scanner service immediately
       console.log('[App] Initializing scanner service...');
-      // Initialize scanner service - it will restore cached statuses to loaded bookmarks
-      await scannerService.init();
-      console.log('Scanner service initialized');
+      if (!this._scannerInitialized) {
+        await scannerService.init();
+        this._scannerInitialized = true;
+        console.log('Scanner service initialized');
+      }
 
       console.log('Main app loaded successfully');
     } catch (error) {
@@ -551,12 +567,12 @@ class App {
    * Show snippet setup modal (GitLab only)
    */
   async showGistSetup() {
-    const modal = document.getElementById('gistSetupModal');
-    const noGistsSection = document.getElementById('noGistsSection');
-    const existingGistSection = document.getElementById('existingGistSection');
-    const multipleGistsSection = document.getElementById('multipleGistsSection');
-    const existingGistInfo = document.getElementById('existingGistInfo');
-    const gistList = document.getElementById('gistList');
+    const modal = document.getElementById('snippetSetupModal');
+    const noGistsSection = document.getElementById('noSnippetsSection');
+    const existingGistSection = document.getElementById('existingSnippetSection');
+    const multipleGistsSection = document.getElementById('multipleSnippetsSection');
+    const existingGistInfo = document.getElementById('existingSnippetInfo');
+    const gistList = document.getElementById('snippetList');
 
     // Only GitLab is supported
     const provider = 'gitlab';
@@ -608,7 +624,7 @@ class App {
         // No items found - show create option
         noGistsSection.style.display = 'block';
         // Update button text
-        const createBtn = document.getElementById('createNewGistBtn');
+        const createBtn = document.getElementById('createNewSnippetBtn');
         if (createBtn) createBtn.textContent = `Create New ${itemName}`;
       } else if (bookmarkItems.length === 1) {
         // One item found - show use or create new
@@ -623,13 +639,13 @@ class App {
         existingGistInfo.textContent = `${description} • ${fileCount} files • Updated ${lastUpdated}`;
 
         // Store item for use button
-        document.getElementById('useExistingGistBtn').onclick = async () => {
+        document.getElementById('useExistingSnippetBtn').onclick = async () => {
           await this.useRemoteStorage(item.id, provider);
         };
 
         // Update button texts
-        const useBtn = document.getElementById('useExistingGistBtn');
-        const createBtn2 = document.getElementById('createNewGistBtn2');
+        const useBtn = document.getElementById('useExistingSnippetBtn');
+        const createBtn2 = document.getElementById('createNewSnippetBtn2');
         if (useBtn) useBtn.textContent = `Use This ${itemName}`;
         if (createBtn2) createBtn2.textContent = `Create New ${itemName}`;
       } else {
@@ -664,15 +680,15 @@ class App {
         });
 
         // Update create button text
-        const createBtn3 = document.getElementById('createNewGistBtn3');
+        const createBtn3 = document.getElementById('createNewSnippetBtn3');
         if (createBtn3) createBtn3.textContent = `Create New ${itemName}`;
       }
 
       // Setup create new buttons
       const createButtons = [
-        document.getElementById('createNewGistBtn'),
-        document.getElementById('createNewGistBtn2'),
-        document.getElementById('createNewGistBtn3')
+        document.getElementById('createNewSnippetBtn'),
+        document.getElementById('createNewSnippetBtn2'),
+        document.getElementById('createNewSnippetBtn3')
       ];
 
       createButtons.forEach(btn => {
@@ -684,9 +700,9 @@ class App {
       });
 
       // Setup logout button in snippet setup modal
-      const gistSetupLogoutBtn = document.getElementById('gistSetupLogoutBtn');
-      if (gistSetupLogoutBtn) {
-        gistSetupLogoutBtn.onclick = async () => {
+      const snippetSetupLogoutBtn = document.getElementById('snippetSetupLogoutBtn');
+      if (snippetSetupLogoutBtn) {
+        snippetSetupLogoutBtn.onclick = async () => {
           // Close the modal first
           modal.classList.add('hidden');
           modal.style.display = 'none';
@@ -724,7 +740,7 @@ class App {
       await syncManager.setSnippetId(itemId);
 
       // Hide modal
-      const modal = document.getElementById('gistSetupModal');
+      const modal = document.getElementById('snippetSetupModal');
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
@@ -778,7 +794,7 @@ class App {
 
       // Hide modal
       console.log(`[Createsnippet] Step 3: Hiding modal...`);
-      const modal = document.getElementById('gistSetupModal');
+      const modal = document.getElementById('snippetSetupModal');
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
@@ -821,10 +837,10 @@ class App {
   }
 
   /**
-   * Show gist setup error
+   * Show snippet setup error
    */
   showGistSetupError(message) {
-    const errorDiv = document.getElementById('gistSetupError');
+    const errorDiv = document.getElementById('snippetSetupError');
     if (errorDiv) {
       errorDiv.textContent = message;
       errorDiv.style.display = 'block';
@@ -1037,6 +1053,12 @@ class App {
    * Set up global event listeners
    */
   setupEventListeners() {
+    // Prevent duplicate listener registration
+    if (this._eventListenersSetup) {
+      return;
+    }
+    this._eventListenersSetup = true;
+
     // Search input
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
@@ -1149,15 +1171,6 @@ class App {
       });
     });
 
-    // Suppress favicon 404 errors in console
-    window.addEventListener('error', (e) => {
-      // Suppress image loading errors (favicons)
-      if (e.target && e.target.tagName === 'IMG' && e.target.classList.contains('bookmark-favicon')) {
-        e.preventDefault();
-        e.stopPropagation();
-        return false;
-      }
-    }, true);
 
     // Close menus when clicking outside
     document.addEventListener('click', () => {
@@ -1186,6 +1199,12 @@ class App {
    * Set up sync event listeners
    */
   setupSyncListeners() {
+    // Prevent duplicate listener registration
+    if (this._syncListenersSetup) {
+      return;
+    }
+    this._syncListenersSetup = true;
+
     // Touch move event (from mobile touch handler)
     window.addEventListener('bookmark:move', async (e) => {
       const { draggedId, targetId, position } = e.detail;

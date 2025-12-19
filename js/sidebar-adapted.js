@@ -397,22 +397,6 @@ const MAX_CHANGELOG_ENTRIES = 1000;
 // Add an entry to the changelog
 async function addChangelogEntry(type, itemType, title, url = null, details = {}) {
   try {
-    const result = await safeStorage.get('changelogEntries');
-    let storedValue = result.changelogEntries;
-
-    // Parse JSON string from localStorage, or use empty array if null/invalid
-    let changelogEntries = [];
-    if (storedValue) {
-      try {
-        changelogEntries = JSON.parse(storedValue);
-        if (!Array.isArray(changelogEntries)) {
-          changelogEntries = [];
-        }
-      } catch (e) {
-        changelogEntries = [];
-      }
-    }
-
     const entry = {
       id: Date.now(),
       type, // 'create', 'update', 'move', 'delete'
@@ -1676,28 +1660,28 @@ async function rescanAllBookmarks() {
 
     // Check each bookmark in the batch - use scanner service (Web Worker) instead of main thread
     const batchPromises = batch.map(async (node) => {
-      // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
-      if (window.scannerService && window.scannerService.worker) {
-        await window.scannerService.scanBookmark(node, true); // Bypass cache for rescan
-        return { id: node.id };
-      } else {
-        // Worker not available - log warning and skip scanning
-        console.warn('[Rescan All] Scanner worker not available, skipping bookmark:', node.url);
-        const results = {};
+        // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
+        if (window.scannerService && window.scannerService.worker && window.scannerService.workerInitialized) {
+          await window.scannerService.scanBookmark(node, true); // Bypass cache for rescan
+          return { id: node.id };
+        } else {
+          // Worker not available or not initialized - log warning and skip scanning
+          console.warn('[Rescan All] Scanner worker not available or not initialized, skipping bookmark:', node.url);
+          const results = {};
 
-        // Set status to unknown since we can't properly check without worker
-        if (linkCheckingEnabled) {
-          results.linkStatus = 'unknown';
-        }
-        if (safetyCheckingEnabled) {
-          results.safetyStatus = 'unknown';
-          results.safetySources = ['Scanner unavailable'];
-        }
+          // Set status to unknown since we can't properly check without worker
+          if (linkCheckingEnabled) {
+            results.linkStatus = 'unknown';
+          }
+          if (safetyCheckingEnabled) {
+            results.safetyStatus = 'unknown';
+            results.safetySources = ['Scanner unavailable'];
+          }
 
-        // Update the node in the tree
-        updateBookmarkInTree(node.id, results);
-        return results;
-      }
+          // Update the node in the tree
+          updateBookmarkInTree(node.id, results);
+          return results;
+        }
     });
 
     // Wait for all checks in the batch to complete
@@ -2770,7 +2754,9 @@ function createBookmarkElement(bookmark) {
   if (displayOptions.favicon && bookmark.url) {
     const faviconUrl = getFaviconUrl(bookmark.url);
     if (faviconUrl) {
-      faviconHtml = `<img class="bookmark-favicon" src="${escapeHtml(faviconUrl)}" alt="" />`;
+      // Use onerror to silently hide broken favicons without console errors
+      // We'll check favicon existence asynchronously after rendering
+      faviconHtml = `<img class="bookmark-favicon" src="${faviconUrl}" data-url="${escapeHtml(bookmark.url)}" alt="" onerror="this.style.display='none';this.onerror=null;" loading="lazy" fetchpriority="low" />`;
     }
   }
 
@@ -2932,6 +2918,12 @@ function createBookmarkElement(bookmark) {
   bookmarkDiv.addEventListener('click', (e) => {
     console.log('[Bookmark Click] Target:', e.target.className, 'Closest menu:', e.target.closest('.bookmark-menu-btn'));
 
+    // Check if menu button was clicked (flag set by menu button handler)
+    if (bookmarkDiv.dataset.menuClicked) {
+      console.log('[Bookmark Click] Ignored - menu button was clicked');
+      return;
+    }
+
     // Don't open if clicking on menu, actions, preview, status indicators, or checkbox
     if (e.target.closest('.bookmark-menu-btn') ||
         e.target.closest('.bookmark-actions') ||
@@ -2964,7 +2956,11 @@ function createBookmarkElement(bookmark) {
       e.preventDefault(); // Prevent default behavior and synthetic click events
       e.stopPropagation(); // Stop event from bubbling up
       e.stopImmediatePropagation(); // Stop other handlers on same element
+      // Set a flag to prevent the bookmark click handler from running
+      bookmarkDiv.dataset.menuClicked = 'true';
       toggleBookmarkMenu(bookmarkDiv);
+      // Clear the flag after menu toggle completes
+      setTimeout(() => delete bookmarkDiv.dataset.menuClicked, 10);
       return false;
     };
     menuBtn.addEventListener('click', handleMenuToggle, true); // Use capture phase
@@ -4673,6 +4669,14 @@ function updateBookmarkStatusInDOM(bookmarkId, linkStatus, safetyStatus, safetyS
   }
 
   statusIndicators.innerHTML = statusIndicatorsHtml;
+
+  // FORCE IMMEDIATE DOM REFLOW to ensure visual update and prevent race condition
+  statusIndicators.offsetHeight; // Trigger layout calculation
+
+  // Additional safeguard: force style recalculation on the parent element
+  bookmarkElement.style.display = 'flex';
+  bookmarkElement.offsetHeight; // Force complete reflow
+  bookmarkElement.style.display = '';
 }
 
 // Whitelist a bookmark (trust it regardless of safety checks)
@@ -5550,8 +5554,53 @@ function findFolderByIdInTree(nodes, folderId) {
 // Get favicon URL
 function getFaviconUrl(url) {
   try {
-    const urlObj = new URL(url);
-    return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+    // Basic URL validation first
+    if (!url || typeof url !== 'string') {
+      return '';
+    }
+
+    // Trim whitespace and check for basic structure
+    const trimmedUrl = url.trim();
+    if (!trimmedUrl || !trimmedUrl.includes('.')) {
+      return '';
+    }
+
+    const urlObj = new URL(trimmedUrl);
+
+    // Validate hostname - must be non-empty and not localhost/private
+    const hostname = urlObj.hostname;
+    if (!hostname || hostname.length === 0) {
+      return '';
+    }
+
+    // Skip localhost and private IP ranges
+    if (hostname === 'localhost' ||
+        hostname === '127.0.0.1' ||
+        hostname === '0.0.0.0' ||
+        hostname.startsWith('192.168.') ||
+        hostname.startsWith('10.') ||
+        hostname.startsWith('172.') ||
+        hostname.includes('local')) {
+      return '';
+    }
+
+    // Skip very short hostnames (likely invalid)
+    if (hostname.length < 4) {
+      return '';
+    }
+
+    // Skip hostnames that are just IP addresses (too generic, often no favicon)
+    const ipRegex = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
+    if (ipRegex.test(hostname)) {
+      return '';
+    }
+
+    // Skip HTTP URLs (many don't have favicons and create unnecessary 404s)
+    if (urlObj.protocol === 'http:') {
+      return '';
+    }
+
+    return `https://www.google.com/s2/favicons?domain=${hostname}&sz=32`;
   } catch {
     return '';
   }
@@ -6405,8 +6454,31 @@ async function clearCache() {
     // Remove both cache keys from storage
     await safeStorage.remove(['linkStatusCache', 'safetyStatusCache']);
 
+    // ALSO RESET: Clear in-memory bookmark statuses and re-render
+    function resetStatuses(nodes) {
+      nodes.forEach(node => {
+        if (node.url) {
+          node.linkStatus = 'unknown';
+          node.safetyStatus = 'unknown';
+          node.safetySources = [];
+        }
+        if (node.children) {
+          resetStatuses(node.children);
+        }
+      });
+    }
+    resetStatuses(bookmarkTree);
+
+    // Clear IndexedDB cache too (if scanner service available)
+    if (window.scannerService && window.scannerService.clearAllCache) {
+      await window.scannerService.clearAllCache();
+    }
+
+    // Re-render bookmarks to show "unknown" status
+    renderBookmarks();
+
     console.log('Cache cleared successfully');
-    alert('Cache cleared! All bookmark checks will be refreshed on next scan.');
+    alert('Cache cleared! Status indicators reset to unknown.');
 
     // Update cache size display
     await updateCacheSizeDisplay();
@@ -7313,6 +7385,12 @@ function setupEventListeners() {
       }
 
       try {
+        // Check if scanner service is ready
+        if (!window.scannerService || !window.scannerService.worker || !window.scannerService.workerInitialized) {
+          alert('Scanner service is not ready yet. Please wait a moment and try again.');
+          return;
+        }
+
         // Stop any ongoing scan first
         if (scannerService && scannerService.isScanning) {
           scannerService.stopScan();

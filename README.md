@@ -6,13 +6,13 @@
 
 **A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website/releases)
+![Version](https://img.shields.io/badge/version-1.0.0-blue)]
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Website](https://img.shields.io/badge/live-website-orange)](https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/)
+[![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
 <br>
 
-**[Launch Website →](https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/)**
+**[Launch Website →](https://bmzweb.absolutezero.fyi/)**
 
 </div>
 
@@ -55,7 +55,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 - ✅ **Change Preview** - "View Changes" button shows detailed diff before syncing
 - ✅ **PAT Authentication** - Secure Personal Access Token authentication for GitLab
 - ✅ **Modern Material Design UI** - Clean, intuitive interface with multiple themes
-- ✅ **100% Static** - No backend, hosted entirely on GitHub Pages
+- ✅ **100% Static** - No backend, hosted entirely on GitLab Pages/Cloudflare Pages
 - ✅ **Offline Support** - Works offline with IndexedDB caching
 
 ### Organization & Search
@@ -109,23 +109,21 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 Simply visit the live website:
 
-**[https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/](https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/)**
+**[https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)**
 
 No installation required! The website works entirely in your browser.
 
 ### Host Your Own Copy
 
-Want to host your own instance? It's easy since it's 100% static:
+Feel free to host your own instance. It's easy since it's 100% static
 
-1. Fork this repository
-2. Enable GitHub Pages in Settings → Pages → Source: main branch
-3. Visit `https://[your-username].github.io/Bookmark-Manager-Zero-Website/`
+I suggest using GitLab Pages
 
 Or deploy to any static hosting provider (Netlify, Vercel, Cloudflare Pages, etc.):
 
 ```bash
-git clone https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website.git
-cd Bookmark-Manager-Zero-Website
+git clone https://gitlab.com/AbsoluteXYZero/BMZ.git
+cd BMZ
 # Deploy the entire directory to your static host
 ```
 
@@ -134,8 +132,8 @@ cd Bookmark-Manager-Zero-Website
 Run locally with Python or any HTTP server:
 
 ```bash
-git clone https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website.git
-cd Bookmark-Manager-Zero-Website
+git clone https://gitlab.com/AbsoluteXYZero/BMZ.git
+cd BMZ
 python -m http.server 8000
 # Visit http://localhost:8000
 ```
@@ -144,7 +142,7 @@ python -m http.server 8000
 
 ### First-Time Setup
 
-1. **Visit the website** at [https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/](https://absolutexyzero.github.io/Bookmark-Manager-Zero-Website/)
+1. **Visit the website** at [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
 2. **Set up GitLab Snippet storage**:
    - Generate a Personal Access Token at GitLab (scope: `api`)
    - Paste your token to authenticate
@@ -409,43 +407,10 @@ Users can whitelist specific URLs to:
 - **Frontend**: Vanilla JavaScript (no frameworks)
 - **Storage**: GitLab Snippets API + IndexedDB
 - **Authentication**: Personal Access Token (PAT) for GitLab
-- **Hosting**: GitHub Pages
+- **Hosting**: GitLab Pages and Cloudflare Pages
 - **Security**: AES-256-GCM encryption for tokens and API keys
 - **UI**: Material Design 3 color system, CSS Grid & Flexbox
 
-## Development
-
-### Project Structure
-```
-├── index.html                    # Main UI
-├── js/
-│   ├── core/
-│   │   ├── app.js               # Application initialization
-│   │   ├── bookmarks.js         # Bookmark management logic
-│   │   ├── scanner.js           # Link and safety scanning
-│   │   └── ui.js                # UI components and interactions
-│   ├── storage/
-│   │   ├── indexeddb.js         # Local IndexedDB storage
-│   │   ├── snippet-adapter.js   # GitLab Snippet sync adapter
-│   │   └── sync-manager.js      # Multi-device sync management
-│   ├── import-export/
-│   │   ├── html-parser.js       # HTML bookmark import
-│   │   ├── json-parser.js       # JSON bookmark import
-│   │   ├── html-exporter.js     # HTML bookmark export
-│   │   └── json-exporter.js     # JSON bookmark export
-│   ├── auth/
-│   │   ├── auth-manager.js      # GitLab PAT authentication
-│   │   └── oauth-pat.js         # GitLab token handler
-│   └── mobile/
-│       └── touch-handler.js     # Touch gesture support
-├── workers/
-│   └── scanner-worker.js        # Background scanning worker
-├── css/
-│   └── themes.css               # Material Design 3 themes
-├── config/
-│   └── github-oauth.js          # GitHub OAuth configuration
-└── icons/                       # Application icons
-```
 
 ### Key Technologies
 - Vanilla JavaScript (no frameworks)
@@ -475,7 +440,7 @@ php -S localhost:8000
 
 ### Security Features
 - ✅ Strong Content Security Policy (CSP)
-- ✅ AES-256-GCM encryption for GitHub tokens
+- ✅ AES-256-GCM encryption for GitLab tokens
 - ✅ Browser fingerprint-derived encryption keys
 - ✅ No eval() or inline scripts
 - ✅ HTTPS-only external requests
@@ -484,7 +449,7 @@ php -S localhost:8000
 - ✅ URL validation blocks dangerous schemes
 
 ### Reporting Security Issues
-Please report security vulnerabilities via GitHub Issues (mark as security issue).
+Please report security vulnerabilities via GitLab Issues (mark as security issue).
 
 ## Browser Compatibility
 
@@ -512,9 +477,9 @@ Contributions welcome! Please:
 
 ## Related Projects
 
-- [Bookmark Manager Zero - Firefox](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Firefox)
-- [Bookmark Manager Zero - Chrome](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Chrome)
-- [Bookmark Manager Zero - Main](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero)
+- [Bookmark Manager Zero - Firefox](https://gitlab.com/AbsoluteXYZero/BMZ-Firefox)
+- [Bookmark Manager Zero - Chrome](https://gitlab.com/AbsoluteXYZero/BMZ-Chrome)
+- [Bookmark Manager Zero - Main](https://gitlab.com/AbsoluteXYZero/BMZ)
 
 ## License
 
@@ -522,8 +487,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ## Support
 
-- **Issues:** [GitHub Issues](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website/issues)
-- **Source Code:** [GitHub Repository](https://github.com/AbsoluteXYZero/Bookmark-Manager-Zero-Website)
+- **Issues:** [GitLab Issues](https://gitlab.com/AbsoluteXYZero/BMZ-Web/-/issues)
+- **Source Code:** [GitLab Repository](https://gitlab.com/AbsoluteXYZero/BMZ-Web/)
 - **Firefox Extension:** [Mozilla Add-ons](https://addons.mozilla.org/firefox/addon/bookmark-manager-zero/)
 - **Chrome Extension:** [Chrome Web Store](https://chromewebstore.google.com/detail/bookmark-manager-zero/jbpiddimkkdfhoellbiegdopfpilnclc)
 - **Buy Me a Coffee:** [Support Development](https://buymeacoffee.com/absolutexyzero)
@@ -532,7 +497,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ### Design & Platform
 - **Material Design 3** - Color system by Google
-- **GitHub Pages** - Free static hosting
+- **GitLab Pages** - Free static hosting
+- **Cloudflare Pages** - Free static hosting
 - **GitLab Snippets** - Simple, private data storage
 
 ### Security & Malware Detection

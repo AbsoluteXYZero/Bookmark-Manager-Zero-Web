@@ -27,8 +27,11 @@ class ScannerService {
    */
   async init() {
     try {
+      console.log('Initializing scanner service...');
+
       // Initialize Web Worker
       this.worker = new Worker('workers/scanner-worker.js');
+      console.log('Scanner worker created');
 
       // Set up message handler
       this.worker.onmessage = (e) => this.handleWorkerMessage(e);
@@ -45,6 +48,8 @@ class ScannerService {
 
       // Restore cached statuses for all bookmarks (bookmarks should be loaded before scanner init)
       await this.restoreCachedStatuses();
+
+      console.log('Scanner service fully initialized');
     } catch (error) {
       console.error('Failed to initialize scanner worker:', error);
       // Gracefully degrade - scanning just won't work
@@ -52,7 +57,7 @@ class ScannerService {
   }
 
   /**
-   * Restore cached scan results from IndexedDB to all bookmarks
+   * Restore cached scan results from IndexedDB to all bookmarks (BATCHED)
    */
   async restoreCachedStatuses() {
     try {
@@ -62,41 +67,56 @@ class ScannerService {
       }
 
       const allBookmarks = window.bookmarkManager.getAllBookmarks();
-      let restored = 0;
-      let linkRestored = 0;
-      let safetyRestored = 0;
+      if (allBookmarks.length === 0) return;
 
       console.log(`[Scanner] Starting cache restore for ${allBookmarks.length} bookmarks...`);
 
-      for (const bookmark of allBookmarks) {
-        if (!bookmark.url) continue;
+      // Batch cache lookups to reduce IndexedDB operations
+      const batchSize = 50; // Process 50 bookmarks at a time
+      let processed = 0;
+      let linkRestored = 0;
+      let safetyRestored = 0;
 
-        // Load cached link status
-        if (!bookmark.linkStatus) {
-          const cachedLink = await this.getCachedResult(bookmark.url, 'link');
-          if (cachedLink) {
-            bookmark.linkStatus = cachedLink;
-            linkRestored++;
-            console.log(`[Scanner] Restored link status "${cachedLink}" for ${bookmark.title || bookmark.url}`);
+      // Process bookmarks in batches to prevent blocking the UI
+      for (let i = 0; i < allBookmarks.length; i += batchSize) {
+        const batch = allBookmarks.slice(i, i + batchSize);
+
+        // Process batch synchronously for better performance
+        for (const bookmark of batch) {
+          if (!bookmark.url) continue;
+
+          // Load cached link status
+          if (!bookmark.linkStatus) {
+            const cachedLink = await this.getCachedResult(bookmark.url, 'link');
+            if (cachedLink) {
+              bookmark.linkStatus = cachedLink;
+              linkRestored++;
+            }
+          }
+
+          // Load cached safety status
+          if (!bookmark.safetyStatus) {
+            const cachedSafety = await this.getCachedResult(bookmark.url, 'safety');
+            if (cachedSafety) {
+              bookmark.safetyStatus = cachedSafety.status;
+              bookmark.safetySources = cachedSafety.sources || [];
+              safetyRestored++;
+            }
           }
         }
 
-        // Load cached safety status
-        if (!bookmark.safetyStatus) {
-          const cachedSafety = await this.getCachedResult(bookmark.url, 'safety');
-          if (cachedSafety) {
-            bookmark.safetyStatus = cachedSafety.status;
-            bookmark.safetySources = cachedSafety.sources || [];
-            safetyRestored++;
-            console.log(`[Scanner] Restored safety status "${cachedSafety.status}" for ${bookmark.title || bookmark.url}`);
-          }
+        processed += batch.length;
+
+        // Yield control to UI thread every 100 bookmarks
+        if (processed % 100 === 0) {
+          await new Promise(resolve => setTimeout(resolve, 0));
         }
       }
 
-      restored = linkRestored + safetyRestored;
+      const restored = linkRestored + safetyRestored;
       console.log(`[Scanner] Cache restore complete: ${linkRestored} link statuses, ${safetyRestored} safety statuses (${restored} total) for ${allBookmarks.length} bookmarks`);
 
-      // Trigger UI re-render if any statuses were restored
+      // Only trigger UI re-render if significant number of statuses were restored
       if (restored > 0 && window.renderBookmarks) {
         console.log('[Scanner] Triggering UI re-render to show cached statuses');
         window.renderBookmarks();
@@ -113,6 +133,8 @@ class ScannerService {
     if (!this.worker) return;
 
     try {
+      console.log('Initializing worker with data...');
+
       // Get API keys from localStorage (they're stored encrypted)
       const apiKeys = {
         googleSafeBrowsingApiKey: await this.getDecryptedApiKey('googleSafeBrowsingApiKey'),
@@ -120,14 +142,24 @@ class ScannerService {
         virusTotalApiKey: await this.getDecryptedApiKey('virusTotalApiKey')
       };
 
+      console.log('API keys loaded:', {
+        google: !!apiKeys.googleSafeBrowsingApiKey,
+        yandex: !!apiKeys.yandexApiKey,
+        virustotal: !!apiKeys.virusTotalApiKey
+      });
+
       // Ensure blocklist is loaded
+      console.log('Ensuring blocklist is ready...');
       await blocklistService.ensureBlocklistReady();
+      console.log('Blocklist ready');
 
       // Get blocklist data
       const blocklistArray = Array.from(blocklistService.maliciousUrlsSet);
       const domainSourceMapArray = Array.from(blocklistService.domainSourceMap.entries());
       const domainOnlyMapArray = Array.from(blocklistService.domainOnlyMap.entries());
       const trustedDomains = blocklistService.TRUSTED_DOMAINS;
+
+      console.log(`Blocklist data: ${blocklistArray.length} URLs, ${domainSourceMapArray.length} domain mappings`);
 
       // Send initialization data to worker
       this.worker.postMessage({
@@ -170,6 +202,8 @@ class ScannerService {
   handleWorkerMessage(e) {
     const { action, data } = e.data;
 
+    console.log(`Worker message received: ${action}`);
+
     switch (action) {
       case 'initComplete':
         this.workerInitialized = true;
@@ -186,6 +220,10 @@ class ScannerService {
 
       case 'scanComplete':
         this.handleScanComplete(data);
+        break;
+
+      case 'batchScanComplete':
+        this.handleBatchScanComplete(data);
         break;
 
       case 'linkError':
@@ -239,38 +277,100 @@ class ScannerService {
   }
 
   /**
-   * Handle complete scan result
-   */
-  async handleScanComplete(data) {
-    const { id, url, linkStatus, safetyStatus, safetySources } = data;
+    * Handle complete scan result
+    */
+   async handleScanComplete(data) {
+     const { id, url, linkStatus, safetyStatus, safetySources } = data;
 
-    // Remove from tracking set
-    this.urlsBeingScanned.delete(url);
+     // Remove from tracking set
+     this.urlsBeingScanned.delete(url);
 
-    // Cache both results
-    await this.cacheResult(url, linkStatus, 'link');
-    await this.cacheResult(url, { status: safetyStatus, sources: safetySources }, 'safety');
+     // Cache both results
+     await this.cacheResult(url, linkStatus, 'link');
+     await this.cacheResult(url, { status: safetyStatus, sources: safetySources }, 'safety');
 
-    // Update bookmark in tree using global function
-    if (window.updateBookmarkInTree) {
-      window.updateBookmarkInTree(id, {
-        linkStatus,
-        safetyStatus,
-        safetySources
-      });
-    }
+     // Update bookmark in tree using global function
+     if (window.updateBookmarkInTree) {
+       window.updateBookmarkInTree(id, {
+         linkStatus,
+         safetyStatus,
+         safetySources
+       });
+     }
 
-    this.scannedCount++;
-    this.updateProgress();
+     this.scannedCount++;
+     this.updateProgress();
 
-    // Update UI efficiently (just the status indicators, no full re-render)
-    if (window.updateBookmarkStatusInDOM) {
-      window.updateBookmarkStatusInDOM(id, linkStatus, safetyStatus, safetySources, url);
-    }
+     // Emit progress event
+     window.dispatchEvent(new CustomEvent('scanProgress', {
+       detail: { scanned: this.scannedCount, total: this.totalCount }
+     }));
 
-    // Process next in queue
-    this.processQueue();
-  }
+     // Update UI efficiently (just the status indicators, no full re-render)
+     if (window.updateBookmarkStatusInDOM) {
+       window.updateBookmarkStatusInDOM(id, linkStatus, safetyStatus, safetySources, url);
+     }
+
+     // Process next in queue
+     this.processQueue();
+   }
+
+  /**
+    * Handle batch scan results from worker
+    */
+   async handleBatchScanComplete(data) {
+     const { results } = data;
+
+     if (!results || results.length === 0) return;
+
+     console.log(`[Scanner] Processing batch of ${results.length} scan results`);
+
+     // Process all results in the batch
+     for (const result of results) {
+       const { id, url, linkStatus, safetyStatus, safetySources } = result;
+
+       // Remove from tracking set
+       this.urlsBeingScanned.delete(url);
+
+       // Cache both results
+       await this.cacheResult(url, linkStatus, 'link');
+       await this.cacheResult(url, { status: safetyStatus, sources: safetySources }, 'safety');
+
+       // Update bookmark in tree using global function
+       if (window.updateBookmarkInTree) {
+         window.updateBookmarkInTree(id, {
+           linkStatus,
+           safetyStatus,
+           safetySources
+         });
+       }
+
+       this.scannedCount++;
+     }
+
+     // Emit batch complete event
+     window.dispatchEvent(new CustomEvent('scanBatchComplete', {
+       detail: { results }
+     }));
+
+     // Update UI efficiently (just the status indicators, no full re-render)
+     if (window.updateBookmarkStatusInDOM) {
+       for (const result of results) {
+         window.updateBookmarkStatusInDOM(result.id, result.linkStatus, result.safetyStatus, result.safetySources, result.url);
+       }
+     }
+
+     // Update progress
+     this.updateProgress();
+
+     // Emit progress event
+     window.dispatchEvent(new CustomEvent('scanProgress', {
+       detail: { scanned: this.scannedCount, total: this.totalCount }
+     }));
+
+     // Process next in queue
+     this.processQueue();
+   }
 
   /**
    * Handle scan error
@@ -336,7 +436,7 @@ class ScannerService {
    * Scan a single bookmark
    */
   async scanBookmark(bookmark, bypassCache = false) {
-    if (!this.worker || !bookmark.url) return;
+    if (!this.worker || !this.workerInitialized || !bookmark.url) return;
 
     // Skip if this URL is already being scanned
     if (this.urlsBeingScanned.has(bookmark.url)) {
@@ -393,63 +493,103 @@ class ScannerService {
   }
 
   /**
-   * Scan all bookmarks
+   * Reset rate limiting for new scan
    */
-  async scanAllBookmarks(bypassCache = false) {
-    if (this.isScanning) {
-      console.log('Scan already in progress');
-      return;
+  resetRateLimit() {
+    if (this.worker) {
+      this.worker.postMessage({
+        action: 'resetRateLimit',
+        data: {}
+      });
     }
-
-    this.isScanning = true;
-    this.scannedCount = 0;
-    this.bypassCache = bypassCache;
-
-    // Clear tracking set at start of new scan
-    this.urlsBeingScanned.clear();
-
-    // Get all bookmarks
-    const allBookmarks = bookmarkManager.getAllBookmarks();
-    this.totalCount = allBookmarks.length;
-
-    console.log(`Starting scan of ${this.totalCount} bookmarks (bypassCache: ${bypassCache})`);
-
-    // Add to queue
-    this.scanQueue = [...allBookmarks];
-
-    // Start processing queue with batch limit
-    this.processQueue();
   }
 
   /**
-   * Process scan queue with batch limit
-   */
-  processQueue() {
-    if (this.scanQueue.length === 0) {
-      // Only log completion once
-      if (this.isScanning) {
-        this.isScanning = false;
-        console.log('Scan complete');
-        this.updateProgress('Scan complete');
-      }
-      return;
-    }
+    * Scan all bookmarks
+    */
+   async scanAllBookmarks(bypassCache = false) {
+     if (this.isScanning) {
+       console.log('Scan already in progress');
+       return;
+     }
+ 
+     // Check if worker is initialized
+     if (!this.worker || !this.workerInitialized) {
+       console.log('Scanner worker not initialized, cannot start scan');
+       return;
+     }
+ 
+     // Reset rate limiting for new scan
+     this.resetRateLimit();
+ 
+     this.isScanning = true;
+     this.scannedCount = 0;
+     this.bypassCache = bypassCache;
+ 
+     // Clear tracking set at start of new scan
+     this.urlsBeingScanned.clear();
+ 
+     // Get all bookmarks
+     const allBookmarks = bookmarkManager.getAllBookmarks();
+     this.totalCount = allBookmarks.length;
+ 
+     console.log(`Starting scan of ${this.totalCount} bookmarks (bypassCache: ${bypassCache})`);
 
-    // Process up to 10 bookmarks at a time
-    const batchSize = 10;
-    const batch = this.scanQueue.splice(0, batchSize);
+     // Notify UI that scan has started
+     window.dispatchEvent(new CustomEvent('scanStarted', {
+       detail: { total: this.totalCount }
+     }));
 
-    batch.forEach(bookmark => {
-      this.scanBookmark(bookmark, this.bypassCache || false);
-    });
+     // Add to queue
+     this.scanQueue = [...allBookmarks];
 
-    // Delay next batch by 300ms to avoid overwhelming the network
-    setTimeout(() => {
-      if (this.scanQueue.length > 0) {
-        this.processQueue();
-      }
-    }, 300);
-  }
+     // Start processing queue with batch limit
+     this.processQueue();
+   }
+
+  /**
+    * Process scan queue with batch limit and better progress reporting
+    */
+   processQueue() {
+     if (this.scanQueue.length === 0) {
+       // Only log completion once
+       if (this.isScanning) {
+         this.isScanning = false;
+         console.log('Scan complete');
+
+         // Notify UI that scan is complete
+         window.dispatchEvent(new CustomEvent('scanComplete', {
+           detail: { scanned: this.scannedCount, total: this.totalCount }
+         }));
+
+         this.updateProgress('Scan complete');
+       }
+       return;
+     }
+
+     // Process up to 5 bookmarks at a time (reduced from 10)
+     const batchSize = 5;
+     const batch = this.scanQueue.splice(0, batchSize);
+
+     batch.forEach(bookmark => {
+       this.scanBookmark(bookmark, this.bypassCache || false);
+     });
+
+     // Update progress more frequently
+     this.updateProgress();
+
+     // Emit progress event
+     window.dispatchEvent(new CustomEvent('scanProgress', {
+       detail: { scanned: this.scannedCount, total: this.totalCount }
+     }));
+
+     // Delay next batch by 500ms to avoid overwhelming the network (increased from 300ms)
+     setTimeout(() => {
+       if (this.scanQueue.length > 0) {
+         this.processQueue();
+       }
+     }, 500);
+   }
 
   /**
    * Update scan progress
@@ -457,58 +597,78 @@ class ScannerService {
   updateProgress(message = null) {
     const progressEl = document.getElementById('scanProgress');
     if (progressEl) {
-      if (message) {
-        progressEl.textContent = message;
-      } else if (this.isScanning) {
-        progressEl.textContent = `Scanning... ${this.scannedCount}/${this.totalCount}`;
-      } else {
-        progressEl.textContent = 'Ready';
-      }
+      // Use setTimeout to defer DOM update, allowing UI to repaint between progress updates
+      setTimeout(() => {
+        if (message) {
+          progressEl.textContent = message;
+        } else if (this.isScanning) {
+          progressEl.textContent = `Scanning... ${this.scannedCount}/${this.totalCount}`;
+        } else {
+          progressEl.textContent = 'Ready';
+        }
+      }, 0);
     }
   }
 
   /**
-   * Scan bookmarks in a folder
-   */
-  async scanFolder(folder, bypassCache = false) {
-    if (!folder.children) return;
+    * Scan bookmarks in a folder
+    */
+   async scanFolder(folder, bypassCache = false) {
+     if (!this.worker || !this.workerInitialized || !folder.children) return;
+ 
+     // Reset rate limiting for new scan
+     this.resetRateLimit();
 
-    const bookmarksInFolder = [];
+     const bookmarksInFolder = [];
 
-    const collectBookmarks = (node) => {
-      if (node.type === 'bookmark' && node.url) {
-        bookmarksInFolder.push(node);
-      } else if (node.children) {
-        node.children.forEach(collectBookmarks);
-      }
-    };
+     const collectBookmarks = (node) => {
+       if (node.type === 'bookmark' && node.url) {
+         bookmarksInFolder.push(node);
+       } else if (node.children) {
+         node.children.forEach(collectBookmarks);
+       }
+     };
 
-    collectBookmarks(folder);
+     collectBookmarks(folder);
 
-    console.log(`Scanning ${bookmarksInFolder.length} bookmarks in folder "${folder.title}"`);
+     console.log(`Scanning ${bookmarksInFolder.length} bookmarks in folder "${folder.title}"`);
 
-    // Clear tracking set at start of folder scan
-    this.urlsBeingScanned.clear();
+     // Clear tracking set at start of folder scan
+     this.urlsBeingScanned.clear();
 
-    this.scanQueue = [...bookmarksInFolder];
-    this.totalCount = bookmarksInFolder.length;
-    this.scannedCount = 0;
-    this.isScanning = true;
-    this.bypassCache = bypassCache;
+     this.scanQueue = [...bookmarksInFolder];
+     this.totalCount = bookmarksInFolder.length;
+     this.scannedCount = 0;
+     this.isScanning = true;
+     this.bypassCache = bypassCache;
 
-    this.processQueue();
-  }
+     // Notify UI that folder scan has started
+     window.dispatchEvent(new CustomEvent('scanStarted', {
+       detail: { total: this.totalCount, folder: folder.title }
+     }));
+
+     this.processQueue();
+   }
+
 
   /**
-   * Stop current scan
-   */
-  stopScan() {
-    this.scanQueue = [];
-    this.isScanning = false;
-    // Clear tracking set when scan is stopped
-    this.urlsBeingScanned.clear();
-    this.updateProgress('Scan stopped');
-  }
+    * Stop current scan
+    */
+   stopScan() {
+     if (!this.isScanning) return;
+
+     this.scanQueue = [];
+     this.isScanning = false;
+     // Clear tracking set when scan is stopped
+     this.urlsBeingScanned.clear();
+
+     // Emit scan cancelled event
+     window.dispatchEvent(new CustomEvent('scanCancelled', {
+       detail: { scanned: this.scannedCount, total: this.totalCount }
+     }));
+
+     this.updateProgress('Scan stopped');
+   }
 }
 
 // Export singleton instance

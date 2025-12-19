@@ -378,12 +378,38 @@ let apiKeys = {
   virusTotalApiKey: null
 };
 
-// Track rate-limited APIs
-let rateLimitedApis = {
-  google: false,
-  yandex: false,
-  virustotal: false
-};
+// Rate limiting flags
+let virusTotalRateLimited = false;
+
+// Performance optimization: Batch results to reduce main thread messages
+let pendingResults = [];
+let batchTimer = null;
+
+/**
+ * Batch scan results to reduce main thread messages
+ * Instead of sending a message for each bookmark, collect results and send in batches
+ */
+function queueResult(result) {
+  pendingResults.push(result);
+
+  // Clear existing timer
+  if (batchTimer) {
+    clearTimeout(batchTimer);
+  }
+
+  // Send batch after 500ms or when 5 results are queued (reduced frequency and batch size)
+  batchTimer = setTimeout(() => {
+    if (pendingResults.length > 0) {
+      self.postMessage({
+        action: 'batchScanComplete',
+        data: {
+          results: pendingResults
+        }
+      });
+      pendingResults = [];
+    }
+  }, 500);
+}
 
 // Store blocklist data passed from main thread
 let blocklist = new Set();
@@ -525,6 +551,12 @@ async function checkVirusTotal(url) {
       return 'unknown';
     }
 
+    // Check if we've hit rate limit during this scan session
+    if (virusTotalRateLimited) {
+      console.log(`[VirusTotal] Rate limited, skipping check for ${url}`);
+      return 'unknown';
+    }
+
     console.log(`[VirusTotal] Starting check for ${url}`);
 
     // First, try to get existing cached report (faster, doesn't create new scan)
@@ -576,12 +608,22 @@ async function checkVirusTotal(url) {
         }
       } else {
         console.log(`[VirusTotal] Cached report GET failed with status: ${reportResponse.status}`);
+        if (reportResponse.status === 429) {
+          virusTotalRateLimited = true;
+          console.log(`[VirusTotal] Rate limit hit, will skip remaining checks`);
+        }
       }
     } catch (reportError) {
       console.log(`[VirusTotal] Error fetching cached report:`, reportError.message);
     }
 
     console.log(`[VirusTotal] No cached report available, submitting new scan...`);
+
+    // Check rate limit again before submitting new scan
+    if (virusTotalRateLimited) {
+      console.log(`[VirusTotal] Rate limited, skipping new scan submission for ${url}`);
+      return 'unknown';
+    }
 
     // No cached report found, submit new scan
     const controller = new AbortController();
@@ -604,6 +646,10 @@ async function checkVirusTotal(url) {
 
     if (!response.ok) {
       console.error(`[VirusTotal] API error: ${response.status}`);
+      if (response.status === 429) {
+        virusTotalRateLimited = true;
+        console.log(`[VirusTotal] Rate limit hit, will skip remaining checks`);
+      }
       return 'unknown';
     }
 
@@ -644,6 +690,10 @@ async function checkVirusTotal(url) {
 
       if (!analysisResponse.ok) {
         console.error(`[VirusTotal] Analysis fetch error: ${analysisResponse.status}`);
+        if (analysisResponse.status === 429) {
+          virusTotalRateLimited = true;
+          console.log(`[VirusTotal] Rate limit hit during analysis, will skip remaining checks`);
+        }
         return 'unknown';
       }
 
@@ -842,6 +892,9 @@ async function checkSafetyStatus(url) {
   }
 }
 
+// Worker initialization state
+let isWorkerInitialized = false;
+
 /**
  * Message handler
  */
@@ -850,6 +903,9 @@ self.addEventListener('message', async (e) => {
 
   switch (action) {
     case 'init':
+      // Reset rate limiting flags
+      virusTotalRateLimited = false;
+
       // Initialize with API keys and blocklist data
       if (data.apiKeys) {
         apiKeys = data.apiKeys;
@@ -876,10 +932,19 @@ self.addEventListener('message', async (e) => {
         console.log(`[Worker] Trusted domains list initialized with ${trustedDomains.length} domains`);
       }
 
+      // Mark worker as initialized
+      isWorkerInitialized = true;
+      console.log('[Worker] Initialization complete');
+
       self.postMessage({
         action: 'initComplete',
         data: { success: true }
       });
+      break;
+
+    case 'resetRateLimit':
+      virusTotalRateLimited = false;
+      console.log('[Worker] Rate limit reset for new scan');
       break;
 
     case 'scanBookmark':
@@ -890,17 +955,16 @@ self.addEventListener('message', async (e) => {
           checkSafetyStatus(data.url)
         ]);
 
-        self.postMessage({
-          action: 'scanComplete',
-          data: {
-            url: data.url,
-            id: data.id,
-            linkStatus: linkStatus,
-            safetyStatus: safetyResult.status,
-            safetySources: safetyResult.sources
-          }
+        // Use batching for better performance
+        queueResult({
+          url: data.url,
+          id: data.id,
+          linkStatus: linkStatus,
+          safetyStatus: safetyResult.status,
+          safetySources: safetyResult.sources
         });
       } catch (error) {
+        // Send error immediately (don't batch errors)
         self.postMessage({
           action: 'scanError',
           data: {

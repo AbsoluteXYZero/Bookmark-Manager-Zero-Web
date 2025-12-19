@@ -13,7 +13,6 @@ class BlocklistService {
     this.domainOnlyMap = new Map();
     this.blocklistLastUpdate = 0;
     this.blocklistLoading = false;
-    this.BLOCKLIST_UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 
     // Blocklist sources - free, CORS-enabled endpoints
     this.BLOCKLIST_SOURCES = [
@@ -66,6 +65,18 @@ class BlocklistService {
     ];
   }
 
+  /**
+   * Helper to check if two timestamps are on the same calendar day.
+   */
+  isSameDay(timestamp1, timestamp2) {
+    if (!timestamp1 || !timestamp2 || timestamp1 === 0 || timestamp2 === 0) return false;
+    const d1 = new Date(timestamp1);
+    const d2 = new Date(timestamp2);
+    return d1.getFullYear() === d2.getFullYear() &&
+           d1.getMonth() === d2.getMonth() &&
+           d1.getDate() === d2.getDate();
+  }
+
   async init() {
     try {
       // Load last update time from storage
@@ -84,37 +95,37 @@ class BlocklistService {
   }
 
   /**
-   * Load cached blocklist from IndexedDB
-   */
-  async loadCachedBlocklist() {
-    try {
-      // Check if we have cached blocklist data
-      const cachedData = await dbManager.get('blocklists', 'compiled');
-      if (!cachedData) {
-        console.log('[Blocklist] No cached data found');
-        return false;
-      }
+    * Load cached blocklist from IndexedDB
+    */
+   async loadCachedBlocklist() {
+     try {
+       // Check if we have cached blocklist data
+       const cachedData = await dbManager.get('blocklists', 'compiled');
+       if (!cachedData) {
+         console.log('[Blocklist] No cached data found');
+         return false;
+       }
 
-      // Check if cache is still fresh (within 24 hours)
-      const now = Date.now();
-      if (now - this.blocklistLastUpdate > this.BLOCKLIST_UPDATE_INTERVAL) {
-        console.log('[Blocklist] Cached data is stale, will update');
-        return false;
-      }
+       // Check if cache is from the same calendar day
+       const now = Date.now();
+       if (!this.isSameDay(now, this.blocklistLastUpdate)) {
+         console.log('[Blocklist] Cached data is from a different day, will update');
+         return false;
+       }
 
-      // Load from cache
-      console.log('[Blocklist] Loading from cache...');
-      this.maliciousUrlsSet = new Set(cachedData.domains || []);
-      this.domainSourceMap = new Map(cachedData.domainSourceMap || []);
-      this.domainOnlyMap = new Map(cachedData.domainOnlyMap || []);
+       // Load from cache
+       console.log('[Blocklist] Loading from cache...');
+       this.maliciousUrlsSet = new Set(cachedData.domains || []);
+       this.domainSourceMap = new Map(cachedData.domainSourceMap || []);
+       this.domainOnlyMap = new Map(cachedData.domainOnlyMap || []);
 
-      console.log(`[Blocklist] Loaded ${this.maliciousUrlsSet.size} domains from cache`);
-      return true;
-    } catch (error) {
-      console.error('[Blocklist] Failed to load cached blocklist:', error);
-      return false;
-    }
-  }
+       console.log(`[Blocklist] Loaded ${this.maliciousUrlsSet.size} domains from cache`);
+       return true;
+     } catch (error) {
+       console.error('[Blocklist] Failed to load cached blocklist:', error);
+       return false;
+     }
+   }
 
   /**
    * Save compiled blocklist to IndexedDB for faster loading
@@ -309,22 +320,21 @@ class BlocklistService {
 
   async ensureBlocklistReady() {
     const now = Date.now();
-    const cacheAge = now - this.blocklistLastUpdate;
-    const isStale = cacheAge > this.BLOCKLIST_UPDATE_INTERVAL;
+    const isDifferentDay = !this.isSameDay(now, this.blocklistLastUpdate);
     const isEmpty = this.maliciousUrlsSet.size === 0;
 
     console.log('[Blocklist] ensureBlocklistReady check:', {
-      cacheAge: Math.floor(cacheAge / 1000 / 60), // minutes
-      isStale,
+      lastUpdate: new Date(this.blocklistLastUpdate).toISOString(),
+      isDifferentDay,
       isEmpty,
       currentSize: this.maliciousUrlsSet.size
     });
 
-    if (isStale || isEmpty) {
-      console.log('[Blocklist] Need update - isStale:', isStale, 'isEmpty:', isEmpty);
+    if (isDifferentDay || isEmpty) {
+      console.log('[Blocklist] Need update - isDifferentDay:', isDifferentDay, 'isEmpty:', isEmpty);
       await this.updateBlocklistDatabase();
     } else {
-      console.log('[Blocklist] Using cached data');
+      console.log('[Blocklist] Using cached data from today');
     }
 
     if (this.blocklistLoading) {

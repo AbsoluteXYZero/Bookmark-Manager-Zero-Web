@@ -45,50 +45,34 @@ class SyncManager {
   }
 
   /**
-   * Initialize sync manager
-   * Loads Snippet ID from metadata and sets up sync
+   * Initialize the sync manager
    */
   async init() {
-    try {
-      // Always use GitLab
-      this.provider = 'gitlab';
-      await this.setProvider('gitlab');
-
-      // Load Snippet ID from metadata
-      const snippetIdRecord = await dbManager.get('metadata', 'snippetId');
-      if (snippetIdRecord) {
-        this.snippetId = snippetIdRecord.value;
-        snippetAdapter.setSnippetId(this.snippetId);
-        console.log('Loaded Snippet ID from storage:', this.snippetId);
-      }
-
-      // Load last sync time
-      const lastSyncRecord = await dbManager.get('metadata', 'lastSync');
-      if (lastSyncRecord) {
-        this.lastSyncTime = lastSyncRecord.value;
-      }
-
-      // Restore hasUnsyncedChanges from persistent storage
-      const hasPending = await this.hasPendingChanges();
-      if (hasPending) {
-        console.log('[Init] Restored hasUnsyncedChanges from storage: true');
-        this.hasUnsyncedChanges = true;
-      }
-
-      // Auto-sync is disabled - we only sync on user actions (add/edit/delete bookmarks)
-      // This prevents rate limiting and account flagging
-      // Use the manual sync button to pull changes from other devices if needed
-      console.log('[Init] Timer-based auto-sync disabled - using event-driven sync only');
-
-      // Listen for online/offline events
-      window.addEventListener('online', () => this.handleOnline());
-      window.addEventListener('offline', () => this.handleOffline());
-
-      console.log('Sync manager initialized');
-    } catch (error) {
-      console.error('Failed to initialize sync manager:', error);
-      throw error;
+    // Prevent duplicate initialization
+    if (this._initialized) {
+      return;
     }
+    this._initialized = true;
+
+    console.log('[Init] Sync manager initializing...');
+    this.provider = await authManager.getPreference('syncProvider') || 'gitlab';
+    console.log('Sync provider set to:', this.provider);
+
+    // Initialize adapter
+    this.adapter = snippetAdapter;
+    // Note: snippetAdapter doesn't have setProvider method, it's always GitLab
+
+    // Load snippet ID from storage
+    const savedId = this.adapter.loadSavedSnippetId();
+    if (savedId) {
+      this.snippetId = savedId;
+      console.log('Loaded Snippet ID from storage:', savedId);
+    }
+
+    // Initialize auto-sync
+    // Note: Auto-sync is disabled by default - we use event-driven sync only
+    // to prevent rate limiting and account flagging
+    console.log('[Init] Timer-based auto-sync disabled - using event-driven sync only');
   }
 
   /**

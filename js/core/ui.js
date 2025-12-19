@@ -26,14 +26,149 @@ class UIManager {
   }
 
   /**
-   * Initialize UI manager
-   * Set up event listeners and load preferences
-   */
-  async init() {
-    // Load preferences from storage
-    // TODO: Load display options and expanded folders from settings
-    console.log('UI manager initialized');
-  }
+    * Initialize UI manager
+    * Set up event listeners and load preferences
+    */
+   async init() {
+     // Load preferences from storage
+     // TODO: Load display options and expanded folders from settings
+
+     // Set up event listeners for scan status updates
+     this.setupScanEventListeners();
+
+     console.log('UI manager initialized');
+   }
+
+  /**
+    * Set up event listeners for scan status updates
+    */
+   setupScanEventListeners() {
+     // Blocklist progress events
+     window.addEventListener('blocklist:progress', (e) => {
+       const { current, total, sourceName, status } = e.detail;
+       this.updateBlocklistProgress(current, total, sourceName, status);
+     });
+
+     window.addEventListener('blocklist:complete', (e) => {
+       const { domains, totalEntries, sources } = e.detail;
+       this.updateBlocklistComplete(domains, totalEntries, sources);
+     });
+
+     // Scan progress events
+     window.addEventListener('scanStarted', (e) => {
+       const { total, folder } = e.detail;
+       this.updateScanStarted(total, folder);
+     });
+
+     window.addEventListener('scanProgress', (e) => {
+       const { scanned, total } = e.detail;
+       this.updateScanProgress(scanned, total);
+     });
+
+     window.addEventListener('scanBatchComplete', (e) => {
+       // Batch updates are handled by individual progress updates
+     });
+
+     window.addEventListener('scanComplete', (e) => {
+       const { scanned, total } = e.detail;
+       this.updateScanComplete(scanned, total);
+     });
+
+     window.addEventListener('scanCancelled', (e) => {
+       const { scanned, total } = e.detail;
+       this.updateScanCancelled(scanned, total);
+     });
+   }
+
+  /**
+    * Update blocklist download progress
+    */
+   updateBlocklistProgress(current, total, sourceName, status) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       if (status === 'starting') {
+         progressEl.textContent = 'Downloading blocklists...';
+       } else if (status === 'downloading' && sourceName) {
+         progressEl.textContent = `Downloading blocklists... (${current}/${total}) - ${sourceName}`;
+       }
+     }
+     console.log(`[Blocklist Progress] ${current}/${total}${sourceName ? ` - ${sourceName}` : ''}`);
+   }
+
+  /**
+    * Update blocklist download complete
+    */
+   updateBlocklistComplete(domains, totalEntries, sources) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       // Only show blocklist message if not currently scanning
+       setTimeout(() => {
+         if (progressEl && progressEl.textContent.startsWith('Downloading blocklists')) {
+           progressEl.textContent = `Blocklists loaded: ${domains.toLocaleString()} domains`;
+           setTimeout(() => {
+             if (progressEl && progressEl.textContent.startsWith('Blocklists loaded:')) {
+               progressEl.textContent = 'Ready';
+             }
+           }, 3000);
+         }
+       }, 1000);
+     }
+     console.log(`[Blocklist Complete] ${domains.toLocaleString()} unique domains from ${totalEntries.toLocaleString()} entries (${sources} sources)`);
+   }
+
+  /**
+    * Update scan started
+    */
+   updateScanStarted(total, folder) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       const folderText = folder ? ` in folder "${folder}"` : '';
+       progressEl.textContent = `Scanning: 0/${total}${folderText}`;
+     }
+     console.log(`[Scan Started] ${total} bookmarks${folder ? ` in folder "${folder}"` : ''}`);
+   }
+
+  /**
+    * Update scan progress
+    */
+   updateScanProgress(scanned, total) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       progressEl.textContent = `Scanning: ${scanned}/${total}`;
+     }
+   }
+
+  /**
+    * Update scan complete
+    */
+   updateScanComplete(scanned, total) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       progressEl.textContent = 'Scan complete';
+       setTimeout(() => {
+         if (progressEl && progressEl.textContent === 'Scan complete') {
+           progressEl.textContent = 'Ready';
+         }
+       }, 2000);
+     }
+     console.log(`[Scan Complete] ${scanned}/${total} bookmarks scanned`);
+   }
+
+  /**
+    * Update scan cancelled
+    */
+   updateScanCancelled(scanned, total) {
+     const progressEl = document.getElementById('scanProgress');
+     if (progressEl) {
+       progressEl.textContent = 'Scan stopped';
+       setTimeout(() => {
+         if (progressEl && progressEl.textContent === 'Scan stopped') {
+           progressEl.textContent = 'Ready';
+         }
+       }, 2000);
+     }
+     console.log(`[Scan Cancelled] ${scanned}/${total} bookmarks scanned`);
+   }
 
   /**
    * Render entire bookmark tree
@@ -88,6 +223,43 @@ class UIManager {
 
     // Update status bar
     this.updateTotalBookmarkCount();
+
+    // Load favicons asynchronously after rendering
+    this.loadFaviconsAsync();
+  }
+
+  /**
+   * Load favicons asynchronously after rendering
+   * Sets favicon src directly since onerror handler will hide broken images
+   */
+  async loadFaviconsAsync() {
+    const faviconElements = document.querySelectorAll('.bookmark-favicon[data-url]');
+    const batchSize = 10;
+    const delay = 300;
+
+    for (let i = 0; i < faviconElements.length; i += batchSize) {
+      const batch = Array.from(faviconElements).slice(i, i + batchSize);
+
+      // Process batch of favicons
+      const loadPromises = batch.map(async (img) => {
+        const url = img.getAttribute('data-url');
+        if (!url) return;
+
+        const faviconUrl = this.getFaviconUrl(url);
+        if (!faviconUrl) return;
+
+        // Set src directly - onerror handler will hide broken favicons
+        img.src = faviconUrl;
+        img.removeAttribute('data-url');
+      });
+
+      // Wait for all favicons in this batch to be processed
+      await Promise.all(loadPromises);
+
+      if (i + batchSize < faviconElements.length) {
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
   }
 
   /**
@@ -252,14 +424,13 @@ class UIManager {
       statusIndicatorsHtml += this.getStatusDotHtml(linkStatus, bookmark.url);
     }
 
-    // Build favicon
+    // Build favicon with throttling
     let faviconHtml = '';
     if (this.displayOptions.favicon && bookmark.url) {
-      const faviconUrl = this.getFaviconUrl(bookmark.url);
-      if (faviconUrl) {
-        // Use onerror to silently hide broken favicons without console errors
-        faviconHtml = `<img class="bookmark-favicon" src="${this.escapeHtml(faviconUrl)}" alt="" onerror="this.style.display='none';this.onerror=null;" loading="lazy" />`;
-      }
+      // Use onerror to silently hide broken favicons without console errors
+      // Add loading="lazy" and fetchpriority="low" to reduce network impact
+      // We'll check favicon existence asynchronously after rendering
+      faviconHtml = `<img class="bookmark-favicon" data-url="${this.escapeHtml(bookmark.url)}" alt="" onerror="this.style.display='none';this.onerror=null;" loading="lazy" fetchpriority="low" />`;
     }
 
     // Build bookmark info
@@ -480,12 +651,13 @@ class UIManager {
    */
   getFaviconUrl(url) {
     try {
-      const urlObj = new URL(url);
-      return `https://www.google.com/s2/favicons?domain=${urlObj.hostname}&sz=32`;
+      // Use Google's newer faviconV2 API which is more reliable
+      return `https://t0.gstatic.com/faviconV2?client=SOCIAL&type=FAVICON&fallback_opts=TYPE,SIZE,URL&url=${encodeURIComponent(url)}&size=32`;
     } catch (e) {
       return null;
     }
   }
+
 
   /**
    * Get status dot HTML
