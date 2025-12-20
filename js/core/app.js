@@ -67,23 +67,23 @@ class App {
   async cleanupLocalStorage() {
     try {
       // Clean localStorage
-      const savedGistId = localStorage.getItem('bmz_gist_id');
-      if (savedGistId) {
+      const savedSnippetId = localStorage.getItem('bmz_snippet_id');
+      if (savedSnippetId) {
         // Check if it's an object instead of a string
-        if (savedGistId.startsWith('{') || savedGistId.startsWith('[')) {
-          console.warn('Found corrupted gist ID in localStorage, clearing...');
-          localStorage.removeItem('bmz_gist_id');
+        if (savedSnippetId.startsWith('{') || savedSnippetId.startsWith('[')) {
+          console.warn('Found corrupted snippet ID in localStorage, clearing...');
+          localStorage.removeItem('bmz_snippet_id');
         }
       }
 
       // Clean IndexedDB
-      const gistIdRecord = await dbManager.get('metadata', 'gistId');
-      if (gistIdRecord && gistIdRecord.value) {
-        const value = gistIdRecord.value;
+      const snippetIdRecord = await dbManager.get('metadata', 'snippetId');
+      if (snippetIdRecord && snippetIdRecord.value) {
+        const value = snippetIdRecord.value;
         // Check if it's an object instead of a string
         if (typeof value === 'object') {
-          console.warn('Found corrupted gist ID in IndexedDB, clearing...');
-          await dbManager.delete('metadata', 'gistId');
+          console.warn('Found corrupted snippet ID in IndexedDB, clearing...');
+          await dbManager.delete('metadata', 'snippetId');
         }
       }
     } catch (error) {
@@ -470,14 +470,14 @@ class App {
       await syncManager.init();
       console.log('Sync manager initialized');
 
-      // Skip gist setup and remote sync if in local mode
+      // Skip snippet setup and remote sync if in local mode
       if (!isLocalMode) {
-        // Check if we have a gist set up
-        const hasGist = await this.checkGistSetup();
+        // Check if we have a snippet set up
+        const hasSnippet = await this.checkSnippetSetup();
 
-        if (!hasGist) {
-          // Show gist setup modal (buttons should already work from initUI)
-          await this.showGistSetup();
+        if (!hasSnippet) {
+          // Show snippet setup modal (buttons should already work from initUI)
+          await this.showSnippetSetup();
           return;
         }
 
@@ -487,7 +487,7 @@ class App {
           this._syncInProgress = true;
           console.log('[App] Syncing bookmarks from remote...');
           try {
-            // Check if we already have the latest data from checkGistSetup()
+            // Check if we already have the latest data from checkSnippetSetup()
             // We can check if local bookmarks are already loaded and match the remote
             const localTree = bookmarkManager.getTree();
             const hasLocalBookmarks = localTree && localTree.roots && Object.keys(localTree.roots).length > 0;
@@ -541,7 +541,7 @@ class App {
    * Check if we have a snippet set up
    * Checks for saved snippet ID
    */
-  async checkGistSetup() {
+  async checkSnippetSetup() {
     // Only GitLab snippets are supported
     const savedSnippetId = snippetAdapter.loadSavedSnippetId();
     if (savedSnippetId) {
@@ -566,12 +566,12 @@ class App {
   /**
    * Show snippet setup modal (GitLab only)
    */
-  async showGistSetup() {
+  async showSnippetSetup() {
     const modal = document.getElementById('snippetSetupModal');
-    const noGistsSection = document.getElementById('noSnippetsSection');
-    const existingGistSection = document.getElementById('existingSnippetSection');
-    const multipleGistsSection = document.getElementById('multipleSnippetsSection');
-    const existingGistInfo = document.getElementById('existingSnippetInfo');
+    const noSnippetsSection = document.getElementById('noSnippetsSection');
+    const existingSnippetSection = document.getElementById('existingSnippetSection');
+    const multipleSnippetsSection = document.getElementById('multipleSnippetsSection');
+    const existingSnippetInfo = document.getElementById('existingSnippetInfo');
     const gistList = document.getElementById('snippetList');
 
     // Only GitLab is supported
@@ -582,9 +582,9 @@ class App {
     console.log(`Setting up ${itemName} for provider: ${provider}`);
 
     // Hide all sections first
-    noGistsSection.style.display = 'none';
-    existingGistSection.style.display = 'none';
-    multipleGistsSection.style.display = 'none';
+    noSnippetsSection.style.display = 'none';
+    existingSnippetSection.style.display = 'none';
+    multipleSnippetsSection.style.display = 'none';
 
     try {
       // FIRST check if we have a saved snippet ID in localStorage
@@ -622,13 +622,13 @@ class App {
 
       if (bookmarkItems.length === 0) {
         // No items found - show create option
-        noGistsSection.style.display = 'block';
+        noSnippetsSection.style.display = 'block';
         // Update button text
         const createBtn = document.getElementById('createNewSnippetBtn');
         if (createBtn) createBtn.textContent = `Create New ${itemName}`;
       } else if (bookmarkItems.length === 1) {
         // One item found - show use or create new
-        existingGistSection.style.display = 'block';
+        existingSnippetSection.style.display = 'block';
         const item = bookmarkItems[0];
 
         // Format snippet info
@@ -636,7 +636,7 @@ class App {
         const lastUpdated = new Date(item.updated_at).toLocaleDateString();
         const description = item.title || 'Untitled Snippet';
 
-        existingGistInfo.textContent = `${description} • ${fileCount} files • Updated ${lastUpdated}`;
+        existingSnippetInfo.textContent = `${description} • ${fileCount} files • Updated ${lastUpdated}`;
 
         // Store item for use button
         document.getElementById('useExistingSnippetBtn').onclick = async () => {
@@ -650,8 +650,9 @@ class App {
         if (createBtn2) createBtn2.textContent = `Create New ${itemName}`;
       } else {
         // Multiple items - show selection
-        multipleGistsSection.style.display = 'block';
-        gistList.innerHTML = '';
+        multipleSnippetsSection.style.display = 'block';
+        const snippetList = document.getElementById('snippetList');
+        snippetList.innerHTML = '';
 
         bookmarkItems.forEach(item => {
           const fileCount = item.files?.length || 1;
@@ -676,7 +677,7 @@ class App {
             itemDiv.style.borderColor = 'transparent';
           };
 
-          gistList.appendChild(itemDiv);
+          snippetList.appendChild(itemDiv);
         });
 
         // Update create button text
@@ -717,12 +718,12 @@ class App {
 
     } catch (error) {
       console.error(`Failed to load ${itemName}s:`, error);
-      this.showGistSetupError(`Failed to load ${itemName}s: ` + error.message);
+      this.showSnippetSetupError(`Failed to load ${itemName}s: ` + error.message);
     }
   }
 
   /**
-   * Use existing remote storage (gist or snippet)
+   * Use existing remote storage (snippet)
    */
   async useRemoteStorage(itemId, provider = 'gitlab') {
     try {
@@ -771,7 +772,7 @@ class App {
       console.log(`Using snippet:`, itemId);
     } catch (error) {
       console.error(`Failed to use snippet:`, error);
-      this.showGistSetupError(`Failed to use snippet: ` + error.message);
+      this.showSnippetSetupError(`Failed to use snippet: ` + error.message);
     }
   }
 
@@ -832,14 +833,14 @@ class App {
       console.log(`[Createsnippet] All steps complete. snippet ID:`, itemId);
     } catch (error) {
       console.error('[Createsnippet] Failed:', error);
-      this.showGistSetupError('Failed to create snippet: ' + error.message);
+      this.showSnippetSetupError('Failed to create snippet: ' + error.message);
     }
   }
 
   /**
    * Show snippet setup error
    */
-  showGistSetupError(message) {
+  showSnippetSetupError(message) {
     const errorDiv = document.getElementById('snippetSetupError');
     if (errorDiv) {
       errorDiv.textContent = message;
@@ -941,15 +942,15 @@ class App {
         // Show success message
         this.showToast('GitLab connected successfully! Your bookmarks will now sync to the cloud.', 'success');
 
-        // Initialize sync manager and create/use gist
+        // Initialize sync manager and create/use snippet
         await syncManager.init();
 
-        // Check for existing gist or create new one
-        const hasGist = await this.checkGistSetup();
+        // Check for existing snippet or create new one
+        const hasSnippet = await this.checkSnippetSetup();
 
-        if (!hasGist) {
-          // Show gist setup to let user create or select snippet
-          await this.showGistSetup();
+        if (!hasSnippet) {
+          // Show snippet setup to let user create or select snippet
+          await this.showSnippetSetup();
         } else {
           // Sync local bookmarks to GitLab
           console.log('[App] Syncing local bookmarks to GitLab...');
@@ -978,7 +979,7 @@ class App {
   }
 
   /**
-   * Load bookmarks from Gist or local storage
+   * Load bookmarks from snippet or local storage
    */
   async loadBookmarks() {
     try {
@@ -1551,7 +1552,7 @@ class App {
 
     toast.innerHTML = `
       <div style="margin-bottom: 8px; font-weight: 500;">
-        Bookmarks Updated from Gist
+        Bookmarks Updated from Snippet
       </div>
       <div style="font-size: 0.9em; margin-bottom: 12px; opacity: 0.9;">
         ${diff.added.length} added, ${diff.moved.length} moved, ${diff.modified.length} modified
@@ -1620,7 +1621,7 @@ class App {
         ⚠️ Sync Conflict Detected
       </h2>
       <p style="margin-bottom: 16px;">
-        The remote Gist has <strong>${diff.removed.length} deletion(s)</strong> that will remove bookmarks from your local collection.
+        The remote snippet has <strong>${diff.removed.length} deletion(s)</strong> that will remove bookmarks from your local collection.
       </p>
       <p style="margin-bottom: 16px; opacity: 0.8;">
         Review the changes below before deciding to sync:

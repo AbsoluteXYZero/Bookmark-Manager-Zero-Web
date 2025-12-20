@@ -377,9 +377,10 @@ class SyncManager {
             type: remoteValue.node.url ? 'bookmark' : 'folder'
           });
         }
-        // Check if modified (title or url changed)
-        else if (localValue.node.title !== remoteValue.node.title ||
-                 localValue.node.url !== remoteValue.node.url) {
+        // Check if modified (title or url changed), ignoring case-only title differences
+        const titleDiffers = (localValue.node.title || '').toLowerCase() !== (remoteValue.node.title || '').toLowerCase();
+        const urlDiffers = localValue.node.url !== remoteValue.node.url;
+        if (titleDiffers || urlDiffers) {
           diff.modified.push({
             id,
             oldTitle: localValue.node.title || 'Untitled',
@@ -854,7 +855,6 @@ class SyncManager {
       hasUnsyncedChanges: this.hasUnsyncedChanges,
       lastSyncTime: this.lastSyncTime,
       provider: this.provider,
-      gistId: this.gistId,
       snippetId: this.snippetId,
       remoteId: this.getRemoteId(),
       deviceId: this.deviceId

@@ -47,7 +47,7 @@ class IndexedDBManager {
           console.log('Created bookmarks store');
         }
 
-        // 2. Metadata store - Gist ID, sync status, edit locks
+        // 2. Metadata store - Snippet ID, sync status, edit locks
         if (!db.objectStoreNames.contains('metadata')) {
           db.createObjectStore('metadata', { keyPath: 'key' });
           console.log('Created metadata store');

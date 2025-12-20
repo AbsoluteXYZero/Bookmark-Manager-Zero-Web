@@ -765,7 +765,7 @@ class UIManager {
     setupCard.className = 'setup-card';
     setupCard.innerHTML = `
       <div class="setup-card-header">🎆 Welcome to Bookmark Manager Zero Web! 🎆</div>
-      <div class="setup-card-subheader">Your bookmarks are stored in your private GitHub Gist!</div>
+      <div class="setup-card-subheader">Your bookmarks are stored in your private GitLab Snippet!</div>
       <button class="setup-card-scan-btn" id="setupScanBtn">🔍 Scan All Bookmarks Now</button>
       <div class="setup-card-info">
         Bookmarks auto-scan when you expand folders (every 7 days). Progress appears in the status bar below.
