@@ -1,33 +1,30 @@
 @echo off
 setlocal
 
-:: Ask user for commit message
-set /p COMMITMSG="Enter commit message: "
+REM Ask for commit message
+set /p msg="Enter commit message: "
 
-:: Stage all changes
+REM Commit changes
 git add .
+git commit -m "%msg%"
 
-:: Commit changes
-git commit -m "%COMMITMSG%"
+REM List of remotes
+set remotes=origin gitlab gitea
 
-:: Define remotes
-set REMOTES=origin gitlab gitea
-
-:: Loop through each remote
-for %%R in (%REMOTES%) do (
+for %%r in (%remotes%) do (
     echo.
-    echo Pushing to %%R...
-    git push %%R main
-    if %errorlevel% neq 0 (
-        echo First push to %%R failed. Retrying...
-        git push %%R main
-        if %errorlevel% neq 0 (
-            echo ERROR: Push to %%R failed twice!
+    echo Pushing to %%r...
+    git push %%r main
+    if errorlevel 1 (
+        echo First push to %%r failed, retrying...
+        git push %%r main
+        if errorlevel 1 (
+            echo ERROR: Push to %%r failed twice.
         ) else (
-            echo Success on second attempt to %%R.
+            echo Success on second attempt to %%r.
         )
     ) else (
-        echo Success on first attempt to %%R.
+        echo Success on first attempt to %%r.
     )
 )
 
