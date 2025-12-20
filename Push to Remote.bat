@@ -1,41 +1,36 @@
 @echo off
-set /p msg="Enter commit message: "
+setlocal
 
+:: Ask user for commit message
+set /p COMMITMSG="Enter commit message: "
+
+:: Stage all changes
 git add .
-git commit -m "%msg%"
 
-REM Define remotes
-set remotes=origin gitlab gitea
+:: Commit changes
+git commit -m "%COMMITMSG%"
 
-REM Loop through each remote
-for %%r in (%remotes%) do (
-    set push_success=0
+:: Define remotes
+set REMOTES=origin gitlab gitea
 
-    REM First push attempt
-    git push %%r main
-    if %ERRORLEVEL% EQU 0 (
-        echo Push to %%r succeeded.
-        set push_success=1
-    ) else (
-        echo First push to %%r failed. Retrying...
-        REM Second push attempt
-        git push %%r main
-        if %ERRORLEVEL% EQU 0 (
-            echo Second push to %%r succeeded.
-            set push_success=1
+:: Loop through each remote
+for %%R in (%REMOTES%) do (
+    echo.
+    echo Pushing to %%R...
+    git push %%R main
+    if %errorlevel% neq 0 (
+        echo First push to %%R failed. Retrying...
+        git push %%R main
+        if %errorlevel% neq 0 (
+            echo ERROR: Push to %%R failed twice!
         ) else (
-            echo Second push to %%r FAILED.
+            echo Success on second attempt to %%R.
         )
-    )
-
-    REM Show final status per remote
-    if %push_success% EQU 1 (
-        echo Final status for %%r: SUCCESS
     ) else (
-        echo Final status for %%r: FAILURE
+        echo Success on first attempt to %%R.
     )
 )
 
 echo.
-echo All push attempts completed.
+echo All push attempts finished.
 pause
