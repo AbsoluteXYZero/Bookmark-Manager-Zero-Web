@@ -563,15 +563,26 @@ class SyncManager {
    * Load bookmarks from IndexedDB
    */
   async loadLocalBookmarks() {
+    console.log('[SyncManager.loadLocalBookmarks] Loading from IndexedDB...');
     const bookmarksRecord = await dbManager.get('metadata', 'bookmarkTree');
-    return bookmarksRecord ? bookmarksRecord.value : this.getEmptyBookmarkTree();
+    console.log('[SyncManager.loadLocalBookmarks] Retrieved:', bookmarksRecord);
+    const result = bookmarksRecord ? bookmarksRecord.value : this.getEmptyBookmarkTree();
+    console.log('[SyncManager.loadLocalBookmarks] Returning:', result);
+    return result;
   }
 
   /**
    * Save bookmarks to IndexedDB
    */
   async saveLocalBookmarks(bookmarkTree) {
-    await dbManager.put('metadata', { key: 'bookmarkTree', value: bookmarkTree });
+    console.log('[SyncManager.saveLocalBookmarks] Saving bookmarks to IndexedDB:', bookmarkTree);
+    try {
+      await dbManager.put('metadata', { key: 'bookmarkTree', value: bookmarkTree });
+      console.log('[SyncManager.saveLocalBookmarks] Successfully saved');
+    } catch (error) {
+      console.error('[SyncManager.saveLocalBookmarks] Failed to save:', error);
+      throw error;
+    }
   }
 
   /**

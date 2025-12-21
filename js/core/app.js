@@ -112,8 +112,9 @@ class App {
     if (isLocalMode) {
       console.log('[Auth] Local mode detected');
       // Check if there are bookmarks in local storage
-      const hasBookmarks = await dbManager.getAllBookmarks();
-      if (hasBookmarks && hasBookmarks.length > 0) {
+      const bookmarkTree = await dbManager.get('metadata', 'bookmarkTree');
+      const hasBookmarks = bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots;
+      if (hasBookmarks) {
         console.log('[Auth] Found local bookmarks, loading app...');
         this.isAuthenticated = true;
         await this.showMainApp();
@@ -268,7 +269,7 @@ class App {
           }
 
           // Store bookmarks in local storage
-          await dbManager.saveAllBookmarks(bookmarks);
+          await bookmarkManager.replaceTree(bookmarks);
 
           // Store a flag indicating local mode
           await authManager.storePreference('syncProvider', 'local');
@@ -285,6 +286,105 @@ class App {
           }
           selectFileBtn.disabled = false;
           selectFileBtn.textContent = 'Select Bookmarks File';
+        }
+      };
+    }
+
+    // Check for existing local bookmarks
+    const continueExistingBtn = document.getElementById('continueExistingBtn');
+    (async () => {
+      try {
+        console.log('[LoginScreen] Checking for existing local bookmarks...');
+        const bookmarkTree = await dbManager.get('metadata', 'bookmarkTree');
+        console.log('[LoginScreen] Bookmark tree result:', bookmarkTree);
+        
+        const hasExistingBookmarks = bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots && Object.keys(bookmarkTree.value.roots).length > 0;
+        console.log('[LoginScreen] Has existing bookmarks:', hasExistingBookmarks);
+        
+        if (hasExistingBookmarks && continueExistingBtn) {
+          console.log('[LoginScreen] Showing continue button');
+          continueExistingBtn.style.display = 'block';
+        } else {
+          console.log('[LoginScreen] Not showing continue button - button element:', !!continueExistingBtn, 'has bookmarks:', hasExistingBookmarks);
+        }
+      } catch (error) {
+        console.error('[LoginScreen] Failed to check for existing bookmarks:', error);
+      }
+    })();
+
+    // Set up continue existing bookmarks button
+    if (continueExistingBtn) {
+      continueExistingBtn.onclick = async () => {
+        try {
+          if (localModeError) localModeError.style.display = 'none';
+          continueExistingBtn.disabled = true;
+          continueExistingBtn.textContent = 'Loading...';
+
+          // Set local mode flag
+          await authManager.storePreference('syncProvider', 'local');
+          localStorage.setItem('bmz_local_mode', 'true');
+
+          // Load and show main app
+          await this.showMainApp();
+
+        } catch (error) {
+          console.error('Continue failed:', error);
+          if (localModeError) {
+            localModeError.textContent = error.message || 'Failed to continue. Please try again.';
+            localModeError.style.display = 'block';
+          }
+          continueExistingBtn.disabled = false;
+          continueExistingBtn.textContent = 'Continue with Existing Bookmarks';
+        }
+      };
+    }
+
+    // Set up start fresh button
+    const startFreshBtn = document.getElementById('startFreshBtn');
+    if (startFreshBtn) {
+      startFreshBtn.onclick = async () => {
+        // Confirm with user before clearing everything
+        const confirmed = confirm(
+          'Start Fresh will delete all existing bookmarks and create an empty bookmark list.\n\n' +
+          'This action cannot be undone. Any bookmarks you have will be permanently deleted.\n\n' +
+          'Are you sure you want to continue?'
+        );
+
+        if (!confirmed) {
+          return;
+        }
+
+        try {
+          if (localModeError) localModeError.style.display = 'none';
+          startFreshBtn.disabled = true;
+          startFreshBtn.textContent = 'Setting up...';
+
+          // Create empty bookmark tree structure
+          const emptyTree = syncManager.getEmptyBookmarkTree();
+
+          // Use bookmarkManager to properly save the empty tree
+          await bookmarkManager.replaceTree(emptyTree);
+
+          // Store a flag indicating local mode
+          await authManager.storePreference('syncProvider', 'local');
+          localStorage.setItem('bmz_local_mode', 'true');
+
+          // Hide continue button since we just deleted everything
+          if (continueExistingBtn) {
+            continueExistingBtn.style.display = 'none';
+          }
+
+          // Show success and load main app
+          await this.showMainApp();
+
+        } catch (error) {
+          console.error('Start fresh failed:', error);
+          if (localModeError) {
+            localModeError.textContent = error.message || 'Failed to start fresh. Please try again.';
+            localModeError.style.display = 'block';
+          }
+          startFreshBtn.disabled = false;
+          startFreshBtn.textContent = 'Start Fresh';
         }
       };
     }
@@ -320,7 +420,19 @@ class App {
 
         try {
           // Authenticate with token (GitLab only)
-          const authResult = await oauthPAT.authenticate(token);
+          const authResult = await oauthPAT.authenticate(token, async () => {
+            // Retry callback - clear error and re-trigger login
+            if (loginErrorGitlab) loginErrorGitlab.style.display = 'none';
+            loginBtnGitlab.click();
+          });
+
+          if (authResult === null) {
+            // Popup was shown, authentication failed but user can retry
+            // Reset button state
+            loginBtnGitlab.disabled = false;
+            loginBtnGitlab.textContent = 'Login with GitLab';
+            return;
+          }
 
           console.log(`Authenticated with GitLab:`, authResult.user.username);
 
@@ -402,138 +514,84 @@ class App {
   }
 
   /**
-   * Clear all sync-related data (snippet IDs and bookmarks)
-   * Call this when logging in to ensure fresh state
+   * Create new remote storage (snippet)
    */
-  async clearAllSyncData() {
-    console.log('[App] Clearing all sync data for fresh login...');
-
-    // Clear sync manager state
-    syncManager.snippetId = null;
-    syncManager.provider = null;
-
-    // Clear adapter state
-    snippetAdapter.snippetId = null;
-
-    // Clear localStorage
-    localStorage.removeItem('bmz_snippet_id');
-
-    // Clear IndexedDB metadata (snippet IDs, version, bookmark tree)
-    await dbManager.delete('metadata', 'snippetId');
-    await dbManager.delete('metadata', 'localVersion');
-    await dbManager.delete('metadata', 'bookmarkTree');
-
-    // Clear all bookmarks to force fresh sync
-    await dbManager.clear('bookmarks');
-
-    console.log('[App] All sync data cleared');
-  }
-
-  /**
-   * Show main app after authentication
-   */
-  async showMainApp() {
+  async createNewRemoteStorage(provider = 'gitlab') {
     try {
-      console.log('[App] showMainApp started');
+      // Check if we have local bookmarks that need to be merged
+      const hasLocalBookmarks = await this.hasLocalBookmarks();
+      console.log(`[Createsnippet] Has local bookmarks: ${hasLocalBookmarks}`);
 
-      // Hide login screen, show main content
-      const loginScreen = document.getElementById('loginScreen');
-      const mainContent = document.getElementById('mainContent');
-
-      // Remove show-login class from html element
-      document.documentElement.classList.remove('show-login');
-
-      if (loginScreen) {
-        loginScreen.classList.add('hidden');
-      }
-      if (mainContent) {
-        mainContent.classList.remove('hidden');
-      }
-
-      // Clean up any corrupted storage
-      await this.cleanupLocalStorage();
-
-      // Check if we're in local mode
-      const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
-
-      // Show/hide Connect GitLab button based on mode
-      const connectGitlabBtn = document.getElementById('connectGitlabBtn');
-      if (connectGitlabBtn) {
-        connectGitlabBtn.style.display = isLocalMode ? 'flex' : 'none';
-      }
-
-      // Initialize bookmark manager
-      await bookmarkManager.init();
-      console.log('Bookmark manager initialized');
-
-      // Initialize sync manager
-      await syncManager.init();
-      console.log('Sync manager initialized');
-
-      // Skip snippet setup and remote sync if in local mode
-      if (!isLocalMode) {
-        // Check if we have a snippet set up
-        const hasSnippet = await this.checkSnippetSetup();
-
-        if (!hasSnippet) {
-          // Show snippet setup modal (buttons should already work from initUI)
-          await this.showSnippetSetup();
-          return;
-        }
-
-        // Sync from remote to ensure we have latest data
-        // Prevent duplicate sync operations
-        if (!this._syncInProgress) {
-          this._syncInProgress = true;
-          console.log('[App] Syncing bookmarks from remote...');
-          try {
-            // Check if we already have the latest data from checkSnippetSetup()
-            // We can check if local bookmarks are already loaded and match the remote
-            const localTree = bookmarkManager.getTree();
-            const hasLocalBookmarks = localTree && localTree.roots && Object.keys(localTree.roots).length > 0;
-
-            if (hasLocalBookmarks) {
-              console.log('[App] Already have bookmarks loaded, skipping sync');
-            } else {
-              await syncManager.syncFromRemote();
-              await bookmarkManager.reload();
-            }
-            console.log('[App] Sync from remote complete');
-          } catch (error) {
-            console.warn('[App] Sync from remote failed, will use cached data:', error);
-          } finally {
-            this._syncInProgress = false;
-          }
+      let itemId;
+      if (hasLocalBookmarks) {
+        // Show merge confirmation dialog
+        const userChoice = await this.showMergeConfirmationDialog(null, 'new');
+        if (userChoice === 'keep-local') {
+          // User wants to keep local bookmarks, cancel setup
+          console.log('[Createsnippet] User chose to keep local bookmarks, canceling setup');
+          return; // Exit without creating snippet
+        } else if (userChoice === 'merge') {
+          // Create snippet with merged local bookmarks
+          itemId = await this.createSnippetWithLocalBookmarks();
+        } else if (userChoice === 'replace') {
+          // Create empty snippet (replace local)
+          console.log(`[Createsnippet] Step 1: Creating empty snippet via adapter...`);
+          itemId = await snippetAdapter.createBookmarkSnippet();
         }
       } else {
-        console.log('[App] Local mode - skipping remote sync');
+        // No local bookmarks, create empty snippet
+        console.log(`[Createsnippet] Step 1: Creating snippet via adapter...`);
+        itemId = await snippetAdapter.createBookmarkSnippet();
       }
 
-      console.log('[App] Initializing sidebar...');
-      // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
-      // Prevent duplicate initialization
-      if (window.initSidebar && !this._sidebarInitialized) {
+      console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
+
+      console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
+      snippetAdapter.setSnippetId(itemId);
+
+      // Save snippet ID to sync manager
+      console.log(`[CreateSnippet] Step 4: Saving snippet ID to sync manager...`);
+      await syncManager.setSnippetId(itemId);
+
+      // Hide modal
+      console.log(`[CreateSnippet] Step 3: Hiding modal...`);
+      const modal = document.getElementById('snippetSetupModal');
+      modal.style.display = 'none';
+      modal.classList.add('hidden');
+
+      // Set initial version to 1 (matching what we created)
+      console.log(`[CreateSnippet] Step 4.5: Setting initial version...`);
+      await syncManager.setLocalVersion(1);
+
+      // Sync from remote to get the merged data (if we merged) or empty data
+      console.log(`[CreateSnippet] Step 5: Syncing from remote...`);
+      await syncManager.syncFromRemote();
+
+      // Reload bookmarks from local storage (now contains the snippet data)
+      console.log('[Createsnippet] Step 6: Reloading bookmarks from local...');
+      const tree = await bookmarkManager.reload();
+      console.log('[Createsnippet] Step 6 Complete: Tree loaded:', {
+        hasRoots: !!tree?.roots,
+        rootKeys: tree?.roots ? Object.keys(tree.roots) : [],
+        bookmark_bar: tree?.roots?.bookmark_bar,
+        menu: tree?.roots?.menu,
+        other: tree?.roots?.other,
+        mobile: tree?.roots?.mobile
+      });
+
+      // Initialize sidebar to render the UI
+      console.log('[Createsnippet] Step 7: Initializing sidebar...');
+      if (window.initSidebar) {
         await window.initSidebar();
-        this._sidebarInitialized = true;
+        console.log('[Createsnippet] Step 7 Complete: Sidebar initialized');
+      } else {
+        console.warn('[Createsnippet] window.initSidebar not found!');
       }
 
-      // Initialize services with delays to prevent overwhelming the system
-      console.log('[App] Initializing blocklist service...');
-      await blocklistService.init();
-      console.log('Blocklist service initialized');
-
-      // Initialize scanner service immediately
-      console.log('[App] Initializing scanner service...');
-      if (!this._scannerInitialized) {
-        await scannerService.init();
-        this._scannerInitialized = true;
-        console.log('Scanner service initialized');
-      }
-
-      console.log('Main app loaded successfully');
+      console.log(`[Createsnippet] All steps complete. snippet ID:`, itemId);
     } catch (error) {
-      console.error('Error in showMainApp:', error);
-      this.showError('Failed to load main app', error);
+      console.error('[Createsnippet] Failed:', error);
+      this.showSnippetSetupError('Failed to create snippet: ' + error.message);
     }
   }
 
@@ -727,6 +785,26 @@ class App {
    */
   async useRemoteStorage(itemId, provider = 'gitlab') {
     try {
+      // Check if we have local bookmarks that need to be merged
+      const hasLocalBookmarks = await this.hasLocalBookmarks();
+      console.log(`[UseRemoteStorage] Has local bookmarks: ${hasLocalBookmarks}`);
+
+      if (hasLocalBookmarks) {
+        // Show merge confirmation dialog
+        const userChoice = await this.showMergeConfirmationDialog(itemId, 'existing');
+        if (userChoice === 'keep-local') {
+          // User wants to keep local bookmarks, cancel setup
+          console.log('[UseRemoteStorage] User chose to keep local bookmarks, canceling setup');
+          return; // Exit without using snippet
+        } else if (userChoice === 'merge') {
+          // Merge local bookmarks into the snippet
+          await this.mergeLocalBookmarksIntoSnippet(itemId);
+        } else if (userChoice === 'replace') {
+          // Use snippet as-is (replace local) - continue with normal flow
+          console.log('[UseRemoteStorage] User chose to replace local with snippet');
+        }
+      }
+
       // Verify the snippet exists before saving the ID
       console.log(`[UseRemoteStorage] Verifying snippet ${itemId} exists...`);
       try {
@@ -781,9 +859,28 @@ class App {
    */
   async createNewRemoteStorage(provider = 'gitlab') {
     try {
-      console.log(`[Createsnippet] Step 1: Creating snippet via adapter...`);
+      // Check if we have local bookmarks that need to be merged
+      const hasLocalBookmarks = await this.hasLocalBookmarks();
+      console.log(`[Createsnippet] Has local bookmarks: ${hasLocalBookmarks}`);
 
-      const itemId = await snippetAdapter.createBookmarkSnippet();
+      let itemId;
+      if (hasLocalBookmarks) {
+        // Show merge confirmation dialog
+        const shouldMerge = await this.showMergeConfirmationDialog(null, 'new');
+        if (shouldMerge) {
+          // Create snippet with merged local bookmarks
+          itemId = await this.createSnippetWithLocalBookmarks();
+        } else {
+          // Create empty snippet (original behavior)
+          console.log(`[Createsnippet] Step 1: Creating empty snippet via adapter...`);
+          itemId = await snippetAdapter.createBookmarkSnippet();
+        }
+      } else {
+        // No local bookmarks, create empty snippet
+        console.log(`[Createsnippet] Step 1: Creating snippet via adapter...`);
+        itemId = await snippetAdapter.createBookmarkSnippet();
+      }
+
       console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
 
       console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
@@ -794,22 +891,20 @@ class App {
       await syncManager.setSnippetId(itemId);
 
       // Hide modal
-      console.log(`[Createsnippet] Step 3: Hiding modal...`);
+      console.log(`[CreateSnippet] Step 3: Hiding modal...`);
       const modal = document.getElementById('snippetSetupModal');
       modal.style.display = 'none';
       modal.classList.add('hidden');
 
       // Set initial version to 1 (matching what we created)
-      console.log(`[Createsnippet] Step 4.5: Setting initial version...`);
+      console.log(`[CreateSnippet] Step 4.5: Setting initial version...`);
       await syncManager.setLocalVersion(1);
 
-      // Initialize local bookmarks with empty structure
-      console.log(`[Createsnippet] Step 4.7: Initializing local bookmarks...`);
-      const emptyTree = syncManager.getEmptyBookmarkTree();
-      await syncManager.saveLocalBookmarks(emptyTree);
-      console.log(`[Createsnippet] Step 4.8: Local bookmarks initialized`);
+      // Sync from remote to get the merged data (if we merged) or empty data
+      console.log(`[CreateSnippet] Step 5: Syncing from remote...`);
+      await syncManager.syncFromRemote();
 
-      // Reload bookmarks from local storage
+      // Reload bookmarks from local storage (now contains the snippet data)
       console.log('[Createsnippet] Step 6: Reloading bookmarks from local...');
       const tree = await bookmarkManager.reload();
       console.log('[Createsnippet] Step 6 Complete: Tree loaded:', {
@@ -834,6 +929,352 @@ class App {
     } catch (error) {
       console.error('[Createsnippet] Failed:', error);
       this.showSnippetSetupError('Failed to create snippet: ' + error.message);
+    }
+  }
+
+  /**
+   * Check if user has local bookmarks
+   */
+  async hasLocalBookmarks() {
+    try {
+      const localBookmarks = await dbManager.getAll('bookmarks');
+      if (localBookmarks && localBookmarks.length > 0) {
+        // Count actual bookmarks (not just folders)
+        let bookmarkCount = 0;
+        const countBookmarks = (nodes) => {
+          nodes.forEach(node => {
+            if (node.url) {
+              bookmarkCount++;
+            }
+            if (node.children) {
+              countBookmarks(node.children);
+            }
+          });
+        };
+        countBookmarks(localBookmarks);
+        return bookmarkCount > 0;
+      }
+      return false;
+    } catch (error) {
+      console.error('[hasLocalBookmarks] Error:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Show merge confirmation dialog
+   */
+  async showMergeConfirmationDialog(snippetId, type) {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.className = 'modal-overlay';
+      modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.5);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10002;
+      `;
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: var(--md-sys-color-surface);
+        color: var(--md-sys-color-on-surface);
+        border-radius: 12px;
+        padding: 24px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+      `;
+
+      const actionText = type === 'new' ? 'create a new snippet' : 'use this existing snippet';
+      const snippetText = type === 'new' ? 'new snippet' : 'selected snippet';
+
+      dialog.innerHTML = `
+        <h2 style="margin: 0 0 16px 0; color: var(--md-sys-color-primary);">
+          📋 Local Bookmarks Detected
+        </h2>
+        <p style="margin-bottom: 16px;">
+          You have bookmarks stored locally. How would you like to handle them?
+        </p>
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 20px;">
+          <button id="keepLocal" style="
+            background: var(--md-sys-color-surface-variant);
+            color: var(--md-sys-color-on-surface-variant);
+            border: none;
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            text-align: left;
+            border-left: 4px solid var(--md-sys-color-secondary);
+          ">
+            <div style="font-weight: 500;">Keep Local Bookmarks</div>
+            <div style="font-size: 0.9em; opacity: 0.8; margin-top: 4px;">
+              Cancel setup and keep your local bookmarks unchanged
+            </div>
+          </button>
+
+          <button id="doMerge" style="
+            background: var(--md-sys-color-primary);
+            color: var(--md-sys-color-on-primary);
+            border: none;
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            text-align: left;
+            border-left: 4px solid var(--md-sys-color-primary);
+            font-weight: 500;
+          ">
+            <div style="font-weight: 500;">Merge Bookmarks</div>
+            <div style="font-size: 0.9em; opacity: 0.9; margin-top: 4px;">
+              Add your local bookmarks to the ${snippetText} and sync the combined result
+            </div>
+          </button>
+
+          <button id="replaceLocal" style="
+            background: var(--md-sys-color-error-container);
+            color: var(--md-sys-color-on-error-container);
+            border: none;
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            text-align: left;
+            border-left: 4px solid var(--md-sys-color-error);
+          ">
+            <div style="font-weight: 500;">Replace with Snippet</div>
+            <div style="font-size: 0.9em; opacity: 0.8; margin-top: 4px;">
+              Use the ${snippetText} only (your local bookmarks will be lost)
+            </div>
+          </button>
+        </div>
+      `;
+
+      modal.appendChild(dialog);
+      document.body.appendChild(modal);
+
+      // Button handlers
+      dialog.querySelector('#keepLocal').addEventListener('click', () => {
+        modal.remove();
+        resolve('keep-local');
+      });
+
+      dialog.querySelector('#doMerge').addEventListener('click', () => {
+        modal.remove();
+        resolve('merge');
+      });
+
+      dialog.querySelector('#replaceLocal').addEventListener('click', () => {
+        modal.remove();
+        resolve('replace');
+      });
+    });
+  }
+
+  /**
+   * Create snippet with merged local bookmarks
+   */
+  async createSnippetWithLocalBookmarks() {
+    try {
+      console.log('[createSnippetWithLocalBookmarks] Starting merge process...');
+
+      // Get local bookmarks
+      const localBookmarks = await dbManager.getAll('bookmarks');
+      console.log('[createSnippetWithLocalBookmarks] Retrieved local bookmarks:', localBookmarks?.length || 0);
+
+      // Get empty bookmark tree structure
+      const emptyTree = syncManager.getEmptyBookmarkTree();
+
+      // Merge local bookmarks into the empty tree
+      const mergedTree = this.mergeBookmarksIntoTree(localBookmarks, emptyTree);
+      console.log('[createSnippetWithLocalBookmarks] Merged tree created');
+
+      // Create snippet with merged data
+      console.log('[createSnippetWithLocalBookmarks] Creating snippet with merged data...');
+      const itemId = await snippetAdapter.createBookmarkSnippet(mergedTree);
+      console.log('[createSnippetWithLocalBookmarks] Snippet created with merged data:', itemId);
+
+      return itemId;
+    } catch (error) {
+      console.error('[createSnippetWithLocalBookmarks] Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Merge local bookmarks into existing snippet
+   */
+  async mergeLocalBookmarksIntoSnippet(snippetId) {
+    try {
+      console.log('[mergeLocalBookmarksIntoSnippet] Starting merge process for snippet:', snippetId);
+
+      // Get current snippet data
+      const snippetData = await snippetAdapter.readBookmarks(snippetId);
+      console.log('[mergeLocalBookmarksIntoSnippet] Retrieved snippet data');
+
+      // Get local bookmarks
+      const localBookmarks = await dbManager.getAll('bookmarks');
+      console.log('[mergeLocalBookmarksIntoSnippet] Retrieved local bookmarks:', localBookmarks?.length || 0);
+
+      // Merge local bookmarks into snippet data
+      const mergedTree = this.mergeBookmarksIntoTree(localBookmarks, snippetData);
+      console.log('[mergeLocalBookmarksIntoSnippet] Merged tree created');
+
+      // Update snippet with merged data
+      console.log('[mergeLocalBookmarksIntoSnippet] Updating snippet with merged data...');
+      await snippetAdapter.updateBookmarks(snippetId, mergedTree, snippetData.version + 1);
+      console.log('[mergeLocalBookmarksIntoSnippet] Snippet updated successfully');
+
+    } catch (error) {
+      console.error('[mergeLocalBookmarksIntoSnippet] Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Merge bookmarks from one tree into another tree
+   * Preserves folder structure and merges into existing folders with same names
+   */
+  mergeBookmarksIntoTree(sourceBookmarks, targetTree) {
+    try {
+      console.log('[mergeBookmarksIntoTree] Merging bookmarks with folder structure preservation...');
+
+      // Create a deep copy of the target tree
+      const mergedTree = JSON.parse(JSON.stringify(targetTree));
+
+      // Ensure target tree has roots
+      if (!mergedTree.roots) {
+        mergedTree.roots = {
+          bookmark_bar: { id: '1', title: 'Bookmarks Toolbar', type: 'folder', children: [] },
+          menu: { id: '2', title: 'Bookmarks Menu', type: 'folder', children: [] },
+          other: { id: '3', title: 'Other Bookmarks', type: 'folder', children: [] },
+          mobile: { id: '4', title: 'Mobile Bookmarks', type: 'folder', children: [] }
+        };
+      }
+
+      // Helper function to find folder by title in a root folder
+      const findFolderByTitle = (children, title) => {
+        if (!children) return null;
+        return children.find(child => child.type === 'folder' && child.title === title);
+      };
+
+      // Helper function to merge source folder into target folder
+      const mergeFolder = (sourceFolder, targetParentChildren) => {
+        const existingFolder = findFolderByTitle(targetParentChildren, sourceFolder.title);
+
+        if (existingFolder) {
+          // Folder exists, merge contents
+          console.log(`[mergeBookmarksIntoTree] Merging into existing folder: ${sourceFolder.title}`);
+          if (sourceFolder.children) {
+            // Recursively merge each child
+            sourceFolder.children.forEach(child => {
+              if (child.type === 'folder') {
+                mergeFolder(child, existingFolder.children);
+              } else if (child.url) {
+                // Add bookmark if it doesn't already exist (by URL)
+                const bookmarkExists = existingFolder.children?.some(existingChild =>
+                  existingChild.url === child.url
+                );
+                if (!bookmarkExists) {
+                  if (!existingFolder.children) existingFolder.children = [];
+                  existingFolder.children.push({
+                    ...child,
+                    id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // New ID
+                    dateAdded: Date.now()
+                  });
+                  console.log(`[mergeBookmarksIntoTree] Added bookmark: ${child.title}`);
+                } else {
+                  console.log(`[mergeBookmarksIntoTree] Skipped duplicate bookmark: ${child.title}`);
+                }
+              }
+            });
+          }
+        } else {
+          // Folder doesn't exist, add entire folder structure
+          console.log(`[mergeBookmarksIntoTree] Adding new folder: ${sourceFolder.title}`);
+          const newFolder = {
+            ...sourceFolder,
+            id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // New ID
+            dateAdded: Date.now()
+          };
+          targetParentChildren.push(newFolder);
+        }
+      };
+
+      // Process each root folder from source bookmarks
+      if (sourceBookmarks && Array.isArray(sourceBookmarks)) {
+        // Group source bookmarks by their root folder type
+        const sourceRoots = {
+          bookmark_bar: [],
+          menu: [],
+          other: [],
+          mobile: []
+        };
+
+        // Categorize source bookmarks into appropriate root folders
+        sourceBookmarks.forEach(bookmark => {
+          if (bookmark.type === 'folder') {
+            // Determine which root this folder should go into
+            // Default to 'other' if we can't determine
+            let targetRoot = 'other';
+
+            // Simple heuristic: check if folder title suggests toolbar/menu placement
+            const title = bookmark.title?.toLowerCase() || '';
+            if (title.includes('toolbar') || title.includes('bar')) {
+              targetRoot = 'bookmark_bar';
+            } else if (title.includes('menu')) {
+              targetRoot = 'menu';
+            }
+
+            sourceRoots[targetRoot].push(bookmark);
+          } else if (bookmark.url) {
+            // Individual bookmarks go to 'other' by default
+            sourceRoots.other.push(bookmark);
+          }
+        });
+
+        // Merge each categorized group into the corresponding target root
+        Object.keys(sourceRoots).forEach(rootKey => {
+          const sourceItems = sourceRoots[rootKey];
+          const targetRoot = mergedTree.roots[rootKey];
+
+          if (sourceItems.length > 0 && targetRoot && targetRoot.children) {
+            sourceItems.forEach(item => {
+              if (item.type === 'folder') {
+                mergeFolder(item, targetRoot.children);
+              } else if (item.url) {
+                // Add individual bookmarks, avoiding duplicates
+                const bookmarkExists = targetRoot.children.some(existingChild =>
+                  existingChild.url === item.url
+                );
+                if (!bookmarkExists) {
+                  targetRoot.children.push({
+                    ...item,
+                    id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // New ID
+                    dateAdded: Date.now()
+                  });
+                  console.log(`[mergeBookmarksIntoTree] Added individual bookmark to ${rootKey}: ${item.title}`);
+                } else {
+                  console.log(`[mergeBookmarksIntoTree] Skipped duplicate bookmark in ${rootKey}: ${item.title}`);
+                }
+              }
+            });
+          }
+        });
+      }
+
+      console.log('[mergeBookmarksIntoTree] Merge complete with folder structure preservation');
+      return mergedTree;
+    } catch (error) {
+      console.error('[mergeBookmarksIntoTree] Error:', error);
+      throw error;
     }
   }
 
@@ -915,7 +1356,20 @@ class App {
         if (errorDiv) errorDiv.style.display = 'none';
 
         // Authenticate with token
-        const authResult = await oauthPAT.authenticate(token);
+        const authResult = await oauthPAT.authenticate(token, async () => {
+          // Retry callback - clear error and re-trigger connection
+          if (errorDiv) errorDiv.style.display = 'none';
+          confirmBtn.click();
+        });
+
+        if (authResult === null) {
+          // Popup was shown, authentication failed but user can retry
+          // Reset button state
+          confirmBtn.disabled = false;
+          confirmBtn.textContent = 'Connect GitLab';
+          return;
+        }
+
         console.log(`Authenticated with GitLab:`, authResult.user.username);
 
         // Store token securely
@@ -1586,6 +2040,39 @@ class App {
   }
 
   /**
+   * Merge local and remote bookmarks, preserving folder structure
+   */
+  mergeBookmarkTrees(localTree, remoteTree) {
+    const merged = JSON.parse(JSON.stringify(localTree));
+
+    const mergeFolder = (local, remote, path = '') => {
+      if (!remote || !remote.children) return;
+
+      for (const remoteChild of remote.children) {
+        const localChild = local.children.find(c => c.id === remoteChild.id);
+
+        if (localChild) {
+          if (remoteChild.children && localChild.children) {
+            mergeFolder(localChild, remoteChild, path + '/' + localChild.title);
+          }
+        } else {
+          local.children.push(JSON.parse(JSON.stringify(remoteChild)));
+        }
+      }
+    };
+
+    for (const rootKey in remoteTree.roots) {
+      if (merged.roots[rootKey]) {
+        mergeFolder(merged.roots[rootKey], remoteTree.roots[rootKey], rootKey);
+      } else {
+        merged.roots[rootKey] = JSON.parse(JSON.stringify(remoteTree.roots[rootKey]));
+      }
+    }
+
+    return merged;
+  }
+
+  /**
    * Show sync conflict dialog (for deletions - requires confirmation)
    */
   async showSyncConflictDialog(diff, remoteData, message) {
@@ -1634,7 +2121,7 @@ class App {
         overflow-y: auto;
         margin-bottom: 20px;
       "></div>
-      <div style="display: flex; gap: 12px; justify-content: flex-end;">
+      <div style="display: flex; gap: 12px; justify-content: flex-end; flex-wrap: wrap;">
         <button id="cancelSync" style="
           background: var(--md-sys-color-surface-variant);
           color: var(--md-sys-color-on-surface-variant);
@@ -1644,6 +2131,38 @@ class App {
           cursor: pointer;
           font-size: 1em;
         ">Cancel</button>
+        <button id="keepLocal" style="
+          background: var(--md-sys-color-secondary-container);
+          color: var(--md-sys-color-on-secondary-container);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+          min-width: auto;
+        ">Keep Local</button>
+        <button id="mergeBookmarks" style="
+          background: var(--md-sys-color-primary);
+          color: var(--md-sys-color-on-primary);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+          font-weight: 500;
+          min-width: auto;
+        ">Merge</button>
+        <button id="replaceLocal" style="
+          background: var(--md-sys-color-error);
+          color: var(--md-sys-color-on-error);
+          border: none;
+          padding: 10px 20px;
+          border-radius: 6px;
+          cursor: pointer;
+          font-size: 1em;
+          font-weight: 500;
+          min-width: auto;
+        ">Use Snippet</button>
         <button id="viewFullDiff" style="
           background: var(--md-sys-color-secondary-container);
           color: var(--md-sys-color-on-secondary-container);
@@ -1653,16 +2172,6 @@ class App {
           cursor: pointer;
           font-size: 1em;
         ">View Full Changes</button>
-        <button id="acceptSync" style="
-          background: var(--md-sys-color-error);
-          color: var(--md-sys-color-on-error);
-          border: none;
-          padding: 10px 20px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1em;
-          font-weight: 500;
-        ">Accept & Sync</button>
       </div>
     `;
 
@@ -1682,13 +2191,45 @@ class App {
       this.showSyncDiffModal(diff);
     });
 
-    dialog.querySelector('#acceptSync').addEventListener('click', async () => {
+    dialog.querySelector('#keepLocal').addEventListener('click', () => {
       modal.remove();
-      // Apply the sync
-      const success = await syncManager.applyRemoteSync(remoteData);
-      if (success) {
-        // Reload bookmarks in UI
+      this.showToast('Local bookmarks kept. Remote changes were not applied.', 'info');
+    });
+
+    dialog.querySelector('#mergeBookmarks').addEventListener('click', async () => {
+      modal.remove();
+      try {
+        const localTree = await syncManager.loadLocalBookmarks();
+        const mergedTree = this.mergeBookmarkTrees(localTree, remoteData);
+        mergedTree.version = remoteData.version;
+        
+        await syncManager.saveLocalBookmarks(mergedTree);
+        await syncManager.setLocalVersion(remoteData.version);
+        await bookmarkManager.reload();
+        
+        if (window.reloadBookmarkUI) {
+          await window.reloadBookmarkUI();
+        }
+        
+        this.showToast('Bookmarks merged successfully!', 'success');
         window.location.reload();
+      } catch (error) {
+        console.error('Merge failed:', error);
+        this.showToast('Merge failed: ' + error.message, 'error');
+      }
+    });
+
+    dialog.querySelector('#replaceLocal').addEventListener('click', async () => {
+      modal.remove();
+      try {
+        const success = await syncManager.applyRemoteSync(remoteData);
+        if (success) {
+          this.showToast('Bookmarks replaced with snippet contents', 'success');
+          window.location.reload();
+        }
+      } catch (error) {
+        console.error('Replace failed:', error);
+        this.showToast('Replace failed: ' + error.message, 'error');
       }
     });
   }
@@ -1804,6 +2345,113 @@ class App {
   renderFullDiff(container, diff) {
     this.renderDiffSummary(container, diff, false);
     // The summary already shows first 5 of each type, full diff just doesn't limit
+  }
+
+  /**
+   * Show main application after authentication
+   */
+  async showMainApp() {
+    console.log('[showMainApp] Starting main app initialization...');
+
+    // Hide login screen
+    const loginScreen = document.getElementById('loginScreen');
+    if (loginScreen) {
+      loginScreen.classList.add('hidden');
+    }
+
+    // Show main content
+    const mainContent = document.getElementById('mainContent');
+    if (mainContent) {
+      mainContent.classList.remove('hidden');
+    }
+
+    // Remove show-login class from html element
+    document.documentElement.classList.remove('show-login');
+
+    // Initialize bookmark manager
+    await bookmarkManager.init();
+    console.log('Bookmark manager initialized');
+
+    // Initialize sync manager
+    await syncManager.init();
+    console.log('Sync manager initialized');
+
+    // Skip snippet setup and remote sync if in local mode
+    if (!localStorage.getItem('bmz_local_mode')) {
+      // Check if we have a snippet set up
+      const hasSnippet = await this.checkSnippetSetup();
+
+      if (!hasSnippet) {
+        // Show snippet setup modal (buttons should already work from initUI)
+        await this.showSnippetSetup();
+        return;
+      }
+
+      // Sync from remote to ensure we have latest data
+      // Prevent duplicate sync operations
+      if (!this._syncInProgress) {
+        this._syncInProgress = true;
+        console.log('[App] Syncing bookmarks from remote...');
+        try {
+          // Check if we already have the latest data from checkSnippetSetup()
+          // We can check if local bookmarks are already loaded and match the remote
+          const localTree = bookmarkManager.getTree();
+          const hasLocalBookmarks = localTree && localTree.roots && Object.keys(localTree.roots).length > 0;
+
+          if (hasLocalBookmarks) {
+            console.log('[App] Already have bookmarks loaded, skipping sync');
+          } else {
+            await syncManager.syncFromRemote();
+            await bookmarkManager.reload();
+          }
+          console.log('[App] Sync from remote complete');
+        } catch (error) {
+          console.warn('[App] Sync from remote failed, will use cached data:', error);
+        } finally {
+          this._syncInProgress = false;
+        }
+      }
+    } else {
+      console.log('[App] Local mode - skipping remote sync');
+
+      // Hide logout button in local mode
+      const logoutBtn = document.getElementById('logoutBtn');
+      if (logoutBtn) {
+        logoutBtn.style.display = 'none';
+      }
+
+      // Show Connect GitLab button in header for local mode users
+      const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
+      if (headerConnectGitlabBtn) {
+        headerConnectGitlabBtn.style.display = 'flex';
+        headerConnectGitlabBtn.addEventListener('click', () => {
+          this.showConnectGitlabModal();
+        });
+      }
+    }
+
+    console.log('[App] Initializing sidebar...');
+    // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
+    // Prevent duplicate initialization
+    if (window.initSidebar && !this._sidebarInitialized) {
+      await window.initSidebar();
+      this._sidebarInitialized = true;
+    }
+
+    // Initialize services with delays to prevent overwhelming the system
+    console.log('[App] Initializing blocklist service...');
+    await blocklistService.init();
+    console.log('Blocklist service initialized');
+
+    // Initialize scanner service immediately
+    console.log('[App] Initializing scanner service...');
+    if (!this._scannerInitialized) {
+      await scannerService.init();
+      this._scannerInitialized = true;
+      console.log('Scanner service initialized');
+    }
+
+    console.log('Main app loaded successfully');
   }
 
   /**

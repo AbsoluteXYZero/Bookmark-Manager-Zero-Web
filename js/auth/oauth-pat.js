@@ -3,6 +3,8 @@
  * GitLab PAT authentication
  */
 
+import GitLabErrorHandler from '../utils/gitlab-error-handler.js';
+
 class OAuthPAT {
   constructor() {
     this.token = null;
@@ -13,9 +15,10 @@ class OAuthPAT {
   /**
    * Authenticate with Personal Access Token
    * @param {string} token - GitLab Personal Access Token
-   * @returns {Promise<Object>} User info and token
+   * @param {Function} retryCallback - Callback to trigger retry with new token
+   * @returns {Promise<Object|null>} User info and token, or null if authentication error popup was shown
    */
-  async authenticate(token) {
+  async authenticate(token, retryCallback = null) {
     if (!token || token.trim().length === 0) {
       throw new Error('Token is required');
     }
@@ -30,7 +33,12 @@ class OAuthPAT {
     console.log('Authenticating with GitLab PAT');
 
     try {
-      return await this.authenticateGitLab(trimmedToken);
+      const result = await this.authenticateGitLab(trimmedToken, retryCallback);
+      if (result === null) {
+        // Authentication error popup was shown, allow retry without throwing
+        return null;
+      }
+      return result;
     } catch (error) {
       // Clear stored token on error
       this.token = null;
@@ -39,10 +47,12 @@ class OAuthPAT {
     }
   }
 
+
+
   /**
    * Authenticate with GitLab PAT
    */
-  async authenticateGitLab(token) {
+  async authenticateGitLab(token, retryCallback = null) {
     // Test token by fetching user info
     const response = await fetch('https://gitlab.com/api/v4/user', {
       headers: {
@@ -52,9 +62,27 @@ class OAuthPAT {
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new Error('Invalid GitLab token. Please check your token and try again.');
+        // Show informational popup and allow retry
+        GitLabErrorHandler.showAuthErrorPopup(retryCallback, false);
+        // Return null to indicate authentication failed but allow retry
+        return null;
+      } else if (response.status === 403) {
+        // Show permission error popup and allow retry
+        GitLabErrorHandler.showAuthErrorPopup(retryCallback, true);
+        // Return null to indicate permission failed but allow retry
+        return null;
+      } else if (response.status === 429) {
+        // Show rate limit popup and allow retry
+        GitLabErrorHandler.showRateLimitPopup(retryCallback);
+        // Return null to indicate rate limited but allow retry
+        return null;
+      } else if (response.status >= 500 && response.status < 600) {
+        // Show service error popup and allow retry
+        GitLabErrorHandler.showServiceErrorPopup(retryCallback);
+        // Return null to indicate service error but allow retry
+        return null;
       } else {
-        throw new Error(`GitLab authentication failed: ${response.statusText}`);
+        throw new Error('GitLab authentication failed: ' + response.statusText);
       }
     }
 
@@ -68,7 +96,25 @@ class OAuthPAT {
     });
 
     if (!snippetResponse.ok) {
-      throw new Error('GitLab token does not have "api" scope. Please create a new token with "api" permission.');
+      if (snippetResponse.status === 401) {
+        // Show informational popup for scope issue
+        GitLabErrorHandler.showAuthErrorPopup(retryCallback, false);
+        return null;
+      } else if (snippetResponse.status === 403) {
+        // Show permission error popup for scope issue
+        GitLabErrorHandler.showAuthErrorPopup(retryCallback, true);
+        return null;
+      } else if (snippetResponse.status === 429) {
+        // Show rate limit popup for scope check
+        GitLabErrorHandler.showRateLimitPopup(retryCallback);
+        return null;
+      } else if (snippetResponse.status >= 500 && snippetResponse.status < 600) {
+        // Show service error popup for scope check
+        GitLabErrorHandler.showServiceErrorPopup(retryCallback);
+        return null;
+      } else {
+        throw new Error('GitLab token does not have "api" scope. Please create a new token with "api" permission.');
+      }
     }
 
     // Store token and user info

@@ -12,6 +12,46 @@ import scannerService from './core/scanner.js';
 import { parseHTMLBookmarks } from './import-export/html-parser.js';
 import { parseJSONBookmarks } from './import-export/json-parser.js';
 import { encryptApiKey, decryptApiKey } from './utils/encryption.js';
+import {
+  initErrorToast,
+  showErrorToast,
+  hideErrorToast,
+  logError,
+  setupGlobalErrorHandlers
+} from './utils/error-notification-manager.js';
+import {
+  storeEncryptedApiKey,
+  getDecryptedApiKey,
+  addChangelogEntry,
+  getChangelogEntries,
+  clearChangelog
+} from './utils/storage-utils.js';
+import {
+  loadTheme,
+  applyTheme,
+  applyCustomAccentColor,
+  setupFolderChildrenObserver,
+  updateTintControlsVisibility,
+  applyTintSettings,
+  loadTintSettings,
+  setTheme,
+  loadView,
+  applyView,
+  setView,
+  loadZoom,
+  applyZoom,
+  setZoom,
+  updateZoomDisplay,
+  loadFontSize,
+  applyFontSize,
+  setFontSize,
+  updateFontSizeDisplay,
+  loadGuiScale,
+  applyGuiScale,
+  loadStartFolder,
+  populateStartFolderDropdown,
+  expandToStartFolder
+} from './utils/theme-settings-manager.js';
 
 // ============================================================================
 // BROWSER API COMPATIBILITY LAYER
@@ -125,133 +165,15 @@ async function dismissSetupCard() {
 // GLOBAL ERROR BOUNDARY
 // ============================================================================
 
-// Error toast DOM elements
-let errorToast;
-let errorTitle;
-let errorMessage;
-let errorReload;
-let errorDismiss;
-
-// Error log storage (keep last 50 errors)
-const MAX_ERROR_LOGS = 50;
-
-// Initialize error toast elements after DOM loads
-function initErrorToast() {
-  errorToast = document.getElementById('errorToast');
-  errorTitle = document.getElementById('errorTitle');
-  errorMessage = document.getElementById('errorMessage');
-  errorReload = document.getElementById('errorReload');
-  errorDismiss = document.getElementById('errorDismiss');
-
-  if (errorReload) {
-    errorReload.addEventListener('click', () => {
-      location.reload();
-    });
-  }
-
-  if (errorDismiss) {
-    errorDismiss.addEventListener('click', () => {
-      hideErrorToast();
-    });
-  }
-}
-
-// Show error toast notification
-function showErrorToast(title, message) {
-  if (!errorToast) return;
-
-  errorTitle.textContent = title;
-  errorMessage.textContent = message;
-  errorToast.classList.remove('hidden');
-
-  // Auto-hide after 10 seconds
-  setTimeout(() => {
-    hideErrorToast();
-  }, 10000);
-}
-
-// Hide error toast
-function hideErrorToast() {
-  if (errorToast) {
-    errorToast.classList.add('hidden');
-  }
-}
-
-// Log error to browser storage
-async function logError(error, context = '') {
-  try {
-    const errorLog = {
-      timestamp: Date.now(),
-      message: error.message || String(error),
-      stack: error.stack || '',
-      context: context,
-      userAgent: navigator.userAgent,
-      url: window.location.href
-    };
-
-    // Get existing error logs
-    const errorLogsStr = localStorage.getItem('errorLogs');
-    let errorLogs = errorLogsStr ? JSON.parse(errorLogsStr) : [];
-
-    // Add new error
-    errorLogs.unshift(errorLog);
-
-    // Keep only last 50 errors
-    if (errorLogs.length > MAX_ERROR_LOGS) {
-      errorLogs = errorLogs.slice(0, MAX_ERROR_LOGS);
-    }
-
-    // Save to storage
-    localStorage.setItem('errorLogs', JSON.stringify(errorLogs));
-    console.error(`[Error Logged] ${context}:`, error);
-  } catch (storageError) {
-    console.error('Failed to log error to storage:', storageError);
-  }
-}
-
-// Global error handler for synchronous errors
-window.addEventListener('error', async (event) => {
-  const error = event.error || new Error(event.message);
-
-  console.error('Global error caught:', error);
-
-  // Log error to storage
-  await logError(error, 'Global Error');
-
-  // Show user-friendly error message
-  showErrorToast(
-    'Unexpected Error',
-    error.message || 'An unexpected error occurred. The extension will continue to work, but some features may not function correctly.'
-  );
-
-  // Prevent default browser error handling
-  event.preventDefault();
-});
-
-// Global handler for unhandled promise rejections
-window.addEventListener('unhandledrejection', async (event) => {
-  const error = event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-
-  console.error('Unhandled promise rejection:', error);
-
-  // Log error to storage
-  await logError(error, 'Unhandled Promise Rejection');
-
-  // Show user-friendly error message
-  showErrorToast(
-    'Promise Error',
-    error.message || 'An operation failed unexpectedly. Please try again.'
-  );
-
-  // Prevent default browser error handling
-  event.preventDefault();
-});
-
-// Initialize error toast when DOM is ready
+// Initialize error toast and set up global error handlers
 if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', initErrorToast);
+  document.addEventListener('DOMContentLoaded', () => {
+    initErrorToast();
+    setupGlobalErrorHandlers();
+  });
 } else {
   initErrorToast();
+  setupGlobalErrorHandlers();
 }
 
 // ============================================================================
@@ -364,85 +286,14 @@ function showPrivateModeIndicator() {
 }
 
 // ============================================================================
-// ENCRYPTION UTILITIES
+// ENCRYPTION AND STORAGE UTILITIES
 // ============================================================================
-
-// Encryption utilities now imported from shared utils/encryption.js module
-// Functions: encryptApiKey(), decryptApiKey()
-
-async function storeEncryptedApiKey(keyName, apiKey) {
-  const encrypted = await encryptApiKey(apiKey);
-  if (encrypted) {
-    await safeStorage.set({ [keyName]: encrypted });
-    return true;
-  }
-  return false;
-}
-
-async function getDecryptedApiKey(keyName) {
-  const result = await safeStorage.get(keyName);
-  if (result[keyName]) {
-    return await decryptApiKey(result[keyName]);
-  }
-  return null;
-}
-
-// ============================================================================
-// CHANGELOG UTILITIES
-// ============================================================================
-
-// Maximum number of changelog entries to keep
-const MAX_CHANGELOG_ENTRIES = 1000;
-
-// Add an entry to the changelog
-async function addChangelogEntry(type, itemType, title, url = null, details = {}) {
-  try {
-    const entry = {
-      id: Date.now(),
-      type, // 'create', 'update', 'move', 'delete'
-      itemType, // 'bookmark', 'folder'
-      timestamp: Date.now(),
-      title,
-      url,
-      details
-    };
-
-    // Add new entry at the beginning (most recent first)
-    changelogEntries.unshift(entry);
-
-    // Keep only the latest entries
-    if (changelogEntries.length > MAX_CHANGELOG_ENTRIES) {
-      changelogEntries = changelogEntries.slice(0, MAX_CHANGELOG_ENTRIES);
-    }
-
-    // Stringify before saving to localStorage
-    await safeStorage.set({ changelogEntries: JSON.stringify(changelogEntries) });
-    console.log('[Changelog] Added entry:', entry);
-  } catch (error) {
-    console.error('[Changelog] Failed to add entry:', error);
-  }
-}
-
-// Get all changelog entries
-async function getChangelogEntries() {
-  try {
-    const result = await safeStorage.get('changelogEntries');
-    return result.changelogEntries || [];
-  } catch (error) {
-    console.error('[Changelog] Failed to get entries:', error);
-    return [];
-  }
-}
-
-// Clear all changelog entries
-async function clearChangelog() {
-  try {
-    await safeStorage.set({ changelogEntries: [] });
-    console.log('[Changelog] Cleared all entries');
-  } catch (error) {
-    console.error('[Changelog] Failed to clear entries:', error);
-  }
-}
+// These are now imported from utils/storage-utils.js:
+// - storeEncryptedApiKey()
+// - getDecryptedApiKey()
+// - addChangelogEntry()
+// - getChangelogEntries()
+// - clearChangelog()
 
 // Get folder path for a bookmark/folder
 async function getFolderPath(itemId) {
@@ -841,402 +692,56 @@ async function loadAutoClearSetting() {
 }
 
 // Load theme preference
-function loadTheme() {
-  if (isPreviewMode) {
-    theme = 'enhanced-blue';
-    applyTheme();
-    return;
-  }
-
-  safeStorage.get('theme').then(result => {
-    theme = result.theme || 'enhanced-blue';
-    applyTheme();
-
-    // Update dropdown to match loaded theme
-    const themeSelect = document.getElementById('themeSelect');
-    if (themeSelect) {
-      themeSelect.value = theme;
-    }
-  });
-}
+// Theme and settings functions are now imported from utils/theme-settings-manager.js
+// - loadTheme()
+// - applyTheme()
+// - applyCustomAccentColor()
+// - setupFolderChildrenObserver()
+// - updateTintControlsVisibility()
+// - applyTintSettings()
+// - loadTintSettings()
+// - setTheme()
+// - loadView()
+// - applyView()
+// - setView()
+// - loadZoom()
+// - applyZoom()
+// - setZoom()
+// - updateZoomDisplay()
+// - loadFontSize()
+// - applyFontSize()
+// - setFontSize()
+// - updateFontSizeDisplay()
+// - loadGuiScale()
+// - applyGuiScale()
+// - loadStartFolder()
+// - populateStartFolderDropdown()
+// - expandToStartFolder()
 
 // Store current custom accent color globally
 let currentCustomAccentColor = null;
 
-// Apply custom accent color (global function so it can be called from applyTheme)
-function applyCustomAccentColor(color) {
-  currentCustomAccentColor = color;
-  // Convert hex to RGB for variations
-  const r = parseInt(color.slice(1, 3), 16);
-  const g = parseInt(color.slice(3, 5), 16);
-  const b = parseInt(color.slice(5, 7), 16);
+// ============================================================================
+// EXPOSE GLOBALS TO WINDOW FOR MODULE ACCESS
+// ============================================================================
+// Extracted modules need access to these variables through the window object
+window.safeStorage = safeStorage;
+window.isPreviewMode = isPreviewMode;
+window.bookmarkTree = bookmarkTree;
+window.expandedFolders = expandedFolders;
+window.theme = theme;
+window.viewMode = viewMode;
+window.zoomLevel = zoomLevel;
+window.fontSize = fontSize;
+window.guiScale = guiScale;
+window.startFolderId = startFolderId;
+window.currentCustomAccentColor = currentCustomAccentColor;
 
-  // Create lighter container color (add 80 to each channel, cap at 255)
-  const containerR = Math.min(255, r + 80);
-  const containerG = Math.min(255, g + 80);
-  const containerB = Math.min(255, b + 80);
-  const containerColor = `#${containerR.toString(16).padStart(2, '0')}${containerG.toString(16).padStart(2, '0')}${containerB.toString(16).padStart(2, '0')}`;
-
-  // Remove existing custom accent style if it exists
-  let styleTag = document.getElementById('custom-accent-style');
-  if (styleTag) {
-    styleTag.remove();
-  }
-
-  // Inject a style tag with higher specificity selectors
-  styleTag = document.createElement('style');
-  styleTag.id = 'custom-accent-style';
-  styleTag.textContent = `
-    /* Use @layer to ensure these rules take priority */
-    @layer custom-accent {
-      html:root {
-        --md-sys-color-primary: ${color} !important;
-        --md-sys-color-primary-container: ${containerColor} !important;
-        --md-sys-color-secondary: ${color} !important;
-      }
-      html body.light,
-      html body.blue-dark,
-      html body.dark,
-      html body.enhanced-blue,
-      html body.enhanced-light,
-      html body.enhanced-dark,
-      html body.enhanced-gray,
-      html body.tinted {
-        --md-sys-color-primary: ${color} !important;
-        --md-sys-color-primary-container: ${containerColor} !important;
-        --md-sys-color-secondary: ${color} !important;
-      }
-      /* Directly override border-left on folder-children */
-      .folder-children {
-        border-left: 2px solid ${color} !important;
-      }
-    }
-  `;
-  // Append to body instead of head for later cascade position
-  if (document.body) {
-    document.body.appendChild(styleTag);
-  } else {
-    document.head.appendChild(styleTag);
-  }
-
-  // Directly update all existing .folder-children elements
-  // This bypasses CSS variable resolution issues
-  document.querySelectorAll('.folder-children').forEach(element => {
-    element.style.setProperty('border-left-color', color, 'important');
-  });
-}
-
-// Set up MutationObserver to apply custom color to new folder-children elements
-function setupFolderChildrenObserver() {
-  if (typeof window.folderChildrenObserver === 'undefined' && document.body) {
-    window.folderChildrenObserver = new MutationObserver((mutations) => {
-      if (!currentCustomAccentColor) return;
-
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === 1) { // Element node
-            // Check if the node itself is folder-children
-            if (node.classList && node.classList.contains('folder-children')) {
-              node.style.setProperty('border-left-color', currentCustomAccentColor, 'important');
-            }
-            // Check descendants
-            if (node.querySelectorAll) {
-              node.querySelectorAll('.folder-children').forEach(element => {
-                element.style.setProperty('border-left-color', currentCustomAccentColor, 'important');
-              });
-            }
-          }
-        });
-
-        // Also check for class changes (when .show is added)
-        if (mutation.type === 'attributes' && mutation.attributeName === 'class') {
-          const target = mutation.target;
-          if (target.classList && target.classList.contains('folder-children')) {
-            target.style.setProperty('border-left-color', currentCustomAccentColor, 'important');
-          }
-        }
-      });
-    });
-
-    // Start observing
-    window.folderChildrenObserver.observe(document.body, {
-      childList: true,
-      subtree: true,
-      attributes: true,
-      attributeFilter: ['class']
-    });
-  }
-}
-
-// Call setup when DOM is ready
+// Set up folder children observer when DOM is ready
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', setupFolderChildrenObserver);
 } else {
   setupFolderChildrenObserver();
-}
-
-// Apply theme
-function applyTheme() {
-  // Remove all theme classes
-  document.body.classList.remove('dark', 'light', 'blue-dark',
-    'enhanced-blue', 'enhanced-light', 'enhanced-dark', 'enhanced-gray',
-    'tinted');
-
-  // CRITICAL FIX: Clear tint-related inline styles when switching away from tinted theme
-  if (theme !== 'tinted') {
-    // Remove inline style modifications from tinted theme
-    document.body.style.removeProperty('--md-sys-color-surface');
-    document.documentElement.style.removeProperty('--tint-hue');
-    document.documentElement.style.removeProperty('--tint-saturation');
-    document.documentElement.style.removeProperty('--header-background');
-    document.documentElement.style.removeProperty('--footer-background');
-  }
-
-  // Add current theme class
-  document.body.classList.add(theme);
-
-  // Update tint controls visibility
-  updateTintControlsVisibility();
-
-  // Load tint settings if tinted theme
-  if (theme === 'tinted') {
-    loadTintSettings();
-  }
-
-  // Reapply custom accent color if one is saved
-  const savedColor = localStorage.getItem('customAccentColor');
-  if (savedColor) {
-    applyCustomAccentColor(savedColor);
-  }
-}
-
-// Update tint controls visibility
-function updateTintControlsVisibility() {
-  const tintControls = document.getElementById('tintControls');
-  if (tintControls) {
-    if (theme === 'tinted') {
-      tintControls.style.display = 'block';
-    } else {
-      tintControls.style.display = 'none';
-    }
-  }
-}
-
-// Apply tint settings
-function applyTintSettings(hue, saturation) {
-  if (theme !== 'tinted') return;
-
-  document.documentElement.style.setProperty('--tint-hue', hue);
-  document.documentElement.style.setProperty('--tint-saturation', `${saturation}%`);
-
-  // Calculate luminance-balanced background
-  const lightness = saturation > 50 ? 65 : 70;
-  const bgColor = `hsla(${hue}, ${saturation}%, ${lightness}%, 0.72)`;
-  document.body.style.setProperty('--md-sys-color-surface', bgColor);
-
-  // Update header and footer backgrounds
-  const headerFooterLightness = saturation > 50 ? 70 : 75;
-  const headerFooterColor = `hsla(${hue}, ${saturation}%, ${headerFooterLightness}%, 0.85)`;
-  document.documentElement.style.setProperty('--header-background', headerFooterColor);
-  document.documentElement.style.setProperty('--footer-background', headerFooterColor);
-
-  // Save to storage
-  if (!isPreviewMode) {
-    safeStorage.set({
-      tintHue: hue,
-      tintSaturation: saturation
-    });
-  }
-}
-
-// Load tint settings
-function loadTintSettings() {
-  safeStorage.get(['tintHue', 'tintSaturation']).then(result => {
-    const hue = result.tintHue || 220;
-    const saturation = result.tintSaturation || 30;
-
-    const hueInput = document.getElementById('tintHue');
-    const saturationInput = document.getElementById('tintSaturation');
-    const hueValue = document.getElementById('hueValue');
-    const saturationValue = document.getElementById('saturationValue');
-
-    if (hueInput) hueInput.value = hue;
-    if (saturationInput) saturationInput.value = saturation;
-    if (hueValue) hueValue.textContent = `${hue}°`;
-    if (saturationValue) saturationValue.textContent = `${saturation}%`;
-
-    applyTintSettings(hue, saturation);
-  });
-}
-
-// Set theme
-function setTheme(newTheme) {
-  theme = newTheme;
-  applyTheme();
-  if (!isPreviewMode) {
-    safeStorage.set({ theme });
-  }
-}
-
-// Load view preference
-function loadView() {
-  if (isPreviewMode) {
-    viewMode = 'list';
-    applyView();
-    return;
-  }
-
-  safeStorage.get('viewMode').then(result => {
-    viewMode = result.viewMode || 'list';
-    applyView();
-  });
-}
-
-// Apply view
-function applyView() {
-  // Remove all view classes
-  bookmarkList.classList.remove('grid-view', 'grid-2', 'grid-3', 'grid-4', 'grid-5', 'grid-6');
-
-  // Add current view classes
-  if (viewMode !== 'list') {
-    bookmarkList.classList.add('grid-view', viewMode);
-  }
-}
-
-// Set view
-function setView(newView) {
-  viewMode = newView;
-  applyView();
-  if (!isPreviewMode) {
-    safeStorage.set({ viewMode });
-  }
-}
-
-// Load zoom preference
-function loadZoom() {
-  if (isPreviewMode) {
-    zoomLevel = 80;
-    applyZoom();
-    return;
-  }
-
-  safeStorage.get('zoomLevel').then(result => {
-    zoomLevel = result.zoomLevel || 80;
-    applyZoom();
-    updateZoomDisplay();
-  });
-}
-
-// Load font size preference
-function loadFontSize() {
-  if (isPreviewMode) {
-    fontSize = 100;
-    applyFontSize();
-    return;
-  }
-
-  safeStorage.get('fontSize').then(result => {
-    fontSize = result.fontSize || 100;
-    applyFontSize();
-    updateFontSizeDisplay();
-  });
-}
-
-// Load and apply GUI scale
-function loadGuiScale() {
-  const savedScale = localStorage.getItem('guiScale');
-  guiScale = savedScale ? parseInt(savedScale) : 100;
-  applyGuiScale();
-  if (guiScaleSelect) {
-    guiScaleSelect.value = guiScale;
-  }
-}
-
-// Apply GUI scale to header, toolbar, and filter elements
-function applyGuiScale() {
-  const scaleFactor = guiScale / 100;
-  const elements = [
-    document.querySelector('.header'),
-    document.getElementById('collapsibleHeader'),
-    document.getElementById('filterBar'),
-    document.getElementById('displayBar'),
-    document.getElementById('scanStatusBar')
-  ];
-
-  elements.forEach(element => {
-    if (element) {
-      element.style.zoom = scaleFactor;
-    }
-  });
-}
-
-// Load start folder preference
-async function loadStartFolder() {
-  if (isPreviewMode) {
-    startFolderId = null;
-    return;
-  }
-
-  try {
-    const result = await safeStorage.get('startFolderId');
-    startFolderId = result.startFolderId || null;
-    console.log(`Loaded start folder: ${startFolderId || 'Root'}`);
-  } catch (error) {
-    console.error('Error loading start folder preference:', error);
-    startFolderId = null;
-  }
-}
-
-// Populate start folder dropdown with all available folders
-function populateStartFolderDropdown() {
-  if (!startFolderSelect) return;
-
-  // Get all folders from bookmark tree
-  const folders = getAllFolders(bookmarkTree);
-
-  // Clear existing options except the first one (Root)
-  startFolderSelect.innerHTML = '<option value="">All Bookmarks (Root)</option>';
-
-  // Add folder options
-  folders.forEach(folder => {
-    const option = document.createElement('option');
-    option.value = folder.id;
-    option.textContent = folder.title;
-    startFolderSelect.appendChild(option);
-  });
-
-  // Set selected value
-  if (startFolderId) {
-    startFolderSelect.value = startFolderId;
-  }
-}
-
-// Expand to start folder on load
-async function expandToStartFolder() {
-  if (!startFolderId) return;
-
-  // Find the path to this folder (all parent folders)
-  const pathToFolder = [];
-  function findPath(nodes, targetId, path = []) {
-    for (const node of nodes) {
-      if (node.id === targetId) {
-        return [...path, node.id];
-      }
-      if (node.children) {
-        const found = findPath(node.children, targetId, [...path, node.id]);
-        if (found) return found;
-      }
-    }
-    return null;
-  }
-
-  const path = findPath(bookmarkTree, startFolderId);
-  if (path) {
-    // Expand all folders in the path
-    path.forEach(folderId => {
-      expandedFolders.add(folderId);
-    });
-  }
 }
 
 // Load and apply custom background image
@@ -1465,53 +970,7 @@ function loadCheckingSettings() {
 }
 
 // Apply zoom
-function applyZoom() {
-  const zoomFactor = zoomLevel / 100;
-  // Use CSS zoom instead of transform scale - it actually changes layout size
-  // This prevents the gap issue that transform: scale() causes
-  bookmarkList.style.zoom = zoomFactor;
-  // Reset any previous transform-based zoom
-  bookmarkList.style.transform = '';
-  bookmarkList.style.width = '';
-}
-
-// Set zoom
-function setZoom(newZoom) {
-  zoomLevel = newZoom;
-  applyZoom();
-  updateZoomDisplay();
-  if (!isPreviewMode) {
-    safeStorage.set({ zoomLevel });
-  }
-}
-
-// Update zoom display
-function updateZoomDisplay() {
-  if (zoomSlider) zoomSlider.value = zoomLevel;
-  if (zoomValue) zoomValue.textContent = `${zoomLevel}%`;
-}
-
-// Apply font size
-function applyFontSize() {
-  const fontSizeFactor = fontSize / 100;
-  document.documentElement.style.setProperty('--font-size-scale', fontSizeFactor);
-}
-
-// Set font size
-function setFontSize(newSize) {
-  fontSize = newSize;
-  applyFontSize();
-  updateFontSizeDisplay();
-  if (!isPreviewMode) {
-    safeStorage.set({ fontSize });
-  }
-}
-
-// Update font size display
-function updateFontSizeDisplay() {
-  if (fontSizeSlider) fontSizeSlider.value = fontSize;
-  if (fontSizeValue) fontSizeValue.textContent = `${fontSize}%`;
-}
+// Zoom and font size functions are imported from utils/theme-settings-manager.js
 
 // Load bookmarks from Firefox API
 async function loadBookmarks() {
@@ -1577,10 +1036,15 @@ async function loadBookmarks() {
     // Clear checked bookmarks when loading fresh data
     checkedBookmarks.clear();
     // Update start folder dropdown with current folders
-    populateStartFolderDropdown();
+    populateStartFolderDropdown(getAllFolders);
+
+    // Sync bookmarkTree to window for extracted modules
+    window.bookmarkTree = bookmarkTree;
   } catch (error) {
     console.error('[loadBookmarks] Error:', error);
     showError('Failed to load bookmarks');
+    // Ensure window property is updated even in error cases
+    window.bookmarkTree = bookmarkTree;
   }
 }
 
@@ -2254,6 +1718,9 @@ function renderBookmarks() {
 
   // Update total bookmark count in status bar
   updateTotalBookmarkCount();
+
+  // Sync bookmarkTree to window for extracted modules
+  window.bookmarkTree = bookmarkTree;
 }
 
 // Create a drop zone element that fills the gap between items
@@ -6980,6 +6447,7 @@ function setupEventListeners() {
   if (startFolderSelect) {
     startFolderSelect.addEventListener('change', async (e) => {
       startFolderId = e.target.value || null;
+      window.startFolderId = startFolderId;
       await safeStorage.set({ startFolderId: startFolderId });
       console.log(`Start folder set to: ${startFolderId || 'Root'}`);
 
@@ -7371,6 +6839,7 @@ function setupEventListeners() {
   if (guiScaleSelect) {
     guiScaleSelect.addEventListener('change', (e) => {
       guiScale = parseInt(e.target.value);
+      window.guiScale = guiScale;
       localStorage.setItem('guiScale', guiScale.toString());
       applyGuiScale();
     });

@@ -4,6 +4,7 @@
  */
 
 import authManager from '../auth/auth-manager.js';
+import GitLabErrorHandler from '../utils/gitlab-error-handler.js';
 
 class SnippetAdapter {
   constructor() {
@@ -17,6 +18,8 @@ class SnippetAdapter {
     this.userCache = null;
     this.userCacheExpiry = 0;
   }
+
+
 
   /**
    * Get authorization headers for GitLab API
@@ -165,6 +168,39 @@ class SnippetAdapter {
       }
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Show authentication error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.getAllSnippets().then(resolve).catch(reject);
+            }, false);
+          });
+        } else if (response.status === 403) {
+          // Show permission error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.getAllSnippets().then(resolve).catch(reject);
+            }, true);
+          });
+        } else if (response.status === 429) {
+          // Show rate limit popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showRateLimitPopup(() => {
+              // Retry the entire operation
+              this.getAllSnippets().then(resolve).catch(reject);
+            });
+          });
+        } else if (response.status >= 500 && response.status < 600) {
+          // Show service error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showServiceErrorPopup(() => {
+              // Retry the entire operation
+              this.getAllSnippets().then(resolve).catch(reject);
+            });
+          });
+        }
         const errorText = await response.text();
         console.error('[GetAllSnippets] Error response:', errorText);
         throw new Error(`Failed to fetch snippets: ${response.status}`);
@@ -335,6 +371,39 @@ class SnippetAdapter {
       console.log('[CreateSnippet] Response status:', response.status, response.statusText);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Show authentication error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.createBookmarkSnippet(bookmarkTree).then(resolve).catch(reject);
+            }, false);
+          });
+        } else if (response.status === 403) {
+          // Show permission error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.createBookmarkSnippet(bookmarkTree).then(resolve).catch(reject);
+            }, true);
+          });
+        } else if (response.status === 429) {
+          // Show rate limit popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showRateLimitPopup(() => {
+              // Retry the entire operation
+              this.createBookmarkSnippet(bookmarkTree).then(resolve).catch(reject);
+            });
+          });
+        } else if (response.status >= 500 && response.status < 600) {
+          // Show service error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showServiceErrorPopup(() => {
+              // Retry the entire operation
+              this.createBookmarkSnippet(bookmarkTree).then(resolve).catch(reject);
+            });
+          });
+        }
         const errorBody = await response.text();
         console.error('[CreateSnippet] Error response:', errorBody);
         throw new Error(`Failed to create Snippet: ${response.status} - ${errorBody}`);
@@ -399,6 +468,14 @@ class SnippetAdapter {
           localStorage.removeItem('bmz_snippet_id');
 
           throw new Error('Bookmark Snippet not found');
+        } else if (response.status >= 500 && response.status < 600) {
+          // Show service error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showServiceErrorPopup(() => {
+              // Retry the entire operation
+              this.readBookmarks(snippetId).then(resolve).catch(reject);
+            });
+          });
         }
         const errorText = await response.text();
         console.error('[ReadSnippet] Error response:', errorText);
@@ -432,6 +509,23 @@ class SnippetAdapter {
         // Use the authenticated API endpoint instead of raw_url to avoid CORS
         const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
         if (!fileResponse.ok) {
+          if (fileResponse.status === 429) {
+            // Show rate limit popup and allow retry
+            return new Promise((resolve, reject) => {
+              GitLabErrorHandler.showRateLimitPopup(() => {
+                // Retry the entire operation
+                this.readBookmarks(snippetId).then(resolve).catch(reject);
+              });
+            });
+          } else if (fileResponse.status >= 500 && fileResponse.status < 600) {
+            // Show service error popup and allow retry
+            return new Promise((resolve, reject) => {
+              GitLabErrorHandler.showServiceErrorPopup(() => {
+                // Retry the entire operation
+                this.readBookmarks(snippetId).then(resolve).catch(reject);
+              });
+            });
+          }
           console.warn('[ReadSnippet] API raw endpoint failed with status:', fileResponse.status);
           throw new Error(`Failed to fetch file content: ${fileResponse.status}`);
         }
@@ -505,6 +599,39 @@ class SnippetAdapter {
       console.log('[UpdateSnippet] Response status:', response.status, response.statusText);
 
       if (!response.ok) {
+        if (response.status === 401) {
+          // Show authentication error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.updateBookmarks(snippetId, bookmarkTree, version).then(resolve).catch(reject);
+            }, false);
+          });
+        } else if (response.status === 403) {
+          // Show permission error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showAuthErrorPopup(() => {
+              // Retry the entire operation
+              this.updateBookmarks(snippetId, bookmarkTree, version).then(resolve).catch(reject);
+            }, true);
+          });
+        } else if (response.status === 429) {
+          // Show rate limit popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showRateLimitPopup(() => {
+              // Retry the entire operation
+              this.updateBookmarks(snippetId, bookmarkTree, version).then(resolve).catch(reject);
+            });
+          });
+        } else if (response.status >= 500 && response.status < 600) {
+          // Show service error popup and allow retry
+          return new Promise((resolve, reject) => {
+            GitLabErrorHandler.showServiceErrorPopup(() => {
+              // Retry the entire operation
+              this.updateBookmarks(snippetId, bookmarkTree, version).then(resolve).catch(reject);
+            });
+          });
+        }
         const errorText = await response.text();
         console.error('[UpdateSnippet] Error response:', errorText);
         throw new Error(`Failed to update Snippet: ${response.status} - ${errorText}`);
