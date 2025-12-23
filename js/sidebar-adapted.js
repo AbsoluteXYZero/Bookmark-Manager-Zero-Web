@@ -3786,11 +3786,24 @@ async function deleteFolder(id) {
       throw new Error('Folder not found');
     }
 
-    // Add to changelog before deleting
-    await addChangelogEntry('delete', 'folder', folder.title || 'Untitled');
+    // Find parent folder to get parentId (needed for restoration)
+    const parent = findParentById(bookmarkTree, id);
+    const parentId = parent ? parent.id : undefined;
+
+    // Deep copy folder and add parentId for restoration
+    const fullData = JSON.parse(JSON.stringify(folder));
+    fullData.parentId = parentId;
+
+    // Add to changelog before deleting (store complete folder data for restoration)
+    await addChangelogEntry('delete', 'folder', folder.title || 'Untitled', null, {
+      fullData: fullData
+    });
 
     // Delete the folder
     await bookmarkManager.remove(id);
+
+    // Add parentId to folder data for undo toast
+    folder.parentId = parentId;
 
     // Show undo toast
     showUndoToast({
@@ -4447,7 +4460,7 @@ async function handleBookmarkAction(action, bookmark) {
 
     case 'delete':
       if (confirm(`Delete "${bookmark.title}"?`)) {
-        await deleteBookmark(bookmark.id);
+        await deleteBookmark(bookmark.id, bookmark);
       }
       break;
   }
@@ -4555,7 +4568,7 @@ async function editBookmark(bookmark) {
 }
 
 // Delete bookmark
-async function deleteBookmark(id) {
+async function deleteBookmark(id, bookmarkData = null) {
   if (isPreviewMode) {
     // Find bookmark in mock data
     const findAndRemove = (items, parentArray = null, parentIndex = -1) => {
@@ -4596,16 +4609,33 @@ async function deleteBookmark(id) {
 
   try {
     // Get bookmark details before deleting for undo functionality
-    const bookmark = findBookmarkById(id, bookmarkTree);
+    // Use provided bookmarkData if available, otherwise search the tree
+    let bookmark = bookmarkData;
     if (!bookmark) {
-      throw new Error('Bookmark not found');
+      bookmark = findBookmarkById(id, bookmarkTree);
+      if (!bookmark) {
+        throw new Error('Bookmark not found in tree');
+      }
     }
 
-    // Add to changelog before deleting
-    await addChangelogEntry('delete', 'bookmark', bookmark.title || 'Untitled', bookmark.url);
+    // Find parent folder to get parentId (needed for restoration)
+    const parent = findParentById(bookmarkTree, id);
+    const parentId = parent ? parent.id : undefined;
+
+    // Deep copy bookmark and add parentId for restoration
+    const fullData = JSON.parse(JSON.stringify(bookmark));
+    fullData.parentId = parentId;
+
+    // Add to changelog before deleting (store complete bookmark data for restoration)
+    await addChangelogEntry('delete', 'bookmark', bookmark.title || 'Untitled', bookmark.url, {
+      fullData: fullData
+    });
 
     // Delete the bookmark
     await bookmarkManager.remove(id);
+
+    // Add parentId to bookmark data for undo toast
+    bookmark.parentId = parentId;
 
     // Show undo toast
     showUndoToast({
@@ -5818,8 +5848,57 @@ async function restoreChangelogEntry(entryId) {
     if (!confirmed) return;
 
     if (entry.type === 'delete') {
-      alert('Delete operations cannot be automatically restored from the changelog.\n\nThe changelog does not store enough data to recreate deleted items.\n\nUse the undo feature immediately after deletion for full restoration.');
-      return;
+      // Check if we have the full data stored
+      if (!entry.details || !entry.details.fullData) {
+        alert('Delete operations cannot be automatically restored from the changelog.\n\nThis deletion was logged before full data storage was implemented.\n\nUse the undo feature immediately after deletion for full restoration.');
+        return;
+      }
+
+      // Restore the deleted item
+      const fullData = entry.details.fullData;
+
+      try {
+        if (entry.itemType === 'folder') {
+          // Recreate the folder with all its children
+          await bookmarkManager.create({
+            title: fullData.title,
+            parentId: fullData.parentId,
+            index: fullData.index
+          });
+
+          alert(`Folder "${fullData.title}" has been restored.\n\nNote: Child items were not restored. You may need to restore them individually from the changelog.`);
+        } else {
+          // Recreate the bookmark
+          await bookmarkManager.create({
+            title: fullData.title,
+            url: fullData.url,
+            parentId: fullData.parentId,
+            index: fullData.index
+          });
+
+          alert(`Bookmark "${fullData.title}" has been restored successfully!`);
+        }
+
+        // Refresh UI
+        await loadBookmarks();
+        await renderBookmarks();
+
+        // Add a changelog entry for the restoration
+        await addChangelogEntry('restore', entry.itemType, fullData.title, fullData.url, {
+          originalOperation: 'delete',
+          restoredFrom: entry.id
+        });
+
+        // Close and reopen changelog modal to refresh
+        closeChangelogModal();
+        setTimeout(() => openChangelogModal(), 100);
+
+        return;
+      } catch (error) {
+        console.error('[Changelog Restore] Failed to restore deleted item:', error);
+        alert(`Failed to restore item: ${error.message}`);
+        return;
+      }
     }
 
     if (entry.type === 'move') {

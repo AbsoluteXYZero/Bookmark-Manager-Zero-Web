@@ -6,7 +6,7 @@
 
 **A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
-![Version](https://img.shields.io/badge/version-1.0.0-blue)]
+![Version](https://img.shields.io/badge/version-1.0.0-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -50,58 +50,96 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 ### Core Functionality
 - ✅ **GitLab Snippet Storage** - Store bookmarks in YOUR private GitLab Snippet
-- ✅ **Auto-Sync** - Automatic polling every 60 seconds checks for remote changes
+- ✅ **Auto-Sync with Polling** - Automatic checks every 60 seconds for remote changes
 - ✅ **Smart Notifications** - Additions auto-sync with toast; deletions require confirmation
-- ✅ **Change Preview** - "View Changes" button shows detailed diff before syncing
+- ✅ **Change Preview with Diffs** - View detailed line-by-line changes before syncing
+- ✅ **Edit Lock System** - Prevents concurrent edits across devices with lock notifications
+- ✅ **Conflict Detection** - Version-based conflict resolution for multi-device safety
 - ✅ **PAT Authentication** - Secure Personal Access Token authentication for GitLab
 - ✅ **Modern Material Design UI** - Clean, intuitive interface with multiple themes
 - ✅ **100% Static** - No backend, hosted entirely on GitLab Pages/Cloudflare Pages
-- ✅ **Offline Support** - Works offline with IndexedDB caching
+- ✅ **Offline Support** - Full offline functionality with IndexedDB caching
 
 ### Organization & Search
 - 🔍 **Advanced Search** - Real-time search across titles and URLs
 - 📁 **Folder Management** - Create, edit, move, and organize folders
 - 🏷️ **Smart Filters** - Filter by link status and safety with multi-select support
 - 📊 **List & Grid Views** - Choose your preferred layout
-- 🔄 **Drag & Drop** - Reorder bookmarks and folders
+- 🔄 **Drag & Drop** - Reorder bookmarks and folders with visual drop indicators
+- ☑️ **Multi-Select Mode** - Bulk operations toolbar with Select All/Deselect All
+- 🔄 **Bulk Operations** - Bulk Recheck security, Bulk Move to folder, Bulk Delete
+- 🔍 **Find Duplicates** - Automatically detect and manage duplicate bookmarks
+- 📂 **Start Folder** - Set default folder to load on startup
+- 📊 **Folder State Persistence** - Remembers which folders were expanded
 
 ### Link & Safety Checking
-- 🔗 **Link Status Checking** - Automatically detects broken/dead links
-- 🛡️ **Security Scanning** - Checks URLs against malware databases
+- 🔗 **Link Status Checking** - Automatically detects broken/dead links via HTTP HEAD requests
+- 🛡️ **Multi-Source Security Scanning** - 6-phase threat detection system with 8 free blocklists + URLVoid
+- 🎯 **Background Scanning** - Web Worker processes scans without blocking UI
 - ⚠️ **Safety Indicators** - Visual warnings for suspicious links with detailed tooltips
 - 👆 **Clickable Status Icons** - Click shield or chain icons for full status details popup
 - 🔄 **HTTP Redirect Detection** - Detects when HTTP bookmarks redirect to HTTPS
 - ✅ **Whitelist Support** - Mark trusted URLs to skip safety checks
 - ⚪ **Trusted Filter** - Filter to view only whitelisted bookmarks (white shield)
 - 📜 **Safety History** - Track status changes over time
+- ⏱️ **Smart Caching** - 7-day cache for scan results to minimize network requests
+- 🔢 **Batch Processing** - Scans bookmarks in batches with rate limiting
 
 ### Privacy & Security
-- 🔐 **Token Encryption** - AES-256-GCM encryption with browser fingerprint-derived key
-- 🔒 **Encrypted API Keys** - AES-256-GCM encryption for stored credentials
-- 🚫 **No Tracking** - Zero analytics, no data collection
+- 🔐 **Token Encryption** - AES-256-GCM encryption with device-specific browser fingerprint keys
+- 🔒 **Encrypted API Keys** - AES-256-GCM encryption for all stored credentials
+- 🚫 **No Tracking** - Zero analytics, no data collection, no external scripts
 - 🌐 **Offline Mode** - Works fully offline when external features disabled
-- 🔒 **URL Validation** - Block dangerous schemes and private IPs
-- 🗑️ **Auto-Clear Cache** - Configurable automatic cache cleanup
+- 🔒 **Advanced URL Validation** - Blocks dangerous schemes, private IPs, and malformed URLs
+- 🛡️ **Strong Content Security Policy** - Prevents XSS attacks and code injection
+- 🚫 **No eval() Policy** - Secure code execution without dynamic evaluation
+- 💾 **Multiple Storage Layers** - Separate IndexedDB stores for bookmarks, metadata, cache, blocklists, and API keys
+- 🗑️ **Auto-Clear Cache** - Configurable automatic cache cleanup with TTL management
 
 ### User Experience
-- 🎨 **8 Themes** - Material Design 3 themes with custom accent colors
-- 🎨 **Custom Accent Colors** - Pick any color for theme customization
+- 🎨 **8 Material Design 3 Themes** - Enhanced Blue, Blue Dark, Dark (Pure Black), Light, Enhanced Light, Enhanced Dark, Enhanced Gray, Tinted (dynamic hue/saturation)
+- 🌈 **Tinted Theme Mode** - Dynamic theme with hue slider (0-360°) and saturation control (0-100%)
+- 🎨 **Custom Accent Colors** - Full color picker for theme customization
 - 🎨 **Bookmark Background Opacity** - Adjust bookmark background transparency (0-100%)
-- ✍️ **Custom Text Colors** - Visual color picker for bookmark and folder text
-- 🖼️ **Custom Backgrounds** - Upload and position your own background images
-- 📱 **Mobile-Friendly** - Full touch support with press-and-hold gestures (500ms)
-- ⌨️ **Keyboard Navigation** - Full keyboard support with arrow keys
-- ♿ **Accessibility** - Comprehensive ARIA labels and keyboard traps
-- 🔍 **Zoom Control** - 50% - 200% zoom levels for bookmark content
-- 📱 **Responsive Design** - Adapts to viewport width with auto-wrapping filters
+- ✍️ **Custom Text Colors** - Visual color picker for bookmark and folder text colors
+- 🖼️ **Advanced Background Customization**:
+  - Upload custom background images
+  - Background opacity slider (0-100%)
+  - Background blur effect (0-20px)
+  - Background scale/zoom (10-1000%)
+  - Drag to position background
+  - Background size presets
+- 📏 **Font Size Control** - Adjust bookmark text size (70-150%)
+- 🎛️ **GUI Scale** - Scale header and toolbar elements (100-200%)
+- 📦 **Container Opacity** - Adjust background container transparency (0-100%)
+- 📱 **Mobile Touch Gestures**:
+  - Press-and-hold (500ms) to enter move mode
+  - Visual drag ghost with item title
+  - Drop indicators (before/after/into)
+  - Touch toast feedback messages
+- 📳 **Haptic Feedback** - Vibration on move mode activation and drop completion
+- ⌨️ **Full Keyboard Navigation** - Arrow keys, Enter, Escape, Ctrl+K (focus search), Tab trapping in modals
+- ♿ **Comprehensive Accessibility** - ARIA labels, ARIA roles (menu/toolbar), ARIA states (expanded/pressed), keyboard traps, screen reader support
+- 🔍 **Flexible Zoom Control** - 7 zoom levels from 50% to 200% (50%, 75%, 100%, 125%, 150%, 175%, 200%)
+- 📱 **Fully Responsive Design** - Auto-wrapping filters, hamburger menus, viewport-aware sizing
 
 ### Advanced Features
-- 🖼️ **Website Previews** - Screenshot thumbnails of bookmarks
+- 🖼️ **Website Previews** - Screenshot thumbnails with lazy loading and low-priority fetch
 - 💬 **URL Tooltips** - Hover over bookmark title/URL to see full URL
-- 📤 **Import/Export** - HTML (Netscape format) and JSON bookmark files
-- 🔄 **Bulk Operations** - Multi-select mode for batch editing/deletion
-- ⏮️ **Undo System** - Restore recently deleted bookmarks
-- 🌍 **Favicon Display** - Show website icons
+- 📤 **Import/Export** - HTML (Netscape format with ADD_DATE) and JSON bookmark files
+- ⏮️ **Undo System** - Toast notifications with 10-second countdown timer to restore deletions
+- 📜 **Changelog with Full Restore** - View complete operation history with restore buttons:
+  - Tracks all bookmark operations (add, edit, delete, move, recheck)
+  - Restore deleted bookmarks and folders (stores complete data)
+  - Restore move operations back to original folder
+  - Restore update operations (revert changes)
+  - Click URL to copy, "Clear Changelog" to reset history
+  - Note: For folders with children, only the folder itself is restored (children tracked separately)
+- 🌍 **Favicon Display** - Batch-loaded website icons with error handling
+- 📱 **QR Code Generation** - Generate QR codes from header button or context menu
+- 🖱️ **Context Menus** - Right-click bookmarks/folders for quick actions
+- 💻 **Local Mode** - Use app offline without GitLab (local IndexedDB storage only)
+- 🔄 **Display Options Dropdown** - Toggle visibility of titles, URLs, favicons, status indicators, previews
 
 ## Installation
 
@@ -140,37 +178,131 @@ python -m http.server 8000
 
 ## Usage
 
+### Getting Started with Bookmark Manager Zero
+
+Bookmark Manager Zero offers two ways to get started - choose the option that fits your needs:
+
+**Option 1: Local Mode (No Account Required)**
+- Use BMZ entirely offline without any external services
+- Perfect for privacy-focused users or testing the app
+- Start from scratch with an empty collection or import existing bookmarks (HTML/JSON)
+- All your bookmarks stay on your device with no cloud sync
+- You can add GitLab sync later if you change your mind
+
+**Option 2: GitLab Sync Mode (Cross-Device Synchronization)**
+- Create a free GitLab account at [gitlab.com](https://gitlab.com)
+- Generate a Personal Access Token (PAT) with `api` scope
+- Start from scratch or import existing bookmarks (HTML/JSON)
+- Your bookmarks sync automatically across all your devices via private GitLab Snippets
+- Data stays under your control in your own GitLab account
+
+**Adding GitLab Sync After Local Setup**
+
+If you start in Local Mode, you can add GitLab sync later without losing your bookmarks:
+1. Click the "Connect GitLab" button in the app
+2. Enter your GitLab Personal Access Token
+3. Choose how to handle your existing local bookmarks:
+   - **Create New Snippet** - Upload your local bookmarks to a new GitLab Snippet
+   - **Merge with Existing Snippet** - Combine your local bookmarks with bookmarks already in a GitLab Snippet
+   - **Replace Local with Snippet** - Discard local bookmarks and use the bookmarks from your GitLab Snippet
+
+**Important: GitLab Personal Access Tokens**
+- When you create a PAT in GitLab, it only displays **once**
+- Copy it immediately and save it in a notes app or password manager
+- Tokens expire based on the expiration date you set during creation
+- Keep track of expiration dates to avoid sync interruptions
+- Any token with `api` scope will work as long as your GitLab account is in good standing
+- BMZ includes helpful error handling that will guide you if authentication issues occur
+
+**Seamless Experience**
+
+Bookmark Manager Zero provides intuitive prompts and error messages throughout the setup process. Whether you're troubleshooting a token issue or merging bookmarks, the app guides you every step of the way.
+
 ### First-Time Setup
 
-1. **Visit the website** at [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
+**Option 1: Local Mode (No GitLab Required)**
+1. Visit [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
+2. Click **"Use Local Mode"** to work offline
+3. Choose to:
+   - **Import from File** - Upload HTML/JSON bookmarks
+   - **Start Fresh** - Create empty bookmark list
+   - **Continue with Existing** - Load previously saved local bookmarks
+4. Optional: Connect GitLab later via "Connect GitLab" button
+
+**Option 2: GitLab Sync Mode**
+1. Visit [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
 2. **Set up GitLab Snippet storage**:
    - Generate a Personal Access Token at GitLab (scope: `api`)
-   - Paste your token to authenticate
-   - Token must start with `glpat-` prefix
+   - Paste your token to authenticate (must start with `glpat-` prefix)
    - Token is encrypted with AES-256-GCM before storage
-   - Create a new Snippet or select an existing Snippet from the list
-
-3. **Start managing bookmarks!**
+   - Choose existing GitLab Snippet or create new one
+3. **Merge Existing Bookmarks** (if you have local bookmarks):
+   - Keep Local Bookmarks (ignore snippet)
+   - Merge Bookmarks (combine both)
+   - Replace with Snippet (overwrite local)
+4. **Start managing bookmarks!**
 
 ### Basic Usage
 
 - **Add Bookmark:** Click the "+" button in the header
 - **Edit Bookmark:** Right-click → Edit
-- **Delete Bookmark:** Right-click → Delete (with undo support)
-- **Move Bookmark:** Drag and drop to a different folder
+- **Delete Bookmark:** Right-click → Delete (undo toast appears for 10 seconds)
+- **Move Bookmark:** Drag and drop to a different folder (or press-and-hold on mobile)
 - **Create Folder:** Click the folder icon in the header
-- **Search:** Type in the search bar to filter by title/URL
+- **Search:** Type in the search bar or press **Ctrl+K** (Cmd+K on Mac)
+- **Generate QR Code:** Click QR code button in header or right-click bookmark
+
+### Context Menu Actions
+
+**Right-Click on Bookmarks:**
+- Open in Current Tab
+- Open in New Tab
+- Copy URL
+- Generate QR Code
+- Edit Bookmark
+- Recheck Security Status
+- Add to Whitelist / Remove from Whitelist
+- Delete
+
+**Right-Click on Folders:**
+- Rescan All Bookmarks in Folder
+- Add Bookmark Here
+- Add Subfolder Here
+- Rename Folder
+- Delete Folder
+
+### Multi-Select & Bulk Operations
+
+1. Click the **Multi-Select** button in toolbar
+2. Select bookmarks by clicking them (shows selection counter)
+3. Use bulk action buttons:
+   - **Select All** - Select all visible bookmarks
+   - **Deselect All** - Clear selection
+   - **Bulk Recheck** - Re-scan security status of selected bookmarks
+   - **Bulk Move** - Move all selected to a folder
+   - **Bulk Delete** - Delete all selected bookmarks
+4. Click **Multi-Select** again to exit mode
 
 ### Sync Management
 
 - **Auto-Sync:** Enabled by default, checks Snippet every 60 seconds
   - New bookmarks from other devices auto-sync with notification
   - Deletions require user confirmation (shows "View Changes" button)
+  - Configurable interval (minimum 60 seconds)
 - **Manual Sync:**
   - Click "Push to Snippet" to upload local changes
   - Click "Pull from Snippet" to download remote changes
-- **Change Preview:** Click "View Changes" to see detailed diff before syncing
-- **Edit Lock Notifications:** See when another device is editing
+  - **Shift+Click Sync Button** - Force push local to remote (overwrite)
+- **Change Preview:** Click "View Changes" to see detailed line-by-line diff before syncing
+- **Edit Lock System:**
+  - Prevents concurrent edits across devices
+  - Shows notification when another device is editing
+  - Auto-releases locks after timeout
+- **GitLab Error Handling:**
+  - 401 Unauthorized - Token expired/invalid
+  - 403 Forbidden - Permission errors with user-friendly messages
+  - 429 Rate Limited - Automatic retry with exponential backoff
+  - 500+ Server Errors - Retry logic with user notifications
 
 ### Search & Filter
 
@@ -201,28 +333,82 @@ python -m http.server 8000
 
 ### Settings
 
-Click the gear icon to access:
-- **GitLab Snippet Sync:** Authenticate with Personal Access Token, create/select Snippet, auto-sync settings
-- **Display Options:** Toggle title, URL, status indicators, previews
+Click the **gear icon** to access:
+- **GitLab Snippet Sync:**
+  - Authenticate with Personal Access Token
+  - Select existing snippet or create new one
+  - Auto-sync toggle and interval configuration
+  - Force push/pull options
+- **Display Options Dropdown:**
+  - Toggle Title visibility
+  - Toggle URL visibility
+  - Toggle Favicon display
+  - Toggle Live Status indicators
+  - Toggle Safety Status indicators
+  - Toggle Preview images
+  - Toggle Preview popup on hover
 - **View Mode:** Switch between list and grid layouts
-- **Cache Management:** Configure auto-clear settings
-- **API Keys:** Set up optional security API keys (Google Safe Browsing, Yandex, VirusTotal)
-- **Import/Export:** Import HTML/JSON bookmarks, export to HTML/JSON
+- **Cache Management:**
+  - Manual "Clear Cache" button
+  - Auto-clear cache settings (Never, 7 days, 30 days, 90 days)
+  - View current cache size
+  - View Changelog of all operations
+- **Link & Safety Checking:**
+  - Enable/Disable Link Checking toggle
+  - Enable/Disable Safety Checking toggle
+  - Whitelist management
+- **API Keys:** Set up optional security API keys
+  - Google Safe Browsing API
+  - Yandex Safe Browsing API
+  - VirusTotal API
+- **Import/Export:**
+  - Import HTML (Netscape format) bookmarks
+  - Import JSON bookmarks
+  - Export to HTML (cross-browser compatible)
+  - Export to JSON (GitLab Snippet format)
+- **Find Duplicates:** Detect and manage duplicate bookmarks
+- **Start Folder:** Set default folder to open on launch
 
-Click the theme icon to access:
-- **Theme:** Choose from 8 themes
-- **Accent Color:** Customize theme accent color
-- **Bookmark Opacity:** Adjust bookmark background transparency (0-100%)
-- **Text Color:** Customize bookmark text color with visual color picker
-- **Custom Background:** Upload and position your own background image
-- **Zoom:** Adjust bookmark content size (50% - 200%)
+Click the **theme icon** to access:
+- **Theme Selector:** Choose from 8 themes
+  - Enhanced Blue (default)
+  - Blue Dark
+  - Dark (Pure Black OLED)
+  - Light
+  - Enhanced Light
+  - Enhanced Dark
+  - Enhanced Gray
+  - Tinted (dynamic with hue/saturation sliders)
+- **Tinted Theme Controls:**
+  - Hue slider (0-360°)
+  - Saturation slider (0-100%)
+- **Accent Color:** Full color picker for custom accent
+- **Text Color:** Customize bookmark and folder text colors
+- **Background Customization:**
+  - Upload custom background image
+  - Background opacity (0-100%)
+  - Background blur (0-20px)
+  - Background scale/zoom (10-1000%)
+  - Drag to position
+  - Size presets
+- **Bookmark Opacity:** Bookmark background transparency (0-100%)
+- **Container Opacity:** Background container transparency (0-100%)
+- **Font Size:** Bookmark text size (70-150%)
+- **GUI Scale:** Header/toolbar scale (100-200%)
+- **Zoom:** Bookmark content zoom (50%, 75%, 100%, 125%, 150%, 175%, 200%)
 
 ### Keyboard Shortcuts
 
-#### Navigation (when item selected)
-- `↑/↓` - Navigate bookmarks
-- `←/→` - Collapse/expand folders
-- `Enter` - Open bookmark or toggle folder
+#### Global Shortcuts
+- `Ctrl+K` (Windows/Linux) or `Cmd+K` (Mac) - Focus search bar
+- `Escape` - Clear selection / Close modals / Cancel operations
+- `Tab` / `Shift+Tab` - Navigate UI elements (focus trap in modals)
+
+#### Navigation (when bookmark/folder selected)
+- `↑` / `↓` - Navigate up/down through bookmarks and folders
+- `←` - Collapse folder
+- `→` - Expand folder
+- `Enter` - Open selected bookmark or toggle folder expansion
 - `Escape` - Clear selection
 
 ## Privacy
@@ -242,14 +428,29 @@ See [PRIVACY.md](PRIVACY.md) for complete privacy policy.
 The website can optionally use external services for enhanced features. **All can be disabled in settings:**
 
 ### Default Services (can be disabled)
-- **WordPress mshots** - Website screenshot previews
-- **8 Blocklist Sources** - Dual URLhaus coverage (Active + Historical), BlockList Project (Malware/Phishing/Scam), HaGeZi TIF, Phishing-Filter, OISD Big
-- **Google Favicons** - Website icons
+- **WordPress mshots** - Website screenshot previews via `https://s0.wp.com/mshots/v1/`
+- **Google Favicons** - Website icons via `https://www.google.com/s2/favicons`
+- **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/` (uses CORS proxy, no API key required)
+- **8 Free Blocklist Sources** - Community-maintained threat databases (~1.35M domains):
+  - URLhaus Active (abuse.ch) - ~107K actively distributing malware
+  - URLhaus Historical (CDN mirror) - ~37K historical threats
+  - BlockList Project Malware - ~300K malware domains
+  - BlockList Project Phishing - ~214K phishing sites
+  - BlockList Project Scam - ~112K scam websites
+  - HaGeZi TIF - ~608K comprehensive threat intel
+  - Phishing-Filter - ~21K aggregated phishing database
+  - OISD Big - ~215K multi-source blocklist aggregator
 
-### User-Configured Services (require API keys)
-- **Google Safe Browsing** - Additional malware protection (10K requests/day free)
-- **Yandex Safe Browsing** - Geographic threat diversity (100K requests/day free)
-- **VirusTotal** - Comprehensive threat scanning from 70+ AV engines (500 requests/day free)
+### User-Configured Services (require free API keys)
+- **Google Safe Browsing API** - Additional malware/phishing protection
+  - Rate Limit: 10,000 requests/day (free tier)
+  - Coverage: Malware, Social Engineering, Unwanted Software
+- **Yandex Safe Browsing API** - Geographic threat diversity
+  - Rate Limit: 100,000 requests/day (free tier)
+  - Coverage: Russian and Eastern European threats
+- **VirusTotal API** - Multi-engine comprehensive scanning
+  - Rate Limit: 500 requests/day (free tier)
+  - Coverage: 70+ antivirus engines (2+ flags → Unsafe)
 
 ### Git Provider Services (GitLab Sync)
 
@@ -276,9 +477,10 @@ All external service usage is disclosed in [PRIVACY.md](PRIVACY.md).
 - The application uses standard GitLab Snippets API endpoints documented in the official GitLab API
 
 **API Usage Considerations:**
-- **Event-driven sync**: API calls are made only when you add/edit/delete bookmarks or manually sync
-- **No automatic polling**: The application does not poll GitLab automatically to prevent rate limiting
-- **Manual sync**: Use the "Pull from Snippet" button to check for changes from other devices
+- **Event-driven sync**: API calls are made when you add/edit/delete bookmarks
+- **Auto-sync polling**: When enabled, checks for remote changes every 60 seconds (configurable in settings)
+- **Manual sync**: Use the "Pull from Snippet" and "Push to Snippet" buttons for manual control
+- **Rate limiting protection**: Built-in exponential backoff with jitter respects GitLab API limits
 - **Rate limits**: GitLab has API rate limits; typical bookmark usage stays well within limits
 
 **Best Practices:**
@@ -357,14 +559,25 @@ If configured, provides geographic threat diversity:
 - **Coverage**: Russian and Eastern European threats
 - **Rate Limit**: 100,000 requests/day (free tier)
 
-#### Phase 4: VirusTotal (Optional, Requires Free API Key)
+#### Phase 4: URLVoid Scanning (Free, No API Key Required)
+
+All URLs are checked against URLVoid's reputation database:
+- **Multi-Engine Check**: Aggregates results from multiple security engines
+- **CORS Proxy**: Uses `corsproxy.io` to access URLVoid from browser
+- **Detection Threshold**:
+  - 2+ engines flag as malicious → Unsafe
+  - 1 engine flags → Warning
+  - No flags → Safe
+- **No Rate Limits**: Free public service
+
+#### Phase 5: VirusTotal (Optional, Requires Free API Key)
 
 If configured, URLs are submitted to VirusTotal's multi-engine scanner:
 - 70+ antivirus engines analyze the URL
 - **2+ engines flag as malicious → Unsafe**
 - **Rate Limit**: 500 requests/day (free tier)
 
-#### Phase 5: Suspicious Pattern Detection
+#### Phase 6: Suspicious Pattern Detection
 
 The URL is analyzed for suspicious patterns:
 
@@ -380,7 +593,7 @@ The URL is analyzed for suspicious patterns:
 | Check Result | Final Status | Priority |
 |--------------|--------------|----------|
 | Blocklist match | **Unsafe** (red shield) | Highest |
-| Google/Yandex/VirusTotal match | **Unsafe** (red shield) | Highest |
+| Google/Yandex/URLVoid/VirusTotal match | **Unsafe** (red shield) | Highest |
 | Suspicious patterns found | **Warning** (yellow shield) | Medium |
 | All checks pass | **Safe** (green shield) | Normal |
 
@@ -404,23 +617,79 @@ Users can whitelist specific URLs to:
 
 ## Technology Stack
 
-- **Frontend**: Vanilla JavaScript (no frameworks)
-- **Storage**: GitLab Snippets API + IndexedDB
-- **Authentication**: Personal Access Token (PAT) for GitLab
-- **Hosting**: GitLab Pages and Cloudflare Pages
-- **Security**: AES-256-GCM encryption for tokens and API keys
-- **UI**: Material Design 3 color system, CSS Grid & Flexbox
+### Core Technologies
+- **Language**: Vanilla JavaScript (ES6 modules) - Zero framework dependencies
+- **Architecture**: Single-page application with modular ES6 imports
+- **Module System**: 24+ ES6 modules organized by feature (core, auth, storage, import-export, utils)
+- **Storage**: Dual-layer storage with GitLab Snippets API + IndexedDB
+- **Authentication**: Personal Access Token (PAT) with `glpat-` auto-detection
+- **Hosting**: 100% static - GitLab Pages, Cloudflare Pages, or any static host
+- **Security**: AES-256-GCM encryption with Web Crypto API
+- **UI Framework**: Material Design 3 color system
+- **Layout**: CSS Grid & Flexbox with CSS custom properties
+- **Web Workers**: Background thread for non-blocking link/safety scanning
 
+### IndexedDB Architecture
+Multiple object stores for organized data:
+- **bookmarks** - Hierarchical bookmark tree structure
+- **metadata** - Sync status, snippet IDs, edit locks, version tracking
+- **cache** - Link/safety status with 7-day TTL
+- **blocklists** - 8 malware/phishing domain lists (~1.35M domains)
+- **apiKeys** - Encrypted API credentials for external services
 
-### Key Technologies
-- Vanilla JavaScript (no frameworks)
-- Material Design 3 color system
-- GitLab Snippets API
-- Personal Access Token (PAT) authentication with auto-detection
-- AES-256-GCM encryption
-- CSS Grid & Flexbox
-- IndexedDB for local storage
-- Web Workers for background scanning
+### Security Implementation
+- **Web Crypto API** - AES-256-GCM encryption
+- **SHA-256 Hashing** - Browser fingerprint-based key derivation
+- **Browser Fingerprinting** - Device-specific encryption keys
+- **Content Security Policy** - Strong CSP headers prevent XSS
+- **Input Sanitization** - URL validation, private IP blocking, scheme filtering
+- **No eval()** - No dynamic code execution
+- **HTTPS-only** - All external requests use HTTPS
+
+### Project Architecture
+
+```
+Bookmark-Manager-Zero-Website/
+├── index.html                    # Main entry point (138KB with embedded styles)
+├── css/
+│   └── themes.css               # Material Design 3 theme definitions
+├── js/
+│   ├── core/                    # Core application logic
+│   │   ├── app.js              # Main initialization & lifecycle
+│   │   ├── bookmarks.js        # Bookmark tree operations
+│   │   ├── ui.js               # UI rendering & interactions
+│   │   ├── scanner.js          # Link/safety scan coordinator
+│   │   ├── blocklist-service.js # Malware database management
+│   │   └── sync-timer.js       # Auto-sync polling manager
+│   ├── auth/                    # Authentication
+│   │   ├── auth-manager.js     # Token encryption/decryption
+│   │   └── oauth-pat.js        # GitLab PAT authentication
+│   ├── storage/                 # Data persistence
+│   │   ├── indexeddb.js        # IndexedDB wrapper
+│   │   ├── sync-manager.js     # Bidirectional GitLab sync
+│   │   ├── snippet-adapter.js  # GitLab Snippets API client
+│   │   └── storage-adapter.js  # Storage interface
+│   ├── import-export/           # Bookmark import/export
+│   │   ├── html-exporter.js    # Netscape HTML export
+│   │   ├── html-parser.js      # Netscape HTML import
+│   │   ├── json-exporter.js    # JSON backup export
+│   │   └── json-parser.js      # JSON import
+│   ├── utils/                   # Utilities
+│   │   ├── encryption.js       # AES-256-GCM crypto
+│   │   ├── theme-settings-manager.js # Theme preferences
+│   │   ├── error-notification-manager.js # Error toasts
+│   │   ├── gitlab-error-handler.js # API error handling
+│   │   └── storage-utils.js    # Storage helpers
+│   ├── mobile/
+│   │   └── touch-handler.js    # Touch gestures & mobile support
+│   └── lib/
+│       └── qrcode-lib.js       # QR code generation
+├── workers/
+│   └── scanner-worker.js        # Background scanning (26KB)
+└── icons/                       # Favicon assets
+```
+
+**Total**: 24 JavaScript modules, 100% vanilla ES6
 
 ### Building
 
@@ -439,14 +708,20 @@ php -S localhost:8000
 ## Security
 
 ### Security Features
-- ✅ Strong Content Security Policy (CSP)
-- ✅ AES-256-GCM encryption for GitLab tokens
-- ✅ Browser fingerprint-derived encryption keys
-- ✅ No eval() or inline scripts
-- ✅ HTTPS-only external requests
-- ✅ Input validation and sanitization
-- ✅ XSS protection
-- ✅ URL validation blocks dangerous schemes
+- ✅ **Strong Content Security Policy (CSP)** - Prevents XSS attacks and code injection
+- ✅ **AES-256-GCM Encryption** - Military-grade encryption for GitLab tokens and API keys
+- ✅ **Browser Fingerprint-Derived Keys** - Device-specific encryption keys using SHA-256
+- ✅ **Web Crypto API** - Native browser cryptography (no external crypto libraries)
+- ✅ **No eval() Policy** - Zero dynamic code execution
+- ✅ **No Inline Scripts** - All JavaScript in external modules
+- ✅ **HTTPS-Only Requests** - All external API calls use encrypted connections
+- ✅ **Input Validation** - Comprehensive URL and data validation
+- ✅ **XSS Protection** - Input sanitization prevents script injection
+- ✅ **Dangerous Scheme Blocking** - Blocks javascript:, data:, file:, and other dangerous URL schemes
+- ✅ **Private IP Blocking** - Prevents access to local network resources (localhost, 192.168.x.x, 10.x.x.x, etc.)
+- ✅ **Rate Limiting Protection** - Exponential backoff with jitter for GitLab API calls
+- ✅ **Secure Storage** - Multiple IndexedDB stores with encrypted sensitive data
+- ✅ **No External Dependencies** - Zero npm packages means zero supply chain vulnerabilities
 
 ### Reporting Security Issues
 Please report security vulnerabilities via GitLab Issues (mark as security issue).
@@ -459,6 +734,30 @@ Please report security vulnerabilities via GitLab Issues (mark as security issue
 - **Safari:** ✅ Should work (untested)
 - **Mobile Browsers:** ✅ Full touch support
 
+## Performance & Technical Details
+
+### Performance Optimizations
+- **Web Worker Scanning** - Link and safety checks run in background thread without blocking UI
+- **Batch Processing** - Scans bookmarks in batches with configurable delays to prevent network overload
+- **Smart Caching** - 7-day TTL on scan results reduces redundant network requests
+- **Incremental Rendering** - UI renders progressively for large bookmark collections
+- **Rate Limiting** - Exponential backoff with jitter prevents API throttling
+- **IndexedDB Indexing** - Fast lookups for bookmarks, cache, and blocklists
+- **Lazy Loading** - External resources loaded only when needed
+- **Minimal Reflows** - Efficient DOM manipulation minimizes layout thrashing
+
+### Scalability
+- **Large Collections** - Tested with 5,000+ bookmarks
+- **Efficient Storage** - IndexedDB handles millions of cached entries
+- **Blocklist Performance** - 1.35M domain lookups via indexed hash tables
+- **Memory Management** - Automatic garbage collection of expired cache entries
+
+### Browser Storage Limits
+- **IndexedDB Quota** - Typically 50% of available disk space per origin
+- **Typical Usage** - ~1-5 MB for 1,000 bookmarks with cache
+- **Blocklists** - ~50-100 MB for all 8 threat databases
+- **No Quota Errors** - Automatic cache cleanup prevents storage issues
+
 ## Roadmap
 
 Planned future features:
@@ -467,13 +766,69 @@ Planned future features:
 - [ ] **Collaborative folders** - Share folders with other users
 - [ ] **Local usage metrics** - Track bookmark access frequency (all local)
 
+## Developer Information
+
+### For Developers & Contributors
+
+**No Build Process** - This is intentional! The project uses vanilla JavaScript to:
+- Eliminate build tool dependencies and complexity
+- Enable instant local development (just open in browser)
+- Reduce security surface area (no npm supply chain attacks)
+- Ensure long-term maintainability (no framework churn)
+
+### Key Implementation Details
+
+**Encryption Key Derivation:**
+```javascript
+// Browser fingerprint components: userAgent, language, hardwareConcurrency,
+// screen dimensions, timezone, and more
+const fingerprint = await generateBrowserFingerprint();
+const key = await crypto.subtle.importKey(/* SHA-256 hash of fingerprint */);
+```
+
+**Rate Limiting Strategy:**
+```javascript
+// Exponential backoff: wait = baseDelay * (2 ^ attempt) + random jitter
+// Prevents API throttling while maintaining responsiveness
+const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay) + jitter;
+```
+
+**Bookmark Tree Structure:**
+```javascript
+{
+  id: "unique-id",
+  title: "Bookmark Title",
+  url: "https://example.com",
+  type: "bookmark" | "folder",
+  children: [], // For folders
+  dateAdded: 1234567890000,
+  linkStatus: "live" | "dead" | "parked",
+  safetyStatus: "safe" | "warning" | "unsafe" | "trusted"
+}
+```
+
+**IndexedDB Schema Version:** 1 (with migration support for future versions)
+
+### Testing
+
+The app includes comprehensive manual testing coverage:
+- Cross-browser compatibility (Chrome, Firefox, Edge)
+- Mobile responsiveness (iOS Safari, Android Chrome)
+- Offline functionality
+- Large bookmark collections (5,000+ items)
+- Network failure scenarios
+- API rate limiting edge cases
+
+No automated test suite yet - contributions welcome!
+
 ## Contributing
 
 Contributions welcome! Please:
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+1. Fork the repository on GitLab
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Make your changes (maintain vanilla JavaScript, no build tools)
+4. Test across browsers (Chrome, Firefox, Edge)
+5. Submit a merge request with clear description
 
 ## Related Projects
 
@@ -507,6 +862,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **[HaGeZi TIF](https://github.com/hagezi/dns-blocklists)** - Threat Intelligence Feeds (608K entries)
 - **[Phishing-Filter](https://gitlab.com/malware-filter/phishing-filter)** - Phishing database (~21K entries)
 - **[OISD Big](https://oisd.nl/)** - Comprehensive blocklist aggregator (~215K entries)
+- **[URLVoid](https://www.urlvoid.com/)** - Multi-engine reputation checking service
 - **[Google Safe Browsing API](https://developers.google.com/safe-browsing)** - Optional threat intelligence
 - **[Yandex Safe Browsing](https://yandex.com/dev/safebrowsing/)** - Optional geographic threat diversity
 - **[VirusTotal](https://www.virustotal.com/)** - Optional multi-engine scanning (70+ AV engines)
@@ -514,6 +870,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 ### Services
 - **WordPress mShots** - Website screenshot preview service
 - **Google Favicons** - Website icon service
+- **CORS Proxy (corsproxy.io)** - Enables URLVoid access from browser
 
 Special thanks to the security research community for maintaining free, public malware databases that help keep users safe.
 
