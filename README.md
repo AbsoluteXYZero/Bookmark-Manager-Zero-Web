@@ -50,7 +50,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 ### Core Functionality
 - ✅ **GitLab Snippet Storage** - Store bookmarks in YOUR private GitLab Snippet
-- ✅ **Auto-Sync with Polling** - Automatic checks every 60 seconds for remote changes
+- ✅ **Auto-Sync with Polling** - Automatic checks every 5 minutes for remote changes
 - ✅ **Smart Notifications** - Additions auto-sync with toast; deletions require confirmation
 - ✅ **Change Preview with Diffs** - View detailed line-by-line changes before syncing
 - ✅ **Edit Lock System** - Prevents concurrent edits across devices with lock notifications
@@ -165,130 +165,54 @@ cd BMZ
 # Deploy the entire directory to your static host
 ```
 
-### Local Development
-
-Run locally with Python or any HTTP server:
-
-```bash
-git clone https://gitlab.com/AbsoluteXYZero/BMZ.git
-cd BMZ
-python -m http.server 8000
-# Visit http://localhost:8000
-```
-
 ## Usage
 
-### Getting Started with Bookmark Manager Zero
+### Getting Started
 
-Bookmark Manager Zero offers two ways to get started - choose the option that fits your needs:
+Bookmark Manager Zero offers two ways to get started - visit [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/) and choose:
 
-**Option 1: Local Mode (No Account Required)**
-- Use BMZ entirely offline without any external services
-- Perfect for privacy-focused users or testing the app
-- Start from scratch with an empty collection or import existing bookmarks (HTML/JSON)
-- All your bookmarks stay on your device with no cloud sync
-- You can add GitLab sync later if you change your mind
-
-**Option 2: GitLab Sync Mode (Cross-Device Synchronization)**
-- Create a free GitLab account at [gitlab.com](https://gitlab.com)
-- Generate a Personal Access Token (PAT) with `api` scope
-- Start from scratch or import existing bookmarks (HTML/JSON)
-- Your bookmarks sync automatically across all your devices via private GitLab Snippets
-- Data stays under your control in your own GitLab account
-
-**Adding GitLab Sync After Local Setup**
-
-If you start in Local Mode, you can add GitLab sync later without losing your bookmarks:
-1. Click the "Connect GitLab" button in the app
-2. Enter your GitLab Personal Access Token
-3. Choose how to handle your existing local bookmarks:
-   - **Create New Snippet** - Upload your local bookmarks to a new GitLab Snippet
-   - **Merge with Existing Snippet** - Combine your local bookmarks with bookmarks already in a GitLab Snippet
-   - **Replace Local with Snippet** - Discard local bookmarks and use the bookmarks from your GitLab Snippet
-
-**Important: GitLab Personal Access Tokens**
-- When you create a PAT in GitLab, it only displays **once**
-- Copy it immediately and save it in a notes app or password manager
-- Tokens expire based on the expiration date you set during creation
-- Keep track of expiration dates to avoid sync interruptions
-- Any token with `api` scope will work as long as your GitLab account is in good standing
-- BMZ includes helpful error handling that will guide you if authentication issues occur
-
-**Seamless Experience**
-
-Bookmark Manager Zero provides intuitive prompts and error messages throughout the setup process. Whether you're troubleshooting a token issue or merging bookmarks, the app guides you every step of the way.
-
-### First-Time Setup
-
-**Option 1: Local Mode (No GitLab Required)**
-1. Visit [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
-2. Click **"Use Local Mode"** to work offline
-3. Choose to:
+#### Option 1: Local Mode (No Account Required)
+1. Click **"Use Local Mode"** to work entirely offline
+2. Choose to:
    - **Import from File** - Upload HTML/JSON bookmarks
    - **Start Fresh** - Create empty bookmark list
    - **Continue with Existing** - Load previously saved local bookmarks
-4. Optional: Connect GitLab later via "Connect GitLab" button
+3. All bookmarks stay on your device with no cloud sync
+4. Perfect for privacy-focused users or testing the app
 
-**Option 2: GitLab Sync Mode**
-1. Visit [https://bmzweb.absolutezero.fyi/](https://bmzweb.absolutezero.fyi/)
-2. **Set up GitLab Snippet storage**:
-   - Generate a Personal Access Token at GitLab (scope: `api`)
-   - Paste your token to authenticate (must start with `glpat-` prefix)
+**Want sync later?** Click "Connect GitLab" anytime to add cloud sync without losing bookmarks.
+
+#### Option 2: GitLab Sync Mode (Cross-Device Sync)
+1. Create a free [GitLab account](https://gitlab.com) and generate a Personal Access Token (PAT):
+   - Scope required: `api`
+   - **Important**: PATs display only **once** - copy immediately and save to a password manager
+   - Tokens expire based on your chosen expiration date - track this to avoid sync interruptions
+2. Paste your token in BMZ (must start with `glpat-` prefix)
    - Token is encrypted with AES-256-GCM before storage
-   - Choose existing GitLab Snippet or create new one
-3. **Merge Existing Bookmarks** (if you have local bookmarks):
-   - Keep Local Bookmarks (ignore snippet)
-   - Merge Bookmarks (combine both)
-   - Replace with Snippet (overwrite local)
-4. **Start managing bookmarks!**
+3. Choose existing GitLab Snippet or create new one
+4. Start from scratch or import existing bookmarks (HTML/JSON)
+5. Your bookmarks sync automatically across all devices via private GitLab Snippets
 
-### Basic Usage
+**Adding Sync to Existing Local Bookmarks**
 
-- **Add Bookmark:** Click the "+" button in the header
-- **Edit Bookmark:** Right-click → Edit
-- **Delete Bookmark:** Right-click → Delete (undo toast appears for 10 seconds)
-- **Move Bookmark:** Drag and drop to a different folder (or press-and-hold on mobile)
-- **Create Folder:** Click the folder icon in the header
-- **Search:** Type in the search bar or press **Ctrl+K** (Cmd+K on Mac)
-- **Generate QR Code:** Click QR code button in header or right-click bookmark
+If you're already using Local Mode and want to add GitLab sync:
+1. Click "Connect GitLab" button
+2. Enter your GitLab Personal Access Token
+3. Choose how to merge your bookmarks:
+   - **Create New Snippet** - Upload local bookmarks to new snippet
+   - **Merge with Existing Snippet** - Combine local and remote bookmarks
+   - **Replace Local with Snippet** - Discard local, use remote bookmarks
 
-### Context Menu Actions
-
-**Right-Click on Bookmarks:**
-- Open in Current Tab
-- Open in New Tab
-- Copy URL
-- Generate QR Code
-- Edit Bookmark
-- Recheck Security Status
-- Add to Whitelist / Remove from Whitelist
-- Delete
-
-**Right-Click on Folders:**
-- Rescan All Bookmarks in Folder
-- Add Bookmark Here
-- Add Subfolder Here
-- Rename Folder
-- Delete Folder
-
-### Multi-Select & Bulk Operations
-
-1. Click the **Multi-Select** button in toolbar
-2. Select bookmarks by clicking them (shows selection counter)
-3. Use bulk action buttons:
-   - **Select All** - Select all visible bookmarks
-   - **Deselect All** - Clear selection
-   - **Bulk Recheck** - Re-scan security status of selected bookmarks
-   - **Bulk Move** - Move all selected to a folder
-   - **Bulk Delete** - Delete all selected bookmarks
-4. Click **Multi-Select** again to exit mode
+**Token Tips**
+- Any PAT with `api` scope works as long as your GitLab account is in good standing
+- BMZ includes helpful error prompts to guide you if authentication issues occur
 
 ### Sync Management
 
-- **Auto-Sync:** Enabled by default, checks Snippet every 60 seconds
+- **Auto-Sync:** Enabled by default, checks Snippet every 5 minutes
   - New bookmarks from other devices auto-sync with notification
   - Deletions require user confirmation (shows "View Changes" button)
-  - Configurable interval (minimum 60 seconds)
+  - 5-minute interval helps avoid rate limiting and account flagging
 - **Manual Sync:**
   - Click "Push to Snippet" to upload local changes
   - Click "Pull from Snippet" to download remote changes
@@ -331,44 +255,6 @@ Bookmark Manager Zero provides intuitive prompts and error messages throughout t
 - **Responsive Design:** Adapts to screen size with 44x44px touch targets
 - **Haptic Feedback:** On supported devices
 
-### Settings
-
-Click the **gear icon** to access:
-- **GitLab Snippet Sync:**
-  - Authenticate with Personal Access Token
-  - Select existing snippet or create new one
-  - Auto-sync toggle and interval configuration
-  - Force push/pull options
-- **Display Options Dropdown:**
-  - Toggle Title visibility
-  - Toggle URL visibility
-  - Toggle Favicon display
-  - Toggle Live Status indicators
-  - Toggle Safety Status indicators
-  - Toggle Preview images
-  - Toggle Preview popup on hover
-- **View Mode:** Switch between list and grid layouts
-- **Cache Management:**
-  - Manual "Clear Cache" button
-  - Auto-clear cache settings (Never, 7 days, 30 days, 90 days)
-  - View current cache size
-  - View Changelog of all operations
-- **Link & Safety Checking:**
-  - Enable/Disable Link Checking toggle
-  - Enable/Disable Safety Checking toggle
-  - Whitelist management
-- **API Keys:** Set up optional security API keys
-  - Google Safe Browsing API
-  - Yandex Safe Browsing API
-  - VirusTotal API
-- **Import/Export:**
-  - Import HTML (Netscape format) bookmarks
-  - Import JSON bookmarks
-  - Export to HTML (cross-browser compatible)
-  - Export to JSON (GitLab Snippet format)
-- **Find Duplicates:** Detect and manage duplicate bookmarks
-- **Start Folder:** Set default folder to open on launch
-
 Click the **theme icon** to access:
 - **Theme Selector:** Choose from 8 themes
   - Enhanced Blue (default)
@@ -397,14 +283,7 @@ Click the **theme icon** to access:
 - **GUI Scale:** Header/toolbar scale (100-200%)
 - **Zoom:** Bookmark content zoom (50%, 75%, 100%, 125%, 150%, 175%, 200%)
 
-### Keyboard Shortcuts
-
-#### Global Shortcuts
-- `Ctrl+K` (Windows/Linux) or `Cmd+K` (Mac) - Focus search bar
-- `Escape` - Clear selection / Close modals / Cancel operations
-- `Tab` / `Shift+Tab` - Navigate UI elements (focus trap in modals)
-
-#### Navigation (when bookmark/folder selected)
+### Keyboard Navigation (when bookmark/folder selected)
 - `↑` / `↓` - Navigate up/down through bookmarks and folders
 - `←` - Collapse folder
 - `→` - Expand folder
@@ -441,7 +320,7 @@ The website can optionally use external services for enhanced features. **All ca
   - Phishing-Filter - ~21K aggregated phishing database
   - OISD Big - ~215K multi-source blocklist aggregator
 
-### User-Configured Services (require free API keys)
+### User-Configured Services (require API keys)
 - **Google Safe Browsing API** - Additional malware/phishing protection
   - Rate Limit: 10,000 requests/day (free tier)
   - Coverage: Malware, Social Engineering, Unwanted Software
@@ -478,7 +357,7 @@ All external service usage is disclosed in [PRIVACY.md](PRIVACY.md).
 
 **API Usage Considerations:**
 - **Event-driven sync**: API calls are made when you add/edit/delete bookmarks
-- **Auto-sync polling**: When enabled, checks for remote changes every 60 seconds (configurable in settings)
+- **Auto-sync polling**: When enabled, checks for remote changes every 5 minutes
 - **Manual sync**: Use the "Pull from Snippet" and "Push to Snippet" buttons for manual control
 - **Rate limiting protection**: Built-in exponential backoff with jitter respects GitLab API limits
 - **Rate limits**: GitLab has API rate limits; typical bookmark usage stays well within limits
@@ -547,30 +426,29 @@ URLs are checked against eight community-maintained blocklists with dual URLhaus
 - Both full URLs and domain combinations are checked
 - **Any match → Unsafe** (tooltip shows all sources that flagged it)
 
-#### Phase 2: Google Safe Browsing (Optional, Requires Free API Key)
+#### Phase 2: Google Safe Browsing (Optional, Requires API Key)
 
 If configured, URLs are checked against Google's threat database:
 - **Threat Types**: Malware, Social Engineering, Unwanted Software
 - **Rate Limit**: 10,000 requests/day (free tier)
 
-#### Phase 3: Yandex Safe Browsing (Optional, Requires Free API Key)
+#### Phase 3: Yandex Safe Browsing (Optional, Requires API Key)
 
 If configured, provides geographic threat diversity:
 - **Coverage**: Russian and Eastern European threats
 - **Rate Limit**: 100,000 requests/day (free tier)
 
-#### Phase 4: URLVoid Scanning (Free, No API Key Required)
+#### Phase 4: URLVoid Scanning (Integrated, No API Key Required)
 
 All URLs are checked against URLVoid's reputation database:
 - **Multi-Engine Check**: Aggregates results from multiple security engines
-- **CORS Proxy**: Uses `corsproxy.io` to access URLVoid from browser
 - **Detection Threshold**:
   - 2+ engines flag as malicious → Unsafe
   - 1 engine flags → Warning
   - No flags → Safe
-- **No Rate Limits**: Free public service
+- **No Rate Limits**
 
-#### Phase 5: VirusTotal (Optional, Requires Free API Key)
+#### Phase 5: VirusTotal (Optional, Requires API Key)
 
 If configured, URLs are submitted to VirusTotal's multi-engine scanner:
 - 70+ antivirus engines analyze the URL
@@ -691,20 +569,6 @@ Bookmark-Manager-Zero-Website/
 
 **Total**: 24 JavaScript modules, 100% vanilla ES6
 
-### Building
-
-No build process required - pure vanilla JavaScript!
-
-Simply serve the files with any HTTP server:
-
-```bash
-python -m http.server 8000
-# or
-npx serve
-# or
-php -S localhost:8000
-```
-
 ## Security
 
 ### Security Features
@@ -730,7 +594,7 @@ Please report security vulnerabilities via GitLab Issues (mark as security issue
 
 - **Chrome:** ✅ Fully supported
 - **Firefox:** ✅ Fully supported
-- **Edge:** ✅ Fully supported (Chromium-based)
+- **Edge:** ✅ Should work (untested but Chromium-based)
 - **Safari:** ✅ Should work (untested)
 - **Mobile Browsers:** ✅ Full touch support
 
@@ -747,24 +611,10 @@ Please report security vulnerabilities via GitLab Issues (mark as security issue
 - **Minimal Reflows** - Efficient DOM manipulation minimizes layout thrashing
 
 ### Scalability
-- **Large Collections** - Tested with 5,000+ bookmarks
+- **Large Collections** - Tested with 2,000+ bookmarks
 - **Efficient Storage** - IndexedDB handles millions of cached entries
 - **Blocklist Performance** - 1.35M domain lookups via indexed hash tables
 - **Memory Management** - Automatic garbage collection of expired cache entries
-
-### Browser Storage Limits
-- **IndexedDB Quota** - Typically 50% of available disk space per origin
-- **Typical Usage** - ~1-5 MB for 1,000 bookmarks with cache
-- **Blocklists** - ~50-100 MB for all 8 threat databases
-- **No Quota Errors** - Automatic cache cleanup prevents storage issues
-
-## Roadmap
-
-Planned future features:
-- [ ] **Browser extension integration** - Import from browser extensions
-- [ ] **PWA support** - Install as Progressive Web App
-- [ ] **Collaborative folders** - Share folders with other users
-- [ ] **Local usage metrics** - Track bookmark access frequency (all local)
 
 ## Developer Information
 
@@ -786,13 +636,6 @@ const fingerprint = await generateBrowserFingerprint();
 const key = await crypto.subtle.importKey(/* SHA-256 hash of fingerprint */);
 ```
 
-**Rate Limiting Strategy:**
-```javascript
-// Exponential backoff: wait = baseDelay * (2 ^ attempt) + random jitter
-// Prevents API throttling while maintaining responsiveness
-const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay) + jitter;
-```
-
 **Bookmark Tree Structure:**
 ```javascript
 {
@@ -808,27 +651,6 @@ const delay = Math.min(baseDelay * Math.pow(2, attempt), maxDelay) + jitter;
 ```
 
 **IndexedDB Schema Version:** 1 (with migration support for future versions)
-
-### Testing
-
-The app includes comprehensive manual testing coverage:
-- Cross-browser compatibility (Chrome, Firefox, Edge)
-- Mobile responsiveness (iOS Safari, Android Chrome)
-- Offline functionality
-- Large bookmark collections (5,000+ items)
-- Network failure scenarios
-- API rate limiting edge cases
-
-No automated test suite yet - contributions welcome!
-
-## Contributing
-
-Contributions welcome! Please:
-1. Fork the repository on GitLab
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Make your changes (maintain vanilla JavaScript, no build tools)
-4. Test across browsers (Chrome, Firefox, Edge)
-5. Submit a merge request with clear description
 
 ## Related Projects
 
@@ -869,8 +691,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 ### Services
 - **WordPress mShots** - Website screenshot preview service
-- **Google Favicons** - Website icon service
-- **CORS Proxy (corsproxy.io)** - Enables URLVoid access from browser
+- **Google Favicons** - Website icon servicer
 
 Special thanks to the security research community for maintaining free, public malware databases that help keep users safe.
 
