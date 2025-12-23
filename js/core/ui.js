@@ -31,13 +31,39 @@ class UIManager {
     */
    async init() {
      // Load preferences from storage
-     // TODO: Load display options and expanded folders from settings
+     const stored = localStorage.getItem('bmz_ui_preferences');
+     if (stored) {
+       try {
+         const prefs = JSON.parse(stored);
+         if (prefs.displayOptions) this.displayOptions = { ...this.displayOptions, ...prefs.displayOptions };
+         if (prefs.expandedFolders) this.expandedFolders = new Set(prefs.expandedFolders);
+         if (prefs.hasSeenSetupCard !== undefined) this.hasSeenSetupCard = prefs.hasSeenSetupCard;
+       } catch (e) {
+         console.error('Failed to load UI preferences:', e);
+       }
+     }
 
      // Set up event listeners for scan status updates
      this.setupScanEventListeners();
 
      console.log('UI manager initialized');
    }
+
+  /**
+   * Save UI preferences to storage
+   */
+  savePreferences() {
+    try {
+      const prefs = {
+        displayOptions: this.displayOptions,
+        expandedFolders: Array.from(this.expandedFolders),
+        hasSeenSetupCard: this.hasSeenSetupCard
+      };
+      localStorage.setItem('bmz_ui_preferences', JSON.stringify(prefs));
+    } catch (e) {
+      console.error('Failed to save UI preferences:', e);
+    }
+  }
 
   /**
     * Set up event listeners for scan status updates
@@ -282,8 +308,7 @@ class UIManager {
       return this.searchRecursive(allItems, searchQuery);
     }
 
-    // Apply status filters
-    // TODO: Implement filter logic based on filter buttons
+    // Apply status filters (handled by sidebar-adapted.js)
     return allItems;
   }
 
@@ -624,6 +649,9 @@ class UIManager {
       this.expandedFolders.add(folderId);
     }
 
+    // Save preferences
+    this.savePreferences();
+
     // Re-render bookmarks to update folder state
     const tree = bookmarkManager.getTree();
     this.renderBookmarks(tree);
@@ -786,7 +814,7 @@ class UIManager {
       if (scanBtn) {
         scanBtn.addEventListener('click', async () => {
           await this.dismissSetupCard();
-          // TODO: Trigger full scan
+          // Full scan is handled by the main scan button in status bar
         });
       }
 
@@ -803,7 +831,7 @@ class UIManager {
    */
   async dismissSetupCard() {
     this.hasSeenSetupCard = true;
-    // TODO: Save to storage
+    this.savePreferences();
     const tree = bookmarkManager.getTree();
     this.renderBookmarks(tree);
   }
@@ -814,7 +842,7 @@ class UIManager {
   async handleFolderAction(action, folder) {
     switch (action) {
       case 'rename':
-        // TODO: Show rename modal
+        // Rename functionality handled by sidebar-adapted.js
         console.log('Rename folder:', folder.id);
         break;
       case 'delete':
@@ -825,11 +853,11 @@ class UIManager {
         }
         break;
       case 'add-bookmark':
-        // TODO: Show add bookmark modal with parentId = folder.id
+        // Add bookmark modal handled by sidebar-adapted.js
         console.log('Add bookmark to folder:', folder.id);
         break;
       case 'add-subfolder':
-        // TODO: Show add folder modal
+        // Add folder modal handled by sidebar-adapted.js
         console.log('Add subfolder to:', folder.id);
         break;
       case 'rescan-folder':
@@ -854,11 +882,11 @@ class UIManager {
         this.showToast('URL copied to clipboard');
         break;
       case 'qr-code':
-        // TODO: Show QR code modal
+        // QR code functionality handled by sidebar-adapted.js
         console.log('Generate QR code for:', bookmark.url);
         break;
       case 'edit':
-        // TODO: Show edit modal
+        // Edit modal handled by sidebar-adapted.js
         console.log('Edit bookmark:', bookmark.id);
         break;
       case 'delete':
@@ -934,18 +962,18 @@ class UIManager {
    */
   updateTotalBookmarkCount() {
     const stats = bookmarkManager.getStats();
-    const statusBar = document.querySelector('.status-bar');
-    if (statusBar) {
-      // TODO: Update status bar with bookmark count
-      console.log('Total bookmarks:', stats.totalBookmarks);
+    const totalCountEl = document.getElementById('totalCount');
+    if (totalCountEl) {
+      const count = stats.totalBookmarks || 0;
+      totalCountEl.textContent = `${count.toLocaleString()} bookmark${count !== 1 ? 's' : ''}`;
     }
   }
 
   /**
    * Show toast notification
+   * Full toast system available in error-notification-manager.js and sidebar-adapted.js
    */
   showToast(message, type = 'info') {
-    // TODO: Implement toast system
     console.log(`[Toast ${type}]:`, message);
   }
 

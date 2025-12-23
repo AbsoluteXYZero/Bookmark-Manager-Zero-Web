@@ -5,8 +5,6 @@
  */
 
 import dbManager from '../storage/indexeddb.js';
-import bookmarkManager from './bookmarks.js';
-import uiManager from './ui.js';
 import blocklistService from './blocklist-service.js';
 import { decryptApiKey } from '../utils/encryption.js';
 
@@ -29,8 +27,8 @@ class ScannerService {
     try {
       console.log('Initializing scanner service...');
 
-      // Initialize Web Worker
-      this.worker = new Worker('workers/scanner-worker.js');
+      // Initialize Web Worker with cache busting
+      this.worker = new Worker(`workers/scanner-worker.js?v=${Date.now()}`);
       console.log('Scanner worker created');
 
       // Set up message handler
@@ -247,9 +245,11 @@ class ScannerService {
     await this.cacheResult(url, status, 'link');
 
     // Update bookmark in memory
-    const bookmark = bookmarkManager.getBookmark(id);
-    if (bookmark) {
-      bookmark.linkStatus = status;
+    if (window.bookmarkManager) {
+      const bookmark = window.bookmarkManager.getBookmark(id);
+      if (bookmark) {
+        bookmark.linkStatus = status;
+      }
     }
 
     // Update UI
@@ -266,10 +266,12 @@ class ScannerService {
     await this.cacheResult(url, { status, sources }, 'safety');
 
     // Update bookmark in memory
-    const bookmark = bookmarkManager.getBookmark(id);
-    if (bookmark) {
-      bookmark.safetyStatus = status;
-      bookmark.safetySources = sources;
+    if (window.bookmarkManager) {
+      const bookmark = window.bookmarkManager.getBookmark(id);
+      if (bookmark) {
+        bookmark.safetyStatus = status;
+        bookmark.safetySources = sources;
+      }
     }
 
     // Update UI
@@ -528,9 +530,13 @@ class ScannerService {
  
      // Clear tracking set at start of new scan
      this.urlsBeingScanned.clear();
- 
+
      // Get all bookmarks
-     const allBookmarks = bookmarkManager.getAllBookmarks();
+     if (!window.bookmarkManager) {
+       console.error('[Scanner] BookmarkManager not available');
+       return;
+     }
+     const allBookmarks = window.bookmarkManager.getAllBookmarks();
      this.totalCount = allBookmarks.length;
  
      console.log(`Starting scan of ${this.totalCount} bookmarks (bypassCache: ${bypassCache})`);

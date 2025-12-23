@@ -298,23 +298,28 @@ function showPrivateModeIndicator() {
 // Get folder path for a bookmark/folder
 async function getFolderPath(itemId) {
   try {
-    const parents = [];
+    if (!itemId) return 'Root';
+
+    const path = [];
     let currentId = itemId;
 
     while (currentId) {
-      const item = findBookmarkById(currentId, bookmarkTree);
+      const item = bookmarkManager.getBookmark(currentId);
       if (!item) break;
-      if (!item.parentId) break;
 
-      const parent = findBookmarkById(item.parentId, bookmarkTree);
+      // Add the current item's title to the path
+      if (item.title) {
+        path.unshift(item.title);
+      }
+
+      // Find the parent and continue up the tree
+      const parent = bookmarkManager.findParent(currentId);
       if (!parent) break;
-      if (!parent.title) break;
 
-      parents.unshift(parent.title);
-      currentId = parent.parentId;
+      currentId = parent.id;
     }
 
-    return parents.join(' > ') || 'Root';
+    return path.length > 0 ? path.join(' > ') : 'Root';
   } catch (error) {
     return 'Unknown';
   }
@@ -2919,7 +2924,8 @@ async function handleDropToRoot(draggedId) {
 
   try {
     // Get old parent folder path before moving
-    const oldParent = await getFolderPath(draggedItem.parentId);
+    const oldParent = findParentById(bookmarkTree, draggedId);
+    const fromFolder = oldParent ? await getFolderPath(oldParent.id) : 'Root';
 
     // Move to root at the last position
     await bookmarkManager.move(draggedId, {
@@ -2929,7 +2935,7 @@ async function handleDropToRoot(draggedId) {
 
     // Add to changelog
     const itemType = draggedItem.url ? 'bookmark' : 'folder';
-    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { oldParent, newParent: 'Root' });
+    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { fromFolder, toFolder: 'Root' });
 
     await loadBookmarks();
     renderBookmarks();
@@ -2986,7 +2992,8 @@ async function handleDropToPosition(draggedId, targetParentId, targetIndex) {
 
   try {
     // Get old parent folder path before moving
-    const oldParent = await getFolderPath(draggedItem.parentId);
+    const oldParent = findParentById(bookmarkTree, draggedId);
+    const fromFolder = oldParent ? await getFolderPath(oldParent.id) : 'Root';
 
     await bookmarkManager.move(draggedId, {
       parentId: targetParentId === 'root________' ? undefined : targetParentId,
@@ -2994,11 +3001,11 @@ async function handleDropToPosition(draggedId, targetParentId, targetIndex) {
     });
 
     // Get new parent folder path after moving
-    const newParent = await getFolderPath(targetParentId === 'root________' ? undefined : targetParentId);
+    const toFolder = await getFolderPath(targetParentId === 'root________' ? undefined : targetParentId);
 
     // Add to changelog
     const itemType = draggedItem.url ? 'bookmark' : 'folder';
-    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { oldParent, newParent });
+    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { fromFolder, toFolder });
 
     await loadBookmarks();
     renderBookmarks();
@@ -3112,7 +3119,8 @@ async function handleDrop(draggedId, targetId, targetElement, dropState) {
 
     // Move the bookmark using Firefox API
     // Get old parent folder path before moving
-    const oldParent = await getFolderPath(draggedItem.parentId);
+    const oldParent = findParentById(bookmarkTree, draggedId);
+    const fromFolder = oldParent ? await getFolderPath(oldParent.id) : 'Root';
 
     await bookmarkManager.move(draggedId, {
       parentId: targetParentId,
@@ -3120,11 +3128,11 @@ async function handleDrop(draggedId, targetId, targetElement, dropState) {
     });
 
     // Get new parent folder path after moving
-    const newParent = await getFolderPath(targetParentId);
+    const toFolder = await getFolderPath(targetParentId);
 
     // Add to changelog
     const itemType = draggedItem.url ? 'bookmark' : 'folder';
-    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { oldParent, newParent });
+    await addChangelogEntry('move', itemType, draggedItem.title, draggedItem.url, { fromFolder, toFolder });
 
     // Reload and re-render
     await loadBookmarks();
@@ -4774,7 +4782,8 @@ async function saveNewBookmark() {
     });
 
     // Add to changelog
-    await addChangelogEntry('create', 'bookmark', newBookmark.title, newBookmark.url);
+    const folderPath = parentId ? await getFolderPath(parentId) : 'Root';
+    await addChangelogEntry('create', 'bookmark', newBookmark.title, newBookmark.url, { folderPath });
 
     // Remember the selected folder for next time
     if (parentId) {
@@ -4871,7 +4880,8 @@ async function saveNewFolder() {
     });
 
     // Add to changelog
-    await addChangelogEntry('create', 'folder', newFolder.title);
+    const folderPath = parentId ? await getFolderPath(parentId) : 'Root';
+    await addChangelogEntry('create', 'folder', newFolder.title, null, { folderPath });
 
     // Remember the selected parent folder for next time
     if (parentId) {
@@ -5654,7 +5664,7 @@ async function openChangelogModal() {
     entries.forEach(entry => {
       const date = new Date(entry.timestamp);
       const timeAgo = getTimeAgo(entry.timestamp);
-      const iconColor = entry.type === 'create' ? '#10b981' : entry.type === 'delete' ? '#ef4444' : entry.type === 'move' ? '#3b82f6' : '#f59e0b';
+      const iconColor = entry.type === 'create' ? '#10b981' : entry.type === 'delete' ? '#ef4444' : entry.type === 'move' ? '#3b82f6' : entry.type === 'undo' ? '#8b5cf6' : '#f59e0b';
 
       // SVG icons for operation types
       let icon;
@@ -5664,6 +5674,8 @@ async function openChangelogModal() {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M9,3V4H4V6H5V19A2,2 0 0,0 7,21H17A2,2 0 0,0 19,19V6H20V4H15V3H9M7,6H17V19H7V6M9,8V17H11V8H9M13,8V17H15V8H13Z"/></svg>`;
       } else if (entry.type === 'move') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M14,18L12.6,16.6L15.2,14H4V12H15.2L12.6,9.4L14,8L19,13L14,18M20,6H10A2,2 0 0,0 8,8V11H10V8H20V20H10V17H8V20A2,2 0 0,0 10,22H20A2,2 0 0,0 22,20V8A2,2 0 0,0 20,6Z"/></svg>`;
+      } else if (entry.type === 'undo') {
+        icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 19.56,16H22.01C21.43,12.16 17.97,9 13.9,9H12.5V8M12.5,16C10.54,16 8.77,15.28 7.38,14.12L11,10.5H2V19.5L5.6,15.9C7.45,17.5 9.85,18.5 12.5,18.5C17.1,18.5 20.95,15.4 21.9,11.2H19.38C18.77,14.16 15.76,16.34 12.5,16Z"/></svg>`;
       } else {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>`;
       }
@@ -5677,18 +5689,35 @@ async function openChangelogModal() {
       }
 
       let detailsHtml = '';
-      if (entry.type === 'move' && entry.details.oldParent && entry.details.newParent) {
-        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">From: ${entry.details.oldParent} → ${entry.details.newParent}</div>`;
-      } else if (entry.type === 'update') {
-        if (entry.details.oldTitle && entry.details.newTitle && entry.details.oldTitle !== entry.details.newTitle) {
-          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${entry.details.oldTitle}</div>`;
+      if (entry.type === 'undo') {
+        if (entry.details.undoType === 'move') {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Restored to: ${entry.details.restoredToFolder}</div>`;
+        } else if (entry.details.undoType === 'update') {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Reverted title from: "${entry.details.previousTitle}"</div>`;
+        } else {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Undid ${entry.details.undoType} operation</div>`;
         }
-        if (entry.details.oldUrl && entry.details.newUrl && entry.details.oldUrl !== entry.details.newUrl) {
-          detailsHtml += `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 2px;">URL changed</div>`;
-        }
+      } else if (entry.details && entry.details.oldTitle && entry.details.newTitle) {
+        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${entry.details.oldTitle}</div>`;
+      } else if (entry.details && entry.details.fromFolder && entry.details.toFolder) {
+        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Moved from: ${entry.details.fromFolder} → ${entry.details.toFolder}</div>`;
+      } else if (entry.details && entry.details.folderPath) {
+        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Location: ${entry.details.folderPath}</div>`;
       }
 
       const urlHtml = entry.url ? `<div class="changelog-url" data-url="${entry.url}" style="font-size: 11px; color: var(--md-sys-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline;" title="Click to copy: ${entry.url}">${entry.url}</div>` : '';
+
+      let restoreButtonHtml = '';
+      if ((entry.type === 'delete' || entry.type === 'move' || entry.type === 'update') && entry.type !== 'undo') {
+        const restoreTitle = entry.type === 'delete' ? 'Restore this item' :
+                            entry.type === 'move' ? 'Move back to original location' :
+                            'Revert changes';
+        restoreButtonHtml = `
+          <button class="changelog-restore-btn" data-entry-id="${entry.id}" title="${restoreTitle}" style="margin-left: auto; padding: 4px 8px; border: 1px solid var(--md-sys-color-outline); border-radius: 4px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface); cursor: pointer; font-size: 11px; opacity: 0.7; transition: opacity 0.2s;">
+            Restore
+          </button>
+        `;
+      }
 
       html += `
         <div style="padding: 12px; background: var(--md-sys-color-surface-variant); border-radius: 8px; border-left: 3px solid ${iconColor};">
@@ -5698,6 +5727,7 @@ async function openChangelogModal() {
               <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
                 <span style="font-size: 14px;">${itemIcon}</span>
                 <span style="font-size: 13px; font-weight: 600; color: var(--md-sys-color-on-surface);">${entry.title || 'Untitled'}</span>
+                ${restoreButtonHtml}
               </div>
               ${urlHtml}
               ${detailsHtml}
@@ -5734,6 +5764,16 @@ async function openChangelogModal() {
         }
       });
     });
+
+    // Add click handlers to restore buttons
+    const restoreButtons = changelogList.querySelectorAll('.changelog-restore-btn');
+    restoreButtons.forEach(restoreBtn => {
+      restoreBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const entryId = restoreBtn.getAttribute('data-entry-id');
+        await restoreChangelogEntry(entryId);
+      });
+    });
   }
 
   // Show modal
@@ -5747,6 +5787,170 @@ function closeModal(modal) {
   modal.classList.add('hidden');
   modal.setAttribute('aria-hidden', 'true');
   releaseFocusTrap();
+}
+
+// Close changelog modal
+function closeChangelogModal() {
+  const modal = document.getElementById('changelogModal');
+  modal.classList.add('hidden');
+  modal.setAttribute('aria-hidden', 'true');
+  releaseFocusTrap();
+}
+
+// Restore a changelog entry (undo the operation)
+async function restoreChangelogEntry(entryId) {
+  try {
+    const entries = await getChangelogEntries();
+    const entry = entries.find(e => e.id == entryId);
+
+    if (!entry) {
+      alert('Changelog entry not found.');
+      return;
+    }
+
+    // Only allow restoring certain operation types
+    if (!['delete', 'move', 'update'].includes(entry.type)) {
+      alert('This operation type cannot be restored.');
+      return;
+    }
+
+    const confirmed = confirm(`Restore this ${entry.type} operation: "${entry.title}"?\n\nThis will attempt to undo the change.`);
+    if (!confirmed) return;
+
+    if (entry.type === 'delete') {
+      alert('Delete operations cannot be automatically restored from the changelog.\n\nThe changelog does not store enough data to recreate deleted items.\n\nUse the undo feature immediately after deletion for full restoration.');
+      return;
+    }
+
+    if (entry.type === 'move') {
+      if (entry.details && entry.details.fromFolder) {
+        // Search for the item recursively in the tree
+        function findItemByTitleAndUrl(nodes, title, url) {
+          for (const node of nodes) {
+            if (node.title === title && (!url || node.url === url)) {
+              return node;
+            }
+            if (node.children) {
+              const found = findItemByTitleAndUrl(node.children, title, url);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const matchingItem = findItemByTitleAndUrl(bookmarkTree, entry.title, entry.url);
+
+        if (matchingItem) {
+          let targetParentId = null;
+          const folderPath = entry.details.fromFolder;
+
+          if (folderPath === 'Root') {
+            targetParentId = undefined;
+          } else if (folderPath) {
+            const pathParts = folderPath.split(' > ');
+
+            function findFolderByPath(nodes, parts, index) {
+              if (index >= parts.length) return null;
+
+              for (const node of nodes) {
+                if (node.title === parts[index] && !node.url) {
+                  if (index === parts.length - 1) {
+                    return node.id;
+                  }
+                  if (node.children) {
+                    const found = findFolderByPath(node.children, parts, index + 1);
+                    if (found) return found;
+                  }
+                }
+              }
+              return null;
+            }
+
+            targetParentId = findFolderByPath(bookmarkTree, pathParts, 0);
+          }
+
+          if (folderPath !== 'Root' && !targetParentId) {
+            alert(`Original folder "${folderPath}" not found. The folder may have been deleted.`);
+            return;
+          }
+
+          try {
+            // Use bookmarkManager.move() instead of manually setting parentId
+            await bookmarkManager.move(matchingItem.id, { parentId: targetParentId });
+
+            alert(`Moved "${entry.title}" back to ${entry.details.fromFolder || 'Root'}`);
+
+            const itemType = matchingItem.url ? 'bookmark' : 'folder';
+            await addChangelogEntry('undo', itemType, entry.title, matchingItem.url || null, {
+              undoType: 'move',
+              originalOperation: entry,
+              restoredToFolder: entry.details.fromFolder
+            });
+
+            await loadBookmarks();
+            renderBookmarks();
+            await openChangelogModal();
+          } catch (error) {
+            alert('Failed to move item back: ' + error.message);
+          }
+        } else {
+          alert('Could not find the moved item. It may have been deleted or renamed.');
+        }
+      } else {
+        alert('Not enough information to restore this move operation.');
+      }
+    }
+
+    if (entry.type === 'update') {
+      if (entry.details && entry.details.oldTitle) {
+        // Search for the item recursively in the tree
+        function findItemByTitleAndUrl(nodes, title, url) {
+          for (const node of nodes) {
+            if (node.title === title && (!url || node.url === url)) {
+              return node;
+            }
+            if (node.children) {
+              const found = findItemByTitleAndUrl(node.children, title, url);
+              if (found) return found;
+            }
+          }
+          return null;
+        }
+
+        const matchingItem = findItemByTitleAndUrl(bookmarkTree, entry.title, entry.url);
+
+        if (matchingItem) {
+          try {
+            // Use bookmarkManager.update() instead of directly modifying the item
+            await bookmarkManager.update(matchingItem.id, { title: entry.details.oldTitle });
+
+            alert(`Restored title from "${entry.title}" back to "${entry.details.oldTitle}"`);
+
+            const itemType = matchingItem.url ? 'bookmark' : 'folder';
+            await addChangelogEntry('undo', itemType, entry.details.oldTitle, matchingItem.url || null, {
+              undoType: 'update',
+              originalOperation: entry,
+              restoredTitle: entry.details.oldTitle,
+              previousTitle: entry.title
+            });
+
+            await loadBookmarks();
+            renderBookmarks();
+            await openChangelogModal();
+          } catch (error) {
+            alert('Failed to restore title: ' + error.message);
+          }
+        } else {
+          alert('Could not find the updated item. It may have been deleted.');
+        }
+      } else {
+        alert('Not enough information to restore this update operation.');
+      }
+    }
+  } catch (error) {
+    console.error('Failed to restore changelog entry:', error);
+    alert('Failed to restore the operation: ' + error.message);
+  }
 }
 
 // Helper to get relative time
@@ -6040,14 +6244,15 @@ async function bulkMoveItems() {
       const item = findBookmarkById(itemId, bookmarkTree);
       if (!item) continue;
 
-      const oldParent = await getFolderPath(item.parentId);
+      const oldParent = findParentById(bookmarkTree, itemId);
+      const fromFolder = oldParent ? await getFolderPath(oldParent.id) : 'Root';
 
       await bookmarkManager.move(itemId, { parentId: destinationFolder.id });
 
       // Add to changelog
       const itemType = item.url ? 'bookmark' : 'folder';
-      const newParent = await getFolderPath(destinationFolder.id);
-      await addChangelogEntry('move', itemType, item.title, item.url, { oldParent, newParent });
+      const toFolder = await getFolderPath(destinationFolder.id);
+      await addChangelogEntry('move', itemType, item.title, item.url, { fromFolder, toFolder });
     }
 
     selectedItems.clear();

@@ -5,10 +5,23 @@
  */
 
 /**
+ * Check if Web Crypto API is available
+ */
+export function isCryptoAvailable() {
+  return typeof crypto !== 'undefined' &&
+         typeof crypto.subtle !== 'undefined' &&
+         window.isSecureContext;
+}
+
+/**
  * Get derived encryption key from browser info
  * Uses origin, userAgent, and language for key derivation
  */
 export async function getDerivedKey() {
+  if (!isCryptoAvailable()) {
+    throw new Error('Web Crypto API not available. HTTPS required for encryption.');
+  }
+
   // Use origin and browser info for key derivation
   const appId = window.location.origin;
   const browserInfo = `${navigator.userAgent}-${navigator.language}-${appId}`;

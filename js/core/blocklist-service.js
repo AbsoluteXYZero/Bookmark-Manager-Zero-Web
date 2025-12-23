@@ -18,7 +18,7 @@ class BlocklistService {
     this.BLOCKLIST_SOURCES = [
       {
         name: 'URLhaus (Active)',
-        url: 'https://corsproxy.io/?' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+        url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
         format: 'urlhaus_text'
       },
       {
@@ -211,8 +211,20 @@ class BlocklistService {
         return { domains: [], count: 0 };
       }
 
-      const text = await response.text();
+      let text = await response.text();
       console.log(`[Blocklist] ${source.name}: ${text.length} bytes downloaded`);
+
+      // Check if response is JSON-wrapped (some proxies do this)
+      try {
+        const jsonData = JSON.parse(text);
+        if (jsonData.contents) {
+          text = jsonData.contents;
+        } else if (jsonData.data) {
+          text = jsonData.data;
+        }
+      } catch (e) {
+        // Not JSON, use text as-is
+      }
 
       const lines = text.split('\n');
       const domains = [];

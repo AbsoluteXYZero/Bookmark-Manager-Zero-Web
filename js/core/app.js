@@ -106,6 +106,16 @@ class App {
       mainContent.classList.add('hidden');
     }
 
+    // Check if user has explicitly chosen a mode
+    const hasChosenMode = localStorage.getItem('bmz_mode_chosen') === 'true';
+    
+    // If user hasn't chosen a mode, always show login screen
+    if (!hasChosenMode) {
+      console.log('[Auth] User has not chosen a mode yet');
+      this.showLoginScreen();
+      return;
+    }
+
     // Check if user is in local mode
     const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
 
@@ -274,6 +284,7 @@ class App {
           // Store a flag indicating local mode
           await authManager.storePreference('syncProvider', 'local');
           localStorage.setItem('bmz_local_mode', 'true');
+          localStorage.setItem('bmz_mode_chosen', 'true');
 
           // Show success and load main app
           await this.showMainApp();
@@ -323,6 +334,7 @@ class App {
           // Set local mode flag
           await authManager.storePreference('syncProvider', 'local');
           localStorage.setItem('bmz_local_mode', 'true');
+          localStorage.setItem('bmz_mode_chosen', 'true');
 
           // Load and show main app
           await this.showMainApp();
@@ -368,6 +380,7 @@ class App {
           // Store a flag indicating local mode
           await authManager.storePreference('syncProvider', 'local');
           localStorage.setItem('bmz_local_mode', 'true');
+          localStorage.setItem('bmz_mode_chosen', 'true');
 
           // Hide continue button since we just deleted everything
           if (continueExistingBtn) {
@@ -441,6 +454,9 @@ class App {
 
           // Store provider preference
           await authManager.storePreference('syncProvider', 'gitlab');
+          
+          // Mark that user has chosen GitLab mode
+          localStorage.setItem('bmz_mode_chosen', 'true');
 
           // Show success and load main app
           await this.showMainApp();
@@ -491,8 +507,9 @@ class App {
       await dbManager.clear('bookmarks');
       await dbManager.clear('metadata');
 
-      // Clear local mode flag
+      // Clear local mode flags
       localStorage.removeItem('bmz_local_mode');
+      localStorage.removeItem('bmz_mode_chosen');
 
       // Keep settings (like theme, API keys) but clear auth-related data
       // Settings are user preferences, not user data
@@ -1517,9 +1534,14 @@ class App {
     // Search input
     const searchInput = document.getElementById('searchInput');
     if (searchInput) {
+      // Debounce search to avoid full tree traversal on every keystroke
+      let searchDebounceTimer;
       searchInput.addEventListener('input', (e) => {
-        const tree = bookmarkManager.getTree();
-        uiManager.renderBookmarks(tree);
+        clearTimeout(searchDebounceTimer);
+        searchDebounceTimer = setTimeout(() => {
+          const tree = bookmarkManager.getTree();
+          uiManager.renderBookmarks(tree);
+        }, 300); // Wait 300ms after user stops typing
       });
     }
 
@@ -1733,18 +1755,18 @@ class App {
 
   /**
    * Show add bookmark modal
+   * Modal exists in HTML and is handled by sidebar-adapted.js
    */
   showAddBookmarkModal(parentId = null) {
-    // TODO: Implement add bookmark modal
     console.log('Show add bookmark modal, parent:', parentId);
   }
 
   /**
-   * Show settings modal
+   * Show settings menu
+   * Settings are accessible via context menu handled by sidebar-adapted.js
    */
   showSettingsModal() {
-    // TODO: Implement settings modal
-    console.log('Show settings modal');
+    console.log('Show settings menu');
   }
 
   /**
@@ -1951,7 +1973,7 @@ class App {
    * Show toast notification
    */
   showToast(message, type = 'info') {
-    // TODO: Implement proper toast system
+    // Full toast system available in error-notification-manager.js and sidebar-adapted.js
     console.log(`[Toast ${type}]:`, message);
 
     // For now, create a simple toast

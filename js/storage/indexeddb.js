@@ -10,23 +10,39 @@ class IndexedDBManager {
   constructor() {
     this.db = null;
     this.initPromise = null;
+    this.available = typeof indexedDB !== 'undefined';
+  }
+
+  /**
+   * Check if IndexedDB is available
+   */
+  isAvailable() {
+    return this.available;
   }
 
   /**
    * Initialize IndexedDB with all required object stores
    */
   async init() {
+    // Check if IndexedDB is available (fails in private browsing on some browsers)
+    if (!this.available) {
+      console.warn('[IndexedDB] Not available - may be in private browsing mode');
+      throw new Error('IndexedDB not available');
+    }
+
     if (this.initPromise) {
       return this.initPromise;
     }
 
     this.initPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME, DB_VERSION);
+      try {
+        const request = indexedDB.open(DB_NAME, DB_VERSION);
 
-      request.onerror = () => {
-        console.error('IndexedDB failed to open:', request.error);
-        reject(request.error);
-      };
+        request.onerror = () => {
+          console.error('IndexedDB failed to open:', request.error);
+          this.available = false;
+          reject(request.error);
+        };
 
       request.onsuccess = () => {
         this.db = request.result;
@@ -62,13 +78,47 @@ class IndexedDBManager {
           cacheStore.createIndex('type', 'type', { unique: false });
           console.log('Created cache store');
         } else if (event.oldVersion < 2) {
-          // Migrate from version 1 to version 2: recreate cache store with new keyPath
-          db.deleteObjectStore('cache');
-          const cacheStore = db.createObjectStore('cache', { keyPath: 'cacheKey' });
-          cacheStore.createIndex('url', 'url', { unique: false });
-          cacheStore.createIndex('timestamp', 'timestamp', { unique: false });
-          cacheStore.createIndex('type', 'type', { unique: false });
-          console.log('Migrated cache store to use composite key');
+          // Migrate from version 1 to version 2: preserve cache data while changing keyPath
+          const transaction = event.target.transaction;
+          const oldCacheStore = transaction.objectStore('cache');
+
+          // Read all existing cache entries
+          const oldCacheData = [];
+          const cursorRequest = oldCacheStore.openCursor();
+
+          cursorRequest.onsuccess = (e) => {
+            const cursor = e.target.result;
+            if (cursor) {
+              oldCacheData.push(cursor.value);
+              cursor.continue();
+            } else {
+              // All data read, now recreate store
+              db.deleteObjectStore('cache');
+              const cacheStore = db.createObjectStore('cache', { keyPath: 'cacheKey' });
+              cacheStore.createIndex('url', 'url', { unique: false });
+              cacheStore.createIndex('timestamp', 'timestamp', { unique: false });
+              cacheStore.createIndex('type', 'type', { unique: false });
+
+              // Migrate old data to new structure
+              oldCacheData.forEach(item => {
+                // Add cacheKey if it doesn't exist (url + type)
+                if (!item.cacheKey && item.url && item.type) {
+                  item.cacheKey = `${item.url}:${item.type}`;
+                }
+                // Only add items that have the required cacheKey
+                if (item.cacheKey) {
+                  try {
+                    cacheStore.add(item);
+                  } catch (err) {
+                    // Skip duplicate entries
+                    console.warn('[IndexedDB] Skipped duplicate cache entry:', err);
+                  }
+                }
+              });
+
+              console.log(`Migrated cache store with ${oldCacheData.length} entries preserved`);
+            }
+          };
         }
 
         // 4. Settings store - Theme, preferences, encrypted API keys
@@ -84,6 +134,11 @@ class IndexedDBManager {
           console.log('Created blocklists store');
         }
       };
+      } catch (error) {
+        console.error('[IndexedDB] Failed to initialize:', error);
+        this.available = false;
+        reject(error);
+      }
     });
 
     return this.initPromise;

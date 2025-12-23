@@ -540,206 +540,155 @@ async function checkYandexSafeBrowsing(url) {
 }
 
 /**
+ * Check URL using VirusTotal web scraping
+ * No API key required - fetches the public web page
+ * Always runs on every bookmark
+ * WARNING: For personal use only. May violate VirusTotal ToS if distributed.
+ */
+async function checkVirusTotalScraping(url) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname.toLowerCase();
+
+    console.log(`[VirusTotal Scraping] Checking ${hostname}`);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+
+    const vtUrl = `https://www.virustotal.com/gui/search/${encodeURIComponent(hostname)}`;
+
+    // Website version needs CORS proxy (unlike browser extensions)
+    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(vtUrl)}`;
+
+    const response = await fetch(proxiedUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
+      }
+    });
+
+    clearTimeout(timeout);
+
+    if (!response.ok) {
+      console.log(`[VirusTotal Scraping] Failed to fetch VT for ${hostname}: ${response.status}`);
+      return 'unknown';
+    }
+
+    const html = await response.text();
+
+    // Look for detection indicators in the HTML
+    const detectionPatterns = [
+      /"malicious":\s*(\d+)/i,
+      /"suspicious":\s*(\d+)/i,
+      /"harmless":\s*(\d+)/i,
+      /"undetected":\s*(\d+)/i,
+      /positives['":\s]+(\d+)/i,
+      /detection.*ratio['":\s]+(\d+)/i
+    ];
+
+    let malicious = 0;
+    let suspicious = 0;
+
+    for (const pattern of detectionPatterns) {
+      const match = html.match(pattern);
+      if (match) {
+        const count = parseInt(match[1]);
+        if (pattern.source.includes('malicious')) malicious = count;
+        if (pattern.source.includes('suspicious')) suspicious = count;
+        if (pattern.source.includes('positives')) malicious = Math.max(malicious, count);
+      }
+    }
+
+    console.log(`[VirusTotal Scraping] ${hostname} - Malicious: ${malicious}, Suspicious: ${suspicious}`);
+
+    // Determine safety based on detections
+    if (malicious > 3) {
+      return 'unsafe'; // Multiple vendors flagged as malicious
+    } else if (malicious > 0 || suspicious > 5) {
+      return 'warning'; // Some detections or many suspicious
+    } else {
+      return 'safe'; // Clean or minimal detections
+    }
+
+  } catch (error) {
+    console.log(`[VirusTotal Scraping] Error:`, error.message);
+    return 'unknown';
+  }
+}
+
+/**
  * Check URL using VirusTotal API
+ * Requires API key - get free key at https://www.virustotal.com/gui/my-apikey
+ * Free tier: 500 requests per day, 4 requests per minute
  */
 async function checkVirusTotal(url) {
   try {
     const apiKey = apiKeys.virusTotalApiKey;
 
     if (!apiKey || apiKey.trim() === '') {
-      console.log(`[VirusTotal] No API key configured, skipping check`);
+      console.log(`[VirusTotal API] No API key configured, skipping`);
       return 'unknown';
     }
 
-    // Check if we've hit rate limit during this scan session
     if (virusTotalRateLimited) {
-      console.log(`[VirusTotal] Rate limited, skipping check for ${url}`);
+      console.log(`[VirusTotal API] Rate limited, skipping check for ${url}`);
       return 'unknown';
     }
 
-    console.log(`[VirusTotal] Starting check for ${url}`);
+    console.log(`[VirusTotal API] Starting check for ${url}`);
 
-    // First, try to get existing cached report (faster, doesn't create new scan)
     const urlId = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 
-    try {
-      const reportController = new AbortController();
-      const reportTimeout = setTimeout(() => reportController.abort(), 8000);
+    const reportController = new AbortController();
+    const reportTimeout = setTimeout(() => reportController.abort(), 15000);
 
-      const reportResponse = await fetch(
-        `https://www.virustotal.com/api/v3/urls/${urlId}`,
-        {
-          method: 'GET',
-          signal: reportController.signal,
-          headers: {
-            'x-apikey': apiKey
-          }
-        }
-      );
-
-      clearTimeout(reportTimeout);
-
-      if (reportResponse.ok) {
-        const reportData = await reportResponse.json();
-        const stats = reportData.data?.attributes?.last_analysis_stats;
-
-        if (stats) {
-          console.log(`[VirusTotal] Using cached report - Stats:`, stats);
-
-          const malicious = stats.malicious || 0;
-          const suspicious = stats.suspicious || 0;
-
-          console.log(`[VirusTotal] Analysis complete - Malicious: ${malicious}, Suspicious: ${suspicious}`);
-
-          if (malicious >= 2) {
-            console.log(`[VirusTotal] Result: UNSAFE`);
-            return 'unsafe';
-          }
-
-          if (malicious >= 1 || suspicious >= 2) {
-            console.log(`[VirusTotal] Result: WARNING`);
-            return 'warning';
-          }
-
-          console.log(`[VirusTotal] Result: SAFE`);
-          return 'safe';
-        } else {
-          console.log(`[VirusTotal] Cached report found but no stats available`);
-        }
-      } else {
-        console.log(`[VirusTotal] Cached report GET failed with status: ${reportResponse.status}`);
-        if (reportResponse.status === 429) {
-          virusTotalRateLimited = true;
-          console.log(`[VirusTotal] Rate limit hit, will skip remaining checks`);
-        }
-      }
-    } catch (reportError) {
-      console.log(`[VirusTotal] Error fetching cached report:`, reportError.message);
-    }
-
-    console.log(`[VirusTotal] No cached report available, submitting new scan...`);
-
-    // Check rate limit again before submitting new scan
-    if (virusTotalRateLimited) {
-      console.log(`[VirusTotal] Rate limited, skipping new scan submission for ${url}`);
-      return 'unknown';
-    }
-
-    // No cached report found, submit new scan
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 10000);
-
-    const response = await fetch(
-      `https://www.virustotal.com/api/v3/urls`,
+    const reportResponse = await fetch(
+      `https://www.virustotal.com/api/v3/urls/${urlId}`,
       {
-        method: 'POST',
-        signal: controller.signal,
-        headers: {
-          'x-apikey': apiKey,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: `url=${encodeURIComponent(url)}`
+        method: 'GET',
+        signal: reportController.signal,
+        headers: { 'x-apikey': apiKey }
       }
     );
 
-    clearTimeout(timeout);
+    clearTimeout(reportTimeout);
 
-    if (!response.ok) {
-      console.error(`[VirusTotal] API error: ${response.status}`);
-      if (response.status === 429) {
+    if (!reportResponse.ok) {
+      if (reportResponse.status === 429) {
         virusTotalRateLimited = true;
-        console.log(`[VirusTotal] Rate limit hit, will skip remaining checks`);
+        console.log(`[VirusTotal API] Rate limit hit, will skip remaining checks`);
       }
       return 'unknown';
     }
 
-    console.log(`[VirusTotal] Submission successful, waiting for analysis...`);
-
-    const data = await response.json();
-    const analysisId = data.data?.id;
-
-    if (!analysisId) {
-      console.error(`[VirusTotal] No analysis ID returned`);
-      return 'unknown';
-    }
-
-    // Poll for analysis results with retries
-    let analysisData;
-    let attempts = 0;
-    const maxAttempts = 15; // Increased from 5 to 15 (30 seconds total)
-
-    while (attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      attempts++;
-
-      const analysisController = new AbortController();
-      const analysisTimeout = setTimeout(() => analysisController.abort(), 10000);
-
-      const analysisResponse = await fetch(
-        `https://www.virustotal.com/api/v3/analyses/${analysisId}`,
-        {
-          method: 'GET',
-          signal: analysisController.signal,
-          headers: {
-            'x-apikey': apiKey
-          }
-        }
-      );
-
-      clearTimeout(analysisTimeout);
-
-      if (!analysisResponse.ok) {
-        console.error(`[VirusTotal] Analysis fetch error: ${analysisResponse.status}`);
-        if (analysisResponse.status === 429) {
-          virusTotalRateLimited = true;
-          console.log(`[VirusTotal] Rate limit hit during analysis, will skip remaining checks`);
-        }
-        return 'unknown';
-      }
-
-      analysisData = await analysisResponse.json();
-      const status = analysisData.data?.attributes?.status;
-
-      console.log(`[VirusTotal] Analysis status (attempt ${attempts}): ${status}`);
-
-      if (status === 'completed') {
-        break;
-      }
-
-      if (attempts === maxAttempts) {
-        console.warn(`[VirusTotal] Analysis still not complete after ${maxAttempts} attempts, using partial results`);
-      }
-    }
-
-    const stats = analysisData.data?.attributes?.stats;
-
-    console.log(`[VirusTotal] Full stats:`, stats);
+    const reportData = await reportResponse.json();
+    const stats = reportData.data?.attributes?.last_analysis_stats;
 
     if (!stats) {
-      console.error(`[VirusTotal] No stats in analysis results`);
+      console.log(`[VirusTotal API] No stats available`);
       return 'unknown';
     }
 
     const malicious = stats.malicious || 0;
     const suspicious = stats.suspicious || 0;
 
-    console.log(`[VirusTotal] Analysis complete - Malicious: ${malicious}, Suspicious: ${suspicious}`);
+    console.log(`[VirusTotal API] Analysis - Malicious: ${malicious}, Suspicious: ${suspicious}`);
 
     if (malicious >= 2) {
-      console.log(`[VirusTotal] Result: UNSAFE`);
+      console.log(`[VirusTotal API] Result: UNSAFE`);
       return 'unsafe';
     }
 
     if (malicious >= 1 || suspicious >= 2) {
-      console.log(`[VirusTotal] Result: WARNING`);
+      console.log(`[VirusTotal API] Result: WARNING`);
       return 'warning';
     }
 
-    console.log(`[VirusTotal] Result: SAFE`);
+    console.log(`[VirusTotal API] Result: SAFE`);
     return 'safe';
 
   } catch (error) {
-    console.error(`[VirusTotal] Error:`, error.message);
+    console.error(`[VirusTotal API] Error:`, error.message);
     return 'unknown';
   }
 }
@@ -863,16 +812,31 @@ async function checkSafetyStatus(url) {
       }
     }
 
-    // Check VirusTotal
+    // Check VirusTotal Scraping (always runs, no API key needed)
+    console.log(`[Safety Check] Checking VirusTotal scraping...`);
+    const vtScrapingResult = await checkVirusTotalScraping(url);
+    if (vtScrapingResult === 'unsafe') {
+      finalStatus = 'unsafe';
+      allSources.push('VirusTotal');
+    } else if (vtScrapingResult === 'warning' && finalStatus !== 'unsafe') {
+      finalStatus = 'warning';
+      allSources.push('VirusTotal');
+    }
+
+    // Check VirusTotal API (optional, requires API key)
     if (apiKeys.virusTotalApiKey) {
-      console.log(`[Safety Check] Checking VirusTotal...`);
-      const vtResult = await checkVirusTotal(url);
-      if (vtResult === 'unsafe') {
+      console.log(`[Safety Check] Checking VirusTotal API...`);
+      const vtApiResult = await checkVirusTotal(url);
+      if (vtApiResult === 'unsafe') {
         finalStatus = 'unsafe';
-        allSources.push('VirusTotal');
-      } else if (vtResult === 'warning' && finalStatus !== 'unsafe') {
+        if (!allSources.includes('VirusTotal')) {
+          allSources.push('VirusTotal');
+        }
+      } else if (vtApiResult === 'warning' && finalStatus !== 'unsafe') {
         finalStatus = 'warning';
-        allSources.push('VirusTotal');
+        if (!allSources.includes('VirusTotal')) {
+          allSources.push('VirusTotal');
+        }
       }
     }
 
