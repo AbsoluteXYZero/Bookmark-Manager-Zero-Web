@@ -819,6 +819,25 @@ class App {
         } else if (userChoice === 'replace') {
           // Use snippet as-is (replace local) - continue with normal flow
           console.log('[UseRemoteStorage] User chose to replace local with snippet');
+
+          // Show backup dialog before replacing
+          const shouldBackup = await this.showBackupBeforeReplaceDialog();
+
+          if (shouldBackup === 'cancel') {
+            // User cancelled, exit without using snippet
+            console.log('[UseRemoteStorage] User cancelled replace operation');
+            return;
+          }
+
+          if (shouldBackup === 'backup') {
+            // User wants to backup first
+            console.log('[UseRemoteStorage] Exporting backup before replace...');
+            await window.exportBookmarks();
+          }
+
+          // Clear all local bookmarks to avoid diff conflicts
+          console.log('[UseRemoteStorage] Clearing local bookmarks for clean replace...');
+          await bookmarkManager.clear();
         }
       }
 
@@ -976,6 +995,67 @@ class App {
       console.error('[hasLocalBookmarks] Error:', error);
       return false;
     }
+  }
+
+  /**
+   * Show backup dialog before replacing bookmarks
+   */
+  async showBackupBeforeReplaceDialog() {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 10003;
+      `;
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = `
+        background: var(--md-sys-color-surface, #1e1e1e);
+        color: var(--md-sys-color-on-surface, #e0e0e0);
+        border-radius: 12px;
+        padding: 24px;
+        max-width: 500px;
+        width: 90%;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+      `;
+
+      dialog.innerHTML = `
+        <h2>💾 Backup Your Bookmarks?</h2>
+        <p>You're about to replace your local bookmarks with the snippet data. Would you like to download a backup of your current bookmarks first?</p>
+        <p>This creates a safety backup that you can restore later if needed.</p>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <button id="backupAndReplace" style="padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-primary, #4285f4); color: var(--md-sys-color-on-primary, #fff); cursor: pointer; font-size: 14px;">💾 Download Backup & Replace</button>
+          <button id="skipBackup" style="padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-surface-variant, #2a2a2a); color: var(--md-sys-color-on-surface-variant, #aaa); cursor: pointer; font-size: 14px;">Skip Backup & Replace</button>
+          <button id="cancelReplace" style="padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-surface-variant, #2a2a2a); color: var(--md-sys-color-on-surface-variant, #aaa); cursor: pointer; font-size: 14px;">Cancel</button>
+        </div>
+      `;
+
+      modal.appendChild(dialog);
+      document.body.appendChild(modal);
+
+      dialog.querySelector('#backupAndReplace').addEventListener('click', () => {
+        modal.remove();
+        resolve('backup');
+      });
+
+      dialog.querySelector('#skipBackup').addEventListener('click', () => {
+        modal.remove();
+        resolve('skip');
+      });
+
+      dialog.querySelector('#cancelReplace').addEventListener('click', () => {
+        modal.remove();
+        resolve('cancel');
+      });
+    });
   }
 
   /**

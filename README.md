@@ -202,6 +202,8 @@ If you're already using Local Mode and want to add GitLab sync:
    - **Create New Snippet** - Upload local bookmarks to new snippet
    - **Merge with Existing Snippet** - Combine local and remote bookmarks
    - **Replace Local with Snippet** - Discard local, use remote bookmarks
+     - Safety feature: Option to download backup before replacing
+     - Choose "Download Backup & Replace" (recommended) or "Skip Backup & Replace"
 
 **Token Tips**
 - Any PAT with `api` scope works as long as your GitLab account is in good standing

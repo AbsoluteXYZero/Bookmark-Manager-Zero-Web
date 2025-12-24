@@ -696,35 +696,58 @@ class SyncManager {
   /**
    * Start auto-sync (poll every 5 minutes when online)
    */
-  startAutoSync() {
+  async startAutoSync() {
     if (this.syncInterval) {
       return; // Already running
     }
 
     // Use 5 minutes (300000ms) to avoid rate limiting and account flagging
     const syncIntervalMs = 300000; // 5 minutes
-    console.log('Starting auto-sync (every 5 minutes)...');
+    console.log('Starting auto-sync (immediate + 5-minute interval)...');
 
-    this.syncInterval = setInterval(async () => {
-      if (navigator.onLine && !this.isSyncing) {
-        // Check if we have a remote ID configured before trying to sync
-        const remoteId = this.getRemoteId();
-        if (!remoteId) {
-          console.log('[AutoSync] Skipping - no remote storage configured');
-          return;
-        }
-
+    // Perform initial sync immediately
+    if (navigator.onLine && !this.isSyncing) {
+      const remoteId = this.getRemoteId();
+      if (remoteId) {
         try {
+          console.log('[AutoSync] Running initial sync...');
           // First, push any local changes if needed
-          console.log(`[AutoSync] hasUnsyncedChanges: ${this.hasUnsyncedChanges}`);
           if (this.hasUnsyncedChanges) {
-            console.log('[AutoSync] Unsynced changes detected, pushing to remote...');
+            console.log('[AutoSync] Initial - Unsynced changes detected, pushing to remote...');
             await this.syncToRemote();
           }
           // Then, pull remote changes
           await this.syncFromRemote();
         } catch (error) {
-          console.error('Auto-sync failed:', error);
+          console.error('[AutoSync] Initial sync failed:', error);
+          this.emitEvent('syncError', 'Initial auto-sync failed: ' + error.message);
+        }
+      } else {
+        console.log('[AutoSync] Skipping initial sync - no remote storage configured');
+      }
+    }
+
+    // Then start the interval for subsequent syncs
+    this.syncInterval = setInterval(async () => {
+      if (navigator.onLine && !this.isSyncing) {
+        // Check if we have a remote ID configured before trying to sync
+        const remoteId = this.getRemoteId();
+        if (!remoteId) {
+          console.log('[AutoSync] Skipping scheduled sync - no remote storage configured');
+          return;
+        }
+
+        try {
+          // First, push any local changes if needed
+          console.log(`[AutoSync] Scheduled - hasUnsyncedChanges: ${this.hasUnsyncedChanges}`);
+          if (this.hasUnsyncedChanges) {
+            console.log('[AutoSync] Scheduled - Unsynced changes detected, pushing to remote...');
+            await this.syncToRemote();
+          }
+          // Then, pull remote changes
+          await this.syncFromRemote();
+        } catch (error) {
+          console.error('[AutoSync] Scheduled sync failed:', error);
           this.emitEvent('syncError', 'Auto-sync failed: ' + error.message);
         }
       }
