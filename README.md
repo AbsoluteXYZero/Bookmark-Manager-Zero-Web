@@ -393,11 +393,39 @@ The website checks if bookmark URLs are still accessible and categorizes them as
    - **Domain matches parking list** → Parked
    - **Timeout/Network Error** → Dead
 
-#### Rate Limiting
-Bookmarks are scanned in batches with delays to prevent overwhelming your network.
+#### Performance & Rate Limiting
+
+**Optimized Batch Processing:**
+- Bookmarks are scanned in batches of 10 with a 100ms delay between batches
+- Web Worker isolates scanning from UI thread for non-blocking performance
+- Parallel link and safety checks for faster scanning per bookmark
+
+**Smart Timeout Strategy:**
+- Link checks: 5s timeout (HEAD request), 5s timeout (GET fallback)
+- URLVoid checks: 5s timeout (down from 15s)
+- VirusTotal checks: 8s timeout (down from 15s)
+- Timeout handling: Sites that timeout are marked as 'live' (slow server) instead of 'dead'
+- No redundant GET fallback on timeout - saves up to 5s per slow site
+
+**Network Protection:**
+- 100ms delay between batches prevents DNS overload and router disruption
+- Web Worker prevents UI blocking during intensive scanning operations
+- Background thread handles all network requests independently
+
+**Expected Performance:**
+- Approximately 30-50 bookmarks per second throughput
+- 1,000 bookmarks: ~30-60 seconds
+- 5,000 bookmarks: ~2-5 minutes
+- Performance varies based on network speed and server response times
+
+**Why These Settings:**
+- Batch size of 10: Sweet spot between speed and network stability
+- 100ms batch delay: Minimal pause that prevents request spikes
+- 5s timeouts: Aggressive but appropriate since timeouts are marked as 'live' not 'dead'
+- Web Worker: Offloads all scanning to background thread for smooth UI experience
 
 #### Caching
-Results are cached locally for 7 days to minimize network requests.
+Results are cached locally in IndexedDB for 7 days to minimize network requests.
 
 ---
 

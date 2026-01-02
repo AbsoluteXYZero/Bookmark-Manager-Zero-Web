@@ -659,6 +659,10 @@ async function init() {
 
 // Load and apply auto-clear cache setting
 async function loadAutoClearSetting() {
+  if (isPreviewMode) {
+    return;
+  }
+
   try {
     const result = await safeStorage.get('autoClearCacheDays');
     const autoClearDays = result.autoClearCacheDays || '7';
@@ -1333,7 +1337,222 @@ function updateTotalBookmarkCount() {
   totalCount.textContent = `${count} bookmark${count !== 1 ? 's' : ''}`;
 }
 
-
+// Mock bookmark data for preview mode
+function getMockBookmarks() {
+  return [
+    {
+      id: '1',
+      title: 'Bookmarks Toolbar',
+      type: 'folder',
+      children: [
+        {
+          id: '2',
+          title: 'GitHub',
+          url: 'https://github.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '3',
+          title: 'Stack Overflow',
+          url: 'https://stackoverflow.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        }
+      ]
+    },
+    {
+      id: '4',
+      title: 'Development',
+      type: 'folder',
+      children: [
+        {
+          id: '5',
+          title: 'MDN Web Docs',
+          url: 'https://developer.mozilla.org',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '6',
+          title: 'CSS Tricks',
+          url: 'https://css-tricks.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '7',
+          title: 'Can I Use',
+          url: 'https://caniuse.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '8',
+          title: 'JavaScript Info',
+          url: 'https://javascript.info',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        }
+      ]
+    },
+    {
+      id: '9',
+      title: 'News & Media',
+      type: 'folder',
+      children: [
+        {
+          id: '10',
+          title: 'Hacker News',
+          url: 'https://news.ycombinator.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '11',
+          title: 'The Verge',
+          url: 'https://theverge.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '20',
+          title: 'GitHub (Duplicate)',
+          url: 'https://github.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '21',
+          title: 'Google Search',
+          url: 'https://www.google.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        }
+      ]
+    },
+    {
+      id: '12',
+      title: 'Design Resources',
+      type: 'folder',
+      children: [
+        {
+          id: '13',
+          title: 'Dribbble',
+          url: 'https://dribbble.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '14',
+          title: 'Figma',
+          url: 'https://figma.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '15',
+          title: 'Material Design',
+          url: 'https://material.io',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '22',
+          title: 'MDN Docs (Duplicate)',
+          url: 'https://developer.mozilla.org',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '23',
+          title: 'Google',
+          url: 'https://www.google.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        }
+      ]
+    },
+    {
+      id: '24',
+      title: 'Favorites',
+      type: 'folder',
+      children: [
+        {
+          id: '25',
+          title: 'GitHub - My Favorite',
+          url: 'https://github.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '26',
+          title: 'Google Homepage',
+          url: 'https://www.google.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        },
+        {
+          id: '27',
+          title: 'Stack Overflow Q&A',
+          url: 'https://stackoverflow.com',
+          type: 'bookmark',
+          linkStatus: 'live',
+          safetyStatus: 'safe'
+        }
+      ]
+    },
+    {
+      id: '16',
+      title: 'Suspicious Site Example',
+      url: 'https://suspicious-example.com',
+      type: 'bookmark',
+      linkStatus: 'live',
+      safetyStatus: 'warning'
+    },
+    {
+      id: '17',
+      title: 'Dead Link Example',
+      url: 'https://dead-link-example-404.com',
+      type: 'bookmark',
+      linkStatus: 'dead',
+      safetyStatus: 'unknown'
+    },
+    {
+      id: '18',
+      title: 'Parked Domain Example',
+      url: 'https://parked-domain-example.com',
+      type: 'bookmark',
+      linkStatus: 'parked',
+      safetyStatus: 'unknown'
+    },
+    {
+      id: '19',
+      title: 'Malicious Site Example',
+      url: 'https://dangerous-example.com',
+      type: 'bookmark',
+      linkStatus: 'live',
+      safetyStatus: 'unsafe'
+    }
+  ];
+}
 
 /**
  * Open a URL using the most appropriate method based on the URL scheme.
@@ -2177,6 +2396,11 @@ function createBookmarkElement(bookmark) {
     }
     // Open in active tab
     console.log('[Bookmark Click] Opening URL:', bookmark.url);
+    if (isPreviewMode) {
+      openBookmarkUrl(bookmark.url, true);
+    } else {
+      openBookmarkUrl(bookmark.url, false);
+    }
   });
 
   // Add menu toggle handler
@@ -2662,6 +2886,26 @@ async function handleDropToRoot(draggedId) {
     return;
   }
 
+  if (isPreviewMode) {
+    console.log(`Preview mode: Moving ${draggedId} to end of root`);
+
+    // Get dragged item's current position
+    const draggedParent = findParentById(bookmarkTree, draggedId);
+
+    // Remove item from its current location
+    if (draggedParent) {
+      draggedParent.children = draggedParent.children.filter(child => child.id !== draggedId);
+    } else {
+      bookmarkTree = bookmarkTree.filter(item => item.id !== draggedId);
+    }
+
+    // Add to end of root
+    bookmarkTree.push(draggedItem);
+
+    // Re-render to show the changes
+    renderBookmarks();
+    return;
+  }
 
   try {
     // Get old parent folder path before moving
@@ -2693,6 +2937,43 @@ async function handleDropToPosition(draggedId, targetParentId, targetIndex) {
     return;
   }
 
+  if (isPreviewMode) {
+    console.log(`Preview mode: Moving ${draggedId} to index ${targetIndex} in parent ${targetParentId}`);
+
+    // Get dragged item's current position
+    const draggedParent = findParentById(bookmarkTree, draggedId);
+    let draggedIndex = -1;
+
+    // Remove item from its current location
+    if (draggedParent) {
+      draggedIndex = draggedParent.children.findIndex(child => child.id === draggedId);
+      draggedParent.children = draggedParent.children.filter(child => child.id !== draggedId);
+    } else {
+      draggedIndex = bookmarkTree.findIndex(item => item.id === draggedId);
+      bookmarkTree = bookmarkTree.filter(item => item.id !== draggedId);
+    }
+
+    // Adjust target index if moving within same parent and from earlier position
+    let adjustedIndex = targetIndex;
+    const isSameParent = (draggedParent?.id || 'root________') === targetParentId;
+    if (isSameParent && draggedIndex < targetIndex) {
+      adjustedIndex = targetIndex - 1;
+    }
+
+    // Insert item at the new location
+    if (targetParentId === 'root________') {
+      bookmarkTree.splice(adjustedIndex, 0, draggedItem);
+    } else {
+      const targetParent = findBookmarkById(bookmarkTree, targetParentId);
+      if (targetParent && targetParent.children) {
+        targetParent.children.splice(adjustedIndex, 0, draggedItem);
+      }
+    }
+
+    // Re-render to show the changes
+    renderBookmarks();
+    return;
+  }
 
   try {
     // Get old parent folder path before moving
@@ -2774,6 +3055,52 @@ async function handleDrop(draggedId, targetId, targetElement, dropState) {
 
     const newIndex = targetIndex;
 
+    if (isPreviewMode) {
+      // In preview mode, actually move the item in the mock tree
+      const dropType = dropInto ? 'into' : (dropBefore ? 'before' : 'after');
+      console.log(`Preview mode: Moving ${draggedId} ${dropType} ${targetId}`);
+
+      // Get dragged item's current position
+      const draggedParent = findParentById(bookmarkTree, draggedId);
+      const draggedParentId = draggedParent ? draggedParent.id : undefined;
+
+      let draggedIndex;
+      if (draggedParent) {
+        draggedIndex = draggedParent.children.findIndex(child => child.id === draggedId);
+      } else {
+        draggedIndex = bookmarkTree.findIndex(item => item.id === draggedId);
+      }
+
+      // Check if moving within same parent
+      const isSameParent = draggedParentId === targetParentId;
+
+      // Adjust newIndex if moving within same parent and moving forward
+      let adjustedIndex = newIndex;
+      if (isSameParent && !dropInto && newIndex > draggedIndex) {
+        adjustedIndex = newIndex - 1;
+        console.log(`Preview mode: Adjusted index from ${newIndex} to ${adjustedIndex} (same parent move)`);
+      }
+
+      // Remove item from its current location
+      if (draggedParent) {
+        draggedParent.children = draggedParent.children.filter(child => child.id !== draggedId);
+      } else {
+        bookmarkTree = bookmarkTree.filter(item => item.id !== draggedId);
+      }
+
+      // Insert item at new location
+      const newParent = targetParentId ? findBookmarkById(bookmarkTree, targetParentId) : null;
+      if (newParent) {
+        if (!newParent.children) newParent.children = [];
+        newParent.children.splice(adjustedIndex, 0, draggedItem);
+      } else {
+        bookmarkTree.splice(adjustedIndex, 0, draggedItem);
+      }
+
+      // Re-render to show the changes
+      renderBookmarks();
+      return;
+    }
 
     // Move the bookmark using Firefox API
     // Get old parent folder path before moving
@@ -3337,6 +3664,23 @@ async function rescanFolder(folderId, folderTitle) {
 
 // SAFETY: Count total items in a folder (recursive)
 async function countFolderItems(folderId) {
+  if (isPreviewMode) {
+    // Count items in mock data
+    const folder = findFolderById(folderId, bookmarkTree);
+    if (!folder || !folder.children) return 0;
+
+    let count = 0;
+    const countRecursive = (items) => {
+      for (const item of items) {
+        count++;
+        if (item.children) {
+          countRecursive(item.children);
+        }
+      }
+    };
+    countRecursive(folder.children);
+    return count;
+  }
 
   try {
     const folder = findFolderById(folderId, bookmarkTree);
@@ -3373,6 +3717,45 @@ function findFolderById(id, items) {
 
 // Delete folder
 async function deleteFolder(id) {
+  if (isPreviewMode) {
+    // Find folder in mock data
+    const findAndRemove = (items, parentArray = null, parentIndex = -1) => {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+
+        if (item.id === id) {
+          // Found it! Store data for undo (deep copy to preserve children)
+          const folderData = JSON.parse(JSON.stringify(item));
+          folderData.parentArray = parentArray;
+          folderData.parentIndex = i;
+
+          // Remove from array
+          items.splice(i, 1);
+
+          // Show undo toast
+          showUndoToast({
+            type: 'folder',
+            data: folderData,
+            message: `Folder "${item.title || 'Untitled'}" deleted`,
+            isPreview: true
+          });
+
+          renderBookmarks();
+          return true;
+        }
+
+        if (item.children) {
+          if (findAndRemove(item.children, item.children, i)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    findAndRemove(bookmarkTree);
+    return;
+  }
 
   // SAFETY: Prevent deletion of Firefox's built-in bookmark folders
   const protectedFolderIds = ['menu________', 'toolbar_____', 'unfiled_____', 'mobile______'];
@@ -3694,6 +4077,10 @@ async function recheckBookmarkStatus(bookmarkId) {
     return;
   }
 
+  if (isPreviewMode) {
+    alert('🔄 Rechecking bookmark status...\n\nIn the real extension, this would check:\n• Link status (live/dead/parked)\n• Security analysis (heuristic-based threat detection)');
+    return;
+  }
 
   const checkingUpdates = {};
   if (linkCheckingEnabled) checkingUpdates.linkStatus = 'checking';
@@ -3798,6 +4185,7 @@ async function whitelistBookmark(bookmark) {
 
 // Save whitelist to storage
 async function saveWhitelist() {
+  if (isPreviewMode) return;
   try {
     await safeStorage.set({
       whitelistedUrls: Array.from(whitelistedUrls)
@@ -3809,6 +4197,7 @@ async function saveWhitelist() {
 
 // Load whitelist from storage
 async function loadWhitelist() {
+  if (isPreviewMode) return;
   try {
     const result = await safeStorage.get('whitelistedUrls');
     if (result.whitelistedUrls && Array.isArray(result.whitelistedUrls)) {
@@ -3822,6 +4211,7 @@ async function loadWhitelist() {
 
 // Save safety history to storage
 async function saveSafetyHistory() {
+  if (isPreviewMode) return;
   try {
     await safeStorage.set({ safetyHistory });
   } catch (error) {
@@ -3831,6 +4221,7 @@ async function saveSafetyHistory() {
 
 // Load safety history from storage
 async function loadSafetyHistory() {
+  if (isPreviewMode) return;
   try {
     const result = await safeStorage.get('safetyHistory');
     if (result.safetyHistory) {
@@ -3844,7 +4235,7 @@ async function loadSafetyHistory() {
 
 // Clean up safetyHistory to remove entries for URLs no longer in bookmarks
 function cleanupSafetyHistory() {
-  if (!bookmarkTree || bookmarkTree.length === 0) return;
+  if (isPreviewMode || !bookmarkTree || bookmarkTree.length === 0) return;
 
   // Ensure safetyHistory is an object
   if (Array.isArray(safetyHistory) || typeof safetyHistory !== 'object') {
@@ -4118,6 +4509,11 @@ async function saveEditModal() {
     updates.url = url;
   }
 
+  if (isPreviewMode) {
+    alert('✓ In preview mode. In the real extension, this would update the ' + (isFolder ? 'folder' : 'bookmark') + '.');
+    closeEditModal();
+    return;
+  }
 
   try {
     // Log changes
@@ -4158,6 +4554,43 @@ async function editBookmark(bookmark) {
 
 // Delete bookmark
 async function deleteBookmark(id, bookmarkData = null) {
+  if (isPreviewMode) {
+    // Find bookmark in mock data
+    const findAndRemove = (items, parentArray = null, parentIndex = -1) => {
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+
+        if (item.id === id) {
+          // Found it! Store data for undo
+          const bookmarkData = { ...item, parentArray, parentIndex: i };
+
+          // Remove from array
+          items.splice(i, 1);
+
+          // Show undo toast
+          showUndoToast({
+            type: 'bookmark',
+            data: bookmarkData,
+            message: `Bookmark "${item.title || 'Untitled'}" deleted`,
+            isPreview: true
+          });
+
+          renderBookmarks();
+          return true;
+        }
+
+        if (item.children) {
+          if (findAndRemove(item.children, item.children, i)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    findAndRemove(bookmarkTree);
+    return;
+  }
 
   try {
     // Get bookmark details before deleting for undo functionality
@@ -4254,6 +4687,21 @@ async function openAddBookmarkModal() {
 
   // Try to get the current active tab to pre-populate fields
   // Website version: cannot access current tab info, leave fields empty
+  if (!isPreviewMode) {
+    try {
+      // In website version, we can't get tab info, so leave empty
+      titleInput.value = '';
+      urlInput.value = '';
+    } catch (error) {
+      console.error('Error in add bookmark:', error);
+      titleInput.value = '';
+      urlInput.value = '';
+    }
+  } else {
+    // Preview mode: show example data
+    titleInput.value = 'Current Tab Title';
+    urlInput.value = 'https://example.com/current-page';
+  }
 
   // Load sort preference and populate dropdown
   const sortCheckbox = document.getElementById('sortBookmarkFoldersAlpha');
@@ -4322,6 +4770,11 @@ async function saveNewBookmark() {
     return;
   }
 
+  if (isPreviewMode) {
+    alert('✓ In preview mode. In the real extension, this would create a new bookmark.');
+    closeAddBookmarkModal();
+    return;
+  }
 
   try {
     // SAFETY: Check for duplicate bookmarks to prevent accidental duplication
@@ -4428,6 +4881,11 @@ async function saveNewFolder() {
     return;
   }
 
+  if (isPreviewMode) {
+    alert('✓ In preview mode. In the real extension, this would create a new folder.');
+    closeAddFolderModal();
+    return;
+  }
 
   try {
     const newFolder = await bookmarkManager.create({
@@ -4659,6 +5117,10 @@ function showError(message) {
 
 // Open extension in new tab
 async function openInNewTab() {
+  if (isPreviewMode) {
+    alert('🗗 In the Firefox extension, this would open Bookmark Manager Zero in a new tab for a full-page view.');
+    return;
+  }
 
   try {
     // In website version, just reload the current page
@@ -5072,6 +5534,38 @@ async function deleteSelectedDuplicates() {
     if (!finalWarning) return;
   }
 
+  if (isPreviewMode) {
+    // Get IDs to delete
+    const idsToDelete = Array.from(checkboxes).map(cb => cb.dataset.bookmarkId);
+
+    // Remove bookmarks from the mock data tree
+    const removeBookmarkFromTree = (tree, idToRemove) => {
+      for (let i = 0; i < tree.length; i++) {
+        const node = tree[i];
+
+        // Check if this is a folder with children
+        if (node.children) {
+          // Filter out the bookmark if it's in this folder's children
+          node.children = node.children.filter(child => child.id !== idToRemove);
+          // Recursively check nested folders
+          removeBookmarkFromTree(node.children, idToRemove);
+        }
+      }
+    };
+
+    // Remove each selected bookmark
+    for (const id of idsToDelete) {
+      removeBookmarkFromTree(bookmarkTree, id);
+    }
+
+    // Re-render the UI
+    renderBookmarks();
+
+    // Close modal and show success
+    closeDuplicatesModal();
+    alert(`✓ Successfully deleted ${checkboxes.length} bookmark(s) from preview!`);
+    return;
+  }
 
   try {
     let successCount = 0;
@@ -5547,6 +6041,10 @@ function getTimeAgo(timestamp) {
 
 // Close extension
 async function closeExtension() {
+  if (isPreviewMode) {
+    alert('✕ In the Firefox extension, this would close the sidebar or tab.');
+    return;
+  }
 
   try {
     // In website version, just try to close the window
@@ -5561,6 +6059,9 @@ async function closeExtension() {
 // Clear cache for link status and safety checks
 // Calculate cache size in KB
 async function calculateCacheSize() {
+  if (isPreviewMode) {
+    return 0;
+  }
 
   try {
     const result = await safeStorage.get(['linkStatusCache', 'safetyStatusCache', 'whitelistedUrls', 'safetyHistory']);
@@ -5609,7 +6110,7 @@ async function updateCacheSizeDisplay() {
 
 // Clear old cache entries based on auto-clear setting
 async function clearOldCacheEntries(maxAgeDays) {
-  if (maxAgeDays === 'never') {
+  if (isPreviewMode || maxAgeDays === 'never') {
     return;
   }
 
@@ -5679,6 +6180,10 @@ async function clearOldCacheEntries(maxAgeDays) {
 }
 
 async function clearCache() {
+  if (isPreviewMode) {
+    alert('🧹 In the Firefox extension, this would clear the cache for link and safety checks.');
+    return;
+  }
 
   try {
     // Remove both cache keys from storage
@@ -6984,6 +7489,29 @@ function setupEventListeners() {
 
   // BIDIRECTIONAL SYNC: Listen for bookmark changes (only in extension mode)
   // This ensures the extension automatically updates when bookmarks change in Firefox
+  if (!isPreviewMode) {
+    let syncTimeout = null;
+
+    // Debounced sync function to prevent excessive reloads
+    const syncBookmarks = (eventType) => {
+      clearTimeout(syncTimeout);
+      syncTimeout = setTimeout(async () => {
+        try {
+          console.log(`[Bookmark Sync] ${eventType} - Syncing bookmarks from Firefox...`);
+          await loadBookmarks();
+          cleanupSafetyHistory(); // Clean up stale entries after sync
+          renderBookmarks();
+          console.log('[Bookmark Sync] ✓ Sync complete');
+        } catch (error) {
+          console.error('[Bookmark Sync] Failed to sync:', error);
+        }
+      }, 100); // 100ms debounce
+    };
+
+    // Note: Website version doesn't have browser.bookmarks API
+    // Bookmarks are managed locally via bookmarkManager
+    console.log('[Bookmark Sync] Website version - using local bookmark storage');
+  }
 
   // Multi-select toggle button
   const multiSelectToggle = document.getElementById('multiSelectToggle');

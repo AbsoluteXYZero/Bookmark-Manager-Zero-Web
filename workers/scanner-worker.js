@@ -90,7 +90,7 @@ async function checkLinkStatus(url) {
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
   const headers = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -104,7 +104,7 @@ async function checkLinkStatus(url) {
 
     try {
       const corsController = new AbortController();
-      const corsTimeout = setTimeout(() => corsController.abort(), 10000);
+      const corsTimeout = setTimeout(() => corsController.abort(), 5000);
 
       response = await fetch(url, {
         method: 'HEAD',
@@ -119,7 +119,7 @@ async function checkLinkStatus(url) {
     } catch (corsError) {
       // CORS blocked, try no-cors mode with fresh controller
       const noCorsController = new AbortController();
-      const noCorsTimeout = setTimeout(() => noCorsController.abort(), 10000);
+      const noCorsTimeout = setTimeout(() => noCorsController.abort(), 5000);
 
       response = await fetch(url, {
         method: 'HEAD',
@@ -276,7 +276,7 @@ async function checkLinkStatus(url) {
 
       try {
         const corsController = new AbortController();
-        const corsTimeout = setTimeout(() => corsController.abort(), 8000);
+        const corsTimeout = setTimeout(() => corsController.abort(), 5000);
 
         fallbackResponse = await fetch(url, {
           method: 'GET',
@@ -291,7 +291,7 @@ async function checkLinkStatus(url) {
       } catch (corsError) {
         // CORS blocked, try no-cors mode with fresh controller
         const noCorsController = new AbortController();
-        const noCorsTimeout = setTimeout(() => noCorsController.abort(), 8000);
+        const noCorsTimeout = setTimeout(() => noCorsController.abort(), 5000);
 
         fallbackResponse = await fetch(url, {
           method: 'GET',
@@ -553,7 +553,7 @@ async function checkURLVoidScraping(url) {
     console.log(`[URLVoid Scraping] Checking ${hostname}`);
 
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
 
     const urlvoidUrl = `https://www.urlvoid.com/scan/${encodeURIComponent(hostname)}/`;
 
@@ -620,7 +620,7 @@ async function checkVirusTotal(url) {
     const urlId = btoa(url).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 
     const reportController = new AbortController();
-    const reportTimeout = setTimeout(() => reportController.abort(), 15000);
+    const reportTimeout = setTimeout(() => reportController.abort(), 8000);
 
     const reportResponse = await fetch(
       `https://www.virustotal.com/api/v3/urls/${urlId}`,

@@ -573,8 +573,8 @@ class ScannerService {
        return;
      }
 
-     // Process up to 5 bookmarks at a time (reduced from 10)
-     const batchSize = 5;
+     // Process up to 10 bookmarks at a time
+     const batchSize = 10;
      const batch = this.scanQueue.splice(0, batchSize);
 
      batch.forEach(bookmark => {
@@ -589,12 +589,12 @@ class ScannerService {
        detail: { scanned: this.scannedCount, total: this.totalCount }
      }));
 
-     // Delay next batch by 500ms to avoid overwhelming the network (increased from 300ms)
+     // Delay next batch by 100ms to avoid overwhelming the network
      setTimeout(() => {
        if (this.scanQueue.length > 0) {
          this.processQueue();
        }
-     }, 500);
+     }, 100);
    }
 
   /**
