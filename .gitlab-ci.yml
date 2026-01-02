@@ -1,0 +1,12 @@
+pages:
+  stage: deploy
+  script:
+    - mkdir -p public
+    - cp -r css icons js workers index.html sidebar-body-extract.html public/
+    - if [ -f PRIVACY.md ]; then cp PRIVACY.md public/; fi
+    - if [ -f README.md ]; then cp README.md public/; fi
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
