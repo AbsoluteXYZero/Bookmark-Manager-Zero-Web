@@ -1113,6 +1113,11 @@ async function rescanAllBookmarks() {
         // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
         if (window.scannerService && window.scannerService.worker && window.scannerService.workerInitialized) {
           await window.scannerService.scanBookmark(node, true); // Bypass cache for rescan
+
+          // Update progress immediately after each bookmark completes
+          scannedCount++;
+          if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
+
           return { id: node.id };
         } else {
           // Worker not available or not initialized - log warning and skip scanning
@@ -1130,15 +1135,17 @@ async function rescanAllBookmarks() {
 
           // Update the node in the tree
           updateBookmarkInTree(node.id, results);
+
+          // Update progress even when worker unavailable
+          scannedCount++;
+          if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
+
           return results;
         }
     });
 
     // Wait for all checks in the batch to complete
     await Promise.all(batchPromises);
-
-    scannedCount += batch.length;
-    if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
 
     if (i + BATCH_SIZE < bookmarksToCheck.length) {
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
@@ -1240,6 +1247,11 @@ async function autoCheckBookmarkStatuses() {
         // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
         if (window.scannerService && window.scannerService.worker) {
           await window.scannerService.scanBookmark(item, false); // Don't bypass cache for auto-scan
+
+          // Update progress immediately after each bookmark completes
+          scannedCount++;
+          if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
+
           // scanBookmark will update the bookmark object and DOM, so just return the ID
           return { id: item.id };
         } else {
@@ -1256,6 +1268,10 @@ async function autoCheckBookmarkStatuses() {
             result.safetySources = ['Scanner unavailable'];
           }
 
+          // Update progress even when worker unavailable
+          scannedCount++;
+          if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
+
           return result;
         }
       } catch (error) {
@@ -1266,6 +1282,11 @@ async function autoCheckBookmarkStatuses() {
           errorResult.safetyStatus = 'unknown';
           errorResult.safetySources = [];
         }
+
+        // Update progress even on error
+        scannedCount++;
+        if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
+
         return errorResult;
       }
     });
@@ -1288,10 +1309,6 @@ async function autoCheckBookmarkStatuses() {
       // Update the DOM immediately for this bookmark
       updateBookmarkStatusInDOM(result.id, result.linkStatus, result.safetyStatus, result.safetySources, url);
     });
-
-    // Update scan progress in status bar
-    scannedCount += results.length;
-    if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
 
     console.log(`Checked batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(bookmarksToCheck.length / BATCH_SIZE)} (${results.length} bookmarks)`);
 

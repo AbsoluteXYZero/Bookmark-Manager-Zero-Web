@@ -581,13 +581,8 @@ class ScannerService {
        this.scanBookmark(bookmark, this.bypassCache || false);
      });
 
-     // Update progress more frequently
-     this.updateProgress();
-
-     // Emit progress event
-     window.dispatchEvent(new CustomEvent('scanProgress', {
-       detail: { scanned: this.scannedCount, total: this.totalCount }
-     }));
+     // Progress updates are sent after each bookmark completes (in handleScanComplete)
+     // No need to send batch-level progress here
 
      // Delay next batch by 100ms to avoid overwhelming the network
      setTimeout(() => {
