@@ -18,6 +18,7 @@ import { exportAsJSON } from '../import-export/json-exporter.js';
 import { importFromHTML } from '../import-export/html-parser.js';
 import { importFromJSON } from '../import-export/json-parser.js';
 import touchHandler from '../mobile/touch-handler.js';
+import { addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
 
 class App {
   constructor() {
@@ -106,9 +107,17 @@ class App {
       mainContent.classList.add('hidden');
     }
 
-    // Check if user has explicitly chosen a mode
-    const hasChosenMode = localStorage.getItem('bmz_mode_chosen') === 'true';
-    
+    // Check if user has explicitly chosen a mode (use IndexedDB as source of truth)
+    const modeChosenRecord = await dbManager.get('settings', 'bmz_mode_chosen');
+    const hasChosenMode = modeChosenRecord && modeChosenRecord.value === true;
+
+    const localModeRecord = await dbManager.get('settings', 'bmz_local_mode');
+    const isLocalMode = localModeRecord && localModeRecord.value === true;
+
+    console.log('[Auth] Checking mode on page load:');
+    console.log('[Auth] bmz_mode_chosen (IndexedDB):', hasChosenMode);
+    console.log('[Auth] bmz_local_mode (IndexedDB):', isLocalMode);
+
     // If user hasn't chosen a mode, always show login screen
     if (!hasChosenMode) {
       console.log('[Auth] User has not chosen a mode yet');
@@ -116,8 +125,8 @@ class App {
       return;
     }
 
-    // Check if user is in local mode
-    const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
+    // User is in local mode or GitLab mode
+    console.log('[Auth] Mode chosen, isLocalMode:', isLocalMode);
 
     if (isLocalMode) {
       console.log('[Auth] Local mode detected');
@@ -189,6 +198,12 @@ class App {
       loginScreen.classList.remove('hidden');
       // Clear any inline display style that may have been set to prevent flash
       loginScreen.style.display = '';
+    }
+
+    // Hide logout button on login screen
+    const logoutBtn = document.getElementById('logoutBtn');
+    if (logoutBtn) {
+      logoutBtn.style.display = 'none';
     }
 
     // Add show-login class to html element to make login screen visible
@@ -281,8 +296,10 @@ class App {
           // Store bookmarks in local storage
           await bookmarkManager.replaceTree(bookmarks);
 
-          // Store a flag indicating local mode
+          // Store a flag indicating local mode (IndexedDB is source of truth, localStorage is cache)
           await authManager.storePreference('syncProvider', 'local');
+          await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
+          await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           localStorage.setItem('bmz_local_mode', 'true');
           localStorage.setItem('bmz_mode_chosen', 'true');
 
@@ -331,8 +348,10 @@ class App {
           continueExistingBtn.disabled = true;
           continueExistingBtn.textContent = 'Loading...';
 
-          // Set local mode flag
+          // Set local mode flag (IndexedDB is source of truth, localStorage is cache)
           await authManager.storePreference('syncProvider', 'local');
+          await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
+          await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           localStorage.setItem('bmz_local_mode', 'true');
           localStorage.setItem('bmz_mode_chosen', 'true');
 
@@ -377,8 +396,10 @@ class App {
           // Use bookmarkManager to properly save the empty tree
           await bookmarkManager.replaceTree(emptyTree);
 
-          // Store a flag indicating local mode
+          // Store a flag indicating local mode (IndexedDB is source of truth, localStorage is cache)
           await authManager.storePreference('syncProvider', 'local');
+          await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
+          await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           localStorage.setItem('bmz_local_mode', 'true');
           localStorage.setItem('bmz_mode_chosen', 'true');
 
@@ -454,9 +475,11 @@ class App {
 
           // Store provider preference
           await authManager.storePreference('syncProvider', 'gitlab');
-          
-          // Mark that user has chosen GitLab mode
+
+          // Mark that user has chosen GitLab mode (don't set local mode flag)
+          await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           localStorage.setItem('bmz_mode_chosen', 'true');
+          localStorage.removeItem('bmz_local_mode'); // Clear local mode flag
 
           // Show success and load main app
           await this.showMainApp();
@@ -484,6 +507,17 @@ class App {
     try {
       console.log('Logging out...');
 
+      // IMPORTANT: Save current bookmarks to local storage BEFORE clearing auth
+      // User was synced to GitLab, so bookmarks are in memory but not in local IndexedDB
+      console.log('[Logout] Saving current bookmarks to local storage...');
+      const currentTree = bookmarkManager.getTree();
+      if (currentTree) {
+        await dbManager.put('metadata', { key: 'bookmarkTree', value: currentTree });
+        console.log('[Logout] Bookmarks saved to IndexedDB');
+      } else {
+        console.warn('[Logout] No bookmark tree found in memory');
+      }
+
       // Clear authentication
       await authManager.clearToken('gitlab');
       oauthPAT.clear();
@@ -492,24 +526,25 @@ class App {
       this.isAuthenticated = false;
       this.currentUser = null;
 
-      // Clear provider preference
-      await authManager.storePreference('syncProvider', null);
+      // Clear provider preference and set to local
+      await authManager.storePreference('syncProvider', 'local');
 
-      // Clear snippet ID from localStorage and adapter
+      // Clear snippet ID from localStorage, IndexedDB, and adapter
       localStorage.removeItem('bmz_snippet_id');
+      await dbManager.delete('metadata', 'snippetId');
       snippetAdapter.snippetId = null;
 
       // Clear sync manager state
       syncManager.snippetId = null;
       syncManager.provider = null;
 
-      // Clear all local bookmark data from IndexedDB
-      await dbManager.clear('bookmarks');
-      await dbManager.clear('metadata');
+      // Set local mode flags (IndexedDB is source of truth, localStorage is cache)
+      await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
+      await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
+      localStorage.setItem('bmz_local_mode', 'true');
+      localStorage.setItem('bmz_mode_chosen', 'true');
 
-      // Clear local mode flags
-      localStorage.removeItem('bmz_local_mode');
-      localStorage.removeItem('bmz_mode_chosen');
+      console.log('[Logout] Set local mode flags');
 
       // Keep settings (like theme, API keys) but clear auth-related data
       // Settings are user preferences, not user data
@@ -518,15 +553,104 @@ class App {
 
       // Use setTimeout with longer delay to ensure all IndexedDB operations complete
       // IndexedDB commits are asynchronous even after await returns
+      // Force reload to bypass cache and ensure clean state
       setTimeout(() => {
-        window.location.reload();
-      }, 250);
+        window.location.href = window.location.href.split('?')[0];
+      }, 500);
     } catch (error) {
       console.error('Logout failed:', error);
       // Even if there's an error, try to reload after a delay
       setTimeout(() => {
-        window.location.reload();
-      }, 250);
+        window.location.href = window.location.href.split('?')[0];
+      }, 500);
+    }
+  }
+
+  /**
+   * Reset all data and settings - complete wipe
+   * Clears bookmarks, cache, settings, mode flags, and returns to login screen
+   */
+  async resetAllData() {
+    try {
+      // Show comprehensive confirmation dialog
+      const confirmed = confirm(
+        '⚠️ RESET ALL DATA & SETTINGS ⚠️\n\n' +
+        'This will permanently delete:\n' +
+        '• All bookmarks and folders\n' +
+        '• All scan results and cache\n' +
+        '• All settings (theme, zoom, filters, API keys)\n' +
+        '• GitLab connection (if connected)\n' +
+        '• All mode preferences\n\n' +
+        'You will be returned to the login screen as a new user.\n\n' +
+        '❗ THIS ACTION CANNOT BE UNDONE ❗\n\n' +
+        'Are you absolutely sure you want to continue?'
+      );
+
+      if (!confirmed) {
+        return;
+      }
+
+      // Second confirmation for extra safety
+      const doubleConfirmed = confirm(
+        'FINAL CONFIRMATION\n\n' +
+        'This is your last chance to cancel.\n\n' +
+        'Click OK to permanently delete everything, or Cancel to keep your data.'
+      );
+
+      if (!doubleConfirmed) {
+        return;
+      }
+
+      console.log('[Reset] Starting complete data reset...');
+
+      // Clear all authentication
+      await authManager.clearToken('gitlab');
+      oauthPAT.clear();
+
+      // Clear all mode flags from both IndexedDB and localStorage
+      await dbManager.delete('settings', 'bmz_mode_chosen');
+      await dbManager.delete('settings', 'bmz_local_mode');
+      await dbManager.delete('settings', 'syncProvider');
+      localStorage.removeItem('bmz_mode_chosen');
+      localStorage.removeItem('bmz_local_mode');
+      localStorage.removeItem('bmz_snippet_id');
+
+      // Clear snippet ID from IndexedDB
+      await dbManager.delete('metadata', 'snippetId');
+
+      // Clear all bookmarks
+      await dbManager.delete('metadata', 'bookmarkTree');
+
+      // Clear all scan cache
+      if (window.scannerService && window.scannerService.clearAllCache) {
+        await window.scannerService.clearAllCache();
+      }
+
+      // Clear all settings from IndexedDB
+      const allSettings = await dbManager.getAll('settings');
+      for (const setting of allSettings) {
+        await dbManager.delete('settings', setting.key);
+      }
+
+      // Clear localStorage (except essential browser data)
+      const keysToKeep = ['bmz_install_date']; // Keep install date for analytics
+      const allKeys = Object.keys(localStorage);
+      for (const key of allKeys) {
+        if (key.startsWith('bmz_') && !keysToKeep.includes(key)) {
+          localStorage.removeItem(key);
+        }
+      }
+
+      console.log('[Reset] All data cleared, reloading to login screen...');
+
+      // Reload page to show login screen
+      setTimeout(() => {
+        window.location.href = window.location.href.split('?')[0];
+      }, 500);
+
+    } catch (error) {
+      console.error('[Reset] Failed to reset data:', error);
+      alert('Failed to reset data. Please try clearing your browser data manually or contact support.');
     }
   }
 
@@ -1641,6 +1765,194 @@ class App {
       });
     }
 
+    // Show sync diff dialog with merge/push/pull options
+    this.showSyncDiffDialog = async (diff, remoteData) => {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px;';
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = 'background: var(--md-sys-color-surface, #1e1e1e); padding: 24px; border-radius: 12px; max-width: 700px; width: 100%; max-height: 80%; overflow-y: auto; color: var(--md-sys-color-on-surface, #e0e0e0);';
+
+      const hasChanges = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length > 0;
+
+      let content = '<h2 style="margin: 0 0 16px 0; font-size: 20px;">Snippet Sync Changes</h2>';
+
+      if (!hasChanges) {
+        content += '<p style="color: var(--md-sys-color-on-surface-variant, #aaa);">No changes detected. Your local bookmarks match the Snippet.</p>';
+      } else {
+        // Summary
+        content += '<div style="margin-bottom: 20px; padding: 16px; background: var(--md-sys-color-surface-variant, #2a2a2a); border-radius: 8px;">';
+        content += '<h3 style="margin: 0 0 12px 0; font-size: 16px;">Summary</h3>';
+        if (diff.added.length > 0) content += `<div style="margin-bottom: 4px; color: #4caf50;">✓ ${diff.added.length} item(s) to add</div>`;
+        if (diff.removed.length > 0) content += `<div style="margin-bottom: 4px; color: #f44336;">✗ ${diff.removed.length} item(s) to remove</div>`;
+        if (diff.moved.length > 0) content += `<div style="margin-bottom: 4px; color: #ff9800;">➜ ${diff.moved.length} item(s) to move</div>`;
+        if (diff.modified.length > 0) content += `<div style="color: #2196f3;">✎ ${diff.modified.length} item(s) to modify</div>`;
+        content += '</div>';
+
+        // Detailed changes (collapsed for mobile)
+        if (diff.added.length > 0) {
+          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #4caf50; margin-bottom: 8px;">Added Items</summary>';
+          diff.added.forEach(item => {
+            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(76, 175, 80, 0.1); border-left: 3px solid #4caf50; border-radius: 4px;">
+              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
+              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
+              ${item.url ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">${item.url}</div>` : ''}
+            </div>`;
+          });
+          content += '</details>';
+        }
+
+        if (diff.removed.length > 0) {
+          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #f44336; margin-bottom: 8px;">Removed Items</summary>';
+          diff.removed.forEach(item => {
+            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(244, 67, 54, 0.1); border-left: 3px solid #f44336; border-radius: 4px;">
+              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
+              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
+              ${item.url ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">${item.url}</div>` : ''}
+            </div>`;
+          });
+          content += '</details>';
+        }
+
+        if (diff.moved.length > 0) {
+          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #ff9800; margin-bottom: 8px;">Moved Items</summary>';
+          diff.moved.forEach(item => {
+            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(255, 152, 0, 0.1); border-left: 3px solid #ff9800; border-radius: 4px;">
+              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
+              <div style="font-size: 12px; color: #aaa;">From: ${item.from}</div>
+              <div style="font-size: 12px; color: #aaa;">To: ${item.to}</div>
+            </div>`;
+          });
+          content += '</details>';
+        }
+
+        if (diff.modified.length > 0) {
+          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #2196f3; margin-bottom: 8px;">Modified Items</summary>';
+          diff.modified.forEach(item => {
+            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(33, 150, 243, 0.1); border-left: 3px solid #2196f3; border-radius: 4px;">
+              <div style="font-weight: 500;">${item.oldTitle || 'Untitled'} → ${item.newTitle || 'Untitled'}</div>
+              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
+              ${item.oldUrl !== item.newUrl ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">URL: ${item.oldUrl} → ${item.newUrl}</div>` : ''}
+            </div>`;
+          });
+          content += '</details>';
+        }
+      }
+
+      content += `
+        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
+          ${hasChanges ? `
+            <button id="mergeButton" style="width: 100%; padding: 12px; border-radius: 8px; border: none; background: #4caf50; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;">
+              Merge (Recommended)
+            </button>
+            <div style="display: flex; gap: 12px;">
+              <button id="pushLocalToRemote" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: #90caf9; color: #000; cursor: pointer; font-size: 14px;">
+                Push Local to Remote
+              </button>
+              <button id="applyRemoteChanges" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: #f44336; color: #fff; cursor: pointer; font-size: 14px;">
+                Pull Remote to Local
+              </button>
+            </div>
+          ` : ''}
+          <button id="closeDiffDialog" style="width: 100%; padding: 12px; border-radius: 8px; border: none; background: #2a2a2a; color: #aaa; cursor: pointer; font-size: 14px;">
+            Cancel
+          </button>
+        </div>
+      `;
+
+      dialog.innerHTML = content;
+      modal.appendChild(dialog);
+      document.body.appendChild(modal);
+
+      const mergeBtn = dialog.querySelector('#mergeButton');
+      if (mergeBtn) {
+        mergeBtn.addEventListener('click', async () => {
+          modal.remove();
+          await this.mergeBidirectional();
+        });
+      }
+
+      const pushBtn = dialog.querySelector('#pushLocalToRemote');
+      if (pushBtn) {
+        pushBtn.addEventListener('click', async () => {
+          modal.remove();
+          await syncManager.syncToRemote();
+          this.showToast('Pushed local bookmarks to remote successfully', 'success');
+        });
+      }
+
+      const applyBtn = dialog.querySelector('#applyRemoteChanges');
+      if (applyBtn) {
+        applyBtn.addEventListener('click', async () => {
+          modal.remove();
+
+          // STEP 1: Take a snapshot of current bookmarks before destructive sync
+          const preSyncSnapshot = await syncManager.getLocalBookmarks();
+
+          // STEP 2: Clear all old changelog entries (they will have invalid IDs after sync)
+          await clearChangelog();
+
+          // STEP 3: Add a special changelog entry for this sync operation with full snapshot
+          await addChangelogEntry('pre-sync-snapshot', 'sync', 'Pull Remote to Local', null, {
+            snapshot: preSyncSnapshot,
+            timestamp: Date.now(),
+            operation: 'Pull Remote to Local'
+          });
+
+          await syncManager.saveLocalBookmarks(remoteData);
+          await syncManager.setLocalVersion(remoteData.version);
+          this.showToast('Pulled remote bookmarks to local successfully', 'success');
+          // Reload bookmarks in UI
+          await this.loadBookmarks();
+        });
+      }
+
+      dialog.querySelector('#closeDiffDialog').addEventListener('click', () => modal.remove());
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) modal.remove();
+      });
+    };
+
+    // Bidirectional merge function
+    this.mergeBidirectional = async () => {
+      try {
+        this.showToast('Merging local and remote bookmarks...', 'info');
+
+        const remoteId = syncManager.getRemoteId();
+        const adapter = syncManager.getAdapter();
+        const remoteData = await adapter.readBookmarks(remoteId);
+        const localData = await syncManager.getLocalBookmarks();
+
+        // STEP 1: Take a snapshot of current bookmarks before destructive merge
+        const preSyncSnapshot = JSON.parse(JSON.stringify(localData));
+
+        // STEP 2: Clear all old changelog entries (they will have invalid IDs after merge)
+        await clearChangelog();
+
+        // STEP 3: Add a special changelog entry for this merge operation with full snapshot
+        await addChangelogEntry('pre-sync-snapshot', 'sync', 'Bidirectional Merge', null, {
+          snapshot: preSyncSnapshot,
+          timestamp: Date.now(),
+          operation: 'Bidirectional Merge'
+        });
+
+        // Merge in both directions using sync-manager's merge function
+        const remoteIntoLocal = syncManager.mergeBookmarksIntoTree(remoteData, localData);
+        const fullyMerged = syncManager.mergeBookmarksIntoTree(localData, remoteIntoLocal);
+
+        // Apply merged result to both local and remote
+        await syncManager.saveLocalBookmarks(fullyMerged);
+        await adapter.updateBookmarks(remoteId, fullyMerged);
+
+        this.showToast('Merge completed successfully! All bookmarks preserved.', 'success');
+        // Reload bookmarks in UI
+        await this.loadBookmarks();
+      } catch (error) {
+        console.error('[MergeBidirectional] Error:', error);
+        this.showToast(`Merge failed: ${error.message}`, 'error');
+      }
+    };
+
     // Manual sync button
     const manualSyncBtn = document.getElementById('manualSyncBtn');
     if (manualSyncBtn) {
@@ -1654,24 +1966,51 @@ class App {
           if (!confirm('Force push local bookmarks to remote? This will overwrite the remote with your local data.')) {
             return;
           }
+
+          // Show loading state
+          manualSyncBtn.disabled = true;
+          const originalContent = manualSyncBtn.innerHTML;
+          manualSyncBtn.innerHTML = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="animation: spin 1s linear infinite;"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>';
+
+          try {
+            await syncManager.syncToRemote();
+            this.showToast('Force pushed to remote successfully', 'success');
+          } catch (error) {
+            console.error('[ManualSync] Failed:', error);
+            this.showToast(`Sync failed: ${error.message}`, 'error');
+          } finally {
+            manualSyncBtn.disabled = false;
+            manualSyncBtn.innerHTML = originalContent;
+          }
+          return;
         }
 
-        // Show loading state
-        manualSyncBtn.disabled = true;
-        const originalContent = manualSyncBtn.innerHTML;
-        manualSyncBtn.innerHTML = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="animation: spin 1s linear infinite;"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>';
-
+        // Normal click - show diff dialog
         try {
-          // Force sync to remote if Shift is held
-          await syncManager.manualSync(forcePush);
-          this.showToast('Sync completed successfully', 'success');
+          this.showToast('Checking for changes...', 'info');
+
+          const remoteId = syncManager.getRemoteId();
+          if (!remoteId) {
+            this.showToast('No remote storage configured', 'error');
+            return;
+          }
+
+          const adapter = syncManager.getAdapter();
+          const remoteData = await adapter.readBookmarks(remoteId);
+          const localData = await syncManager.getLocalBookmarks();
+
+          const diff = syncManager.calculateBookmarkDiff(localData, remoteData);
+          const hasChanges = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length > 0;
+
+          if (!hasChanges) {
+            this.showToast('No changes detected. Bookmarks are in sync.', 'success');
+            return;
+          }
+
+          await this.showSyncDiffDialog(diff, remoteData);
         } catch (error) {
           console.error('[ManualSync] Failed:', error);
           this.showToast(`Sync failed: ${error.message}`, 'error');
-        } finally {
-          // Restore button state
-          manualSyncBtn.disabled = false;
-          manualSyncBtn.innerHTML = originalContent;
         }
       });
     }
@@ -1681,6 +2020,14 @@ class App {
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
         await this.logout();
+      });
+    }
+
+    // Reset All Data button
+    const resetAllDataBtn = document.getElementById('resetAllDataBtn');
+    if (resetAllDataBtn) {
+      resetAllDataBtn.addEventListener('click', async () => {
+        await this.resetAllData();
       });
     }
 
@@ -2479,7 +2826,21 @@ class App {
     console.log('Sync manager initialized');
 
     // Skip snippet setup and remote sync if in local mode
-    if (!localStorage.getItem('bmz_local_mode')) {
+    const logoutBtn = document.getElementById('logoutBtn');
+    const localModeRecord = await dbManager.get('settings', 'bmz_local_mode');
+    const isLocalMode = localModeRecord && localModeRecord.value === true;
+    console.log('[App] Button visibility check - isLocalMode:', isLocalMode, 'logoutBtn exists:', !!logoutBtn);
+
+    if (!isLocalMode) {
+      // Show logout button in GitLab mode
+      console.log('[App] GitLab mode - showing logout button');
+      if (logoutBtn) {
+        logoutBtn.style.display = 'flex';
+        console.log('[App] Logout button display set to flex');
+      } else {
+        console.error('[App] Logout button element not found!');
+      }
+
       // Check if we have a snippet set up
       const hasSnippet = await this.checkSnippetSetup();
 
@@ -2517,18 +2878,22 @@ class App {
       console.log('[App] Local mode - skipping remote sync');
 
       // Hide logout button in local mode
-      const logoutBtn = document.getElementById('logoutBtn');
       if (logoutBtn) {
         logoutBtn.style.display = 'none';
+        console.log('[App] Logout button hidden for local mode');
       }
 
       // Show Connect GitLab button in header for local mode users
       const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
+      console.log('[App] headerConnectGitlabBtn exists:', !!headerConnectGitlabBtn);
       if (headerConnectGitlabBtn) {
         headerConnectGitlabBtn.style.display = 'flex';
+        console.log('[App] Connect GitLab button display set to flex');
         headerConnectGitlabBtn.addEventListener('click', () => {
           this.showConnectGitlabModal();
         });
+      } else {
+        console.error('[App] headerConnectGitlabBtn element not found!');
       }
     }
 

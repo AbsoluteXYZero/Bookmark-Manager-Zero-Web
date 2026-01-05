@@ -359,7 +359,7 @@ class SnippetAdapter {
           files: [
             {
               file_path: 'bookmarks.json',
-              content: JSON.stringify(tree)
+              content: JSON.stringify(tree, null, 2)
             }
           ]
         })
@@ -587,7 +587,7 @@ class SnippetAdapter {
             {
               action: 'update',
               file_path: 'bookmarks.json',
-              content: JSON.stringify(dataWithMeta)
+              content: JSON.stringify(dataWithMeta, null, 2)
             }
           ]
         })

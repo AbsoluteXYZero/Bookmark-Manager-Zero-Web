@@ -135,6 +135,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
   - Restore update operations (revert changes)
   - Click URL to copy, "Clear Changelog" to reset history
   - Note: For folders with children, only the folder itself is restored (children tracked separately)
+- 💾 **Pre-Sync Snapshot Protection** - Automatic snapshots before sync operations with one-click restore to undo mistaken syncs
 - 🌍 **Favicon Display** - Batch-loaded website icons with error handling
 - 📱 **QR Code Generation** - Generate QR codes from header button or context menu
 - 🖱️ **Context Menus** - Right-click bookmarks/folders for quick actions

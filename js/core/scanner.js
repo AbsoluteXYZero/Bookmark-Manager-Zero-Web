@@ -347,27 +347,22 @@ class ScannerService {
          });
        }
 
+       // Update UI efficiently (just the status indicator, no full re-render)
+       if (window.updateBookmarkStatusInDOM) {
+         window.updateBookmarkStatusInDOM(id, linkStatus, safetyStatus, safetySources, url);
+       }
+
        this.scannedCount++;
+
+       // Emit progress event for EACH bookmark (not just once per batch)
+       window.dispatchEvent(new CustomEvent('scanProgress', {
+         detail: { scanned: this.scannedCount, total: this.totalCount }
+       }));
      }
 
      // Emit batch complete event
      window.dispatchEvent(new CustomEvent('scanBatchComplete', {
        detail: { results }
-     }));
-
-     // Update UI efficiently (just the status indicators, no full re-render)
-     if (window.updateBookmarkStatusInDOM) {
-       for (const result of results) {
-         window.updateBookmarkStatusInDOM(result.id, result.linkStatus, result.safetyStatus, result.safetySources, result.url);
-       }
-     }
-
-     // Update progress
-     this.updateProgress();
-
-     // Emit progress event
-     window.dispatchEvent(new CustomEvent('scanProgress', {
-       detail: { scanned: this.scannedCount, total: this.totalCount }
      }));
 
      // Process next in queue
@@ -557,7 +552,7 @@ class ScannerService {
     * Process scan queue with batch limit and better progress reporting
     */
    processQueue() {
-     if (this.scanQueue.length === 0) {
+     if (this.scanQueue.length === 0 && this.urlsBeingScanned.size === 0) {
        // Only log completion once
        if (this.isScanning) {
          this.isScanning = false;
@@ -586,7 +581,8 @@ class ScannerService {
 
      // Delay next batch by 100ms to avoid overwhelming the network
      setTimeout(() => {
-       if (this.scanQueue.length > 0) {
+       // Continue processing if there's more in queue OR if URLs are still being scanned
+       if (this.scanQueue.length > 0 || this.urlsBeingScanned.size > 0) {
          this.processQueue();
        }
      }, 100);

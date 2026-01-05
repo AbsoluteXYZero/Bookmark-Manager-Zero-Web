@@ -314,12 +314,45 @@ class SyncManager {
     const localMap = new Map();
     const remoteMap = new Map();
 
-    // Recursively map all items by ID
+    const rootFolderIds = ['toolbar_____', 'menu________', 'unfiled_____', 'mobile______', 'root________', '0', '1', '2', '3'];
+
+    // Normalize folder titles to handle Chrome vs Firefox naming differences
+    // IMPORTANT: Must use same normalization as Chrome/Firefox for cross-browser sync
+    const normalizeTitle = (title) => {
+      // Treat empty string and "Untitled" as equivalent (empty)
+      if (!title || title === 'Untitled' || title === 'Untitled Folder') {
+        return '';
+      }
+
+      const normalized = {
+        'Bookmarks Toolbar': 'Bookmarks bar',   // Firefox → Chrome standard
+        'Bookmarks bar': 'Bookmarks bar',        // Chrome → Chrome standard
+        'Other Bookmarks': 'Other bookmarks',    // Normalize to Chrome's lowercase
+        'Other bookmarks': 'Other bookmarks',    // Chrome → Chrome standard
+        'Mobile Bookmarks': 'Mobile Bookmarks',
+        'Bookmarks Menu': 'Bookmarks Menu'
+      };
+      return normalized[title] || title;
+    };
+
+    // Recursively map all items by content-based key (not ID, since different browsers use different IDs)
     const mapItems = (node, map, parentPath = '') => {
       if (!node) return;
 
-      const path = parentPath ? `${parentPath}/${node.title || node.id}` : (node.title || node.id);
-      map.set(node.id, { node, path, parentId: node.parentId });
+      // Normalize title for consistent paths, then build path
+      const normalizedTitle = normalizeTitle(node.title || '');
+      const path = parentPath ? `${parentPath}/${normalizedTitle}` : normalizedTitle;
+
+      // Don't include root folders themselves in the comparison, only their contents
+      if (!rootFolderIds.includes(node.id)) {
+        // Use content-based key instead of ID
+        const isBookmark = node.url || node.type === 'bookmark';
+        const key = isBookmark
+          ? `bookmark:${node.url}:${path}`
+          : `folder:${path}`;
+
+        map.set(key, { node, path, parentId: node.parentId, originalId: node.id });
+      }
 
       if (node.children) {
         node.children.forEach(child => mapItems(child, map, path));
@@ -337,10 +370,10 @@ class SyncManager {
     }
 
     // Find added items (in remote, not in local)
-    remoteMap.forEach((value, id) => {
-      if (!localMap.has(id)) {
+    remoteMap.forEach((value, key) => {
+      if (!localMap.has(key)) {
         diff.added.push({
-          id,
+          id: value.originalId,
           title: value.node.title || 'Untitled',
           url: value.node.url || null,
           path: value.path,
@@ -350,10 +383,10 @@ class SyncManager {
     });
 
     // Find removed items (in local, not in remote)
-    localMap.forEach((value, id) => {
-      if (!remoteMap.has(id)) {
+    localMap.forEach((value, key) => {
+      if (!remoteMap.has(key)) {
         diff.removed.push({
-          id,
+          id: value.originalId,
           title: value.node.title || 'Untitled',
           url: value.node.url || null,
           path: value.path,
@@ -363,13 +396,13 @@ class SyncManager {
     });
 
     // Find moved/modified items
-    localMap.forEach((localValue, id) => {
-      const remoteValue = remoteMap.get(id);
+    localMap.forEach((localValue, key) => {
+      const remoteValue = remoteMap.get(key);
       if (remoteValue) {
-        // Check if moved (parent changed)
-        if (localValue.parentId !== remoteValue.parentId) {
+        // Check if the path changed (item moved to different folder)
+        if (localValue.path !== remoteValue.path) {
           diff.moved.push({
-            id,
+            id: localValue.originalId,
             title: remoteValue.node.title || 'Untitled',
             url: remoteValue.node.url || null,
             oldPath: localValue.path,
@@ -377,12 +410,15 @@ class SyncManager {
             type: remoteValue.node.url ? 'bookmark' : 'folder'
           });
         }
-        // Check if modified (title or url changed), ignoring case-only title differences
-        const titleDiffers = (localValue.node.title || '').toLowerCase() !== (remoteValue.node.title || '').toLowerCase();
+        // Check if modified (different title or URL)
+        // Normalize titles to ignore differences like empty string vs "Untitled"
+        const normalizedLocalTitle = normalizeTitle(localValue.node.title || '');
+        const normalizedRemoteTitle = normalizeTitle(remoteValue.node.title || '');
+        const titleDiffers = normalizedLocalTitle !== normalizedRemoteTitle;
         const urlDiffers = localValue.node.url !== remoteValue.node.url;
         if (titleDiffers || urlDiffers) {
           diff.modified.push({
-            id,
+            id: localValue.originalId,
             oldTitle: localValue.node.title || 'Untitled',
             newTitle: remoteValue.node.title || 'Untitled',
             oldUrl: localValue.node.url || null,
@@ -457,11 +493,21 @@ class SyncManager {
           added: diff.added.length,
           removed: diff.removed.length,
           moved: diff.moved.length,
-          modified: diff.modified.length
+          modified: diff.modified.length,
+          localVersion: localVersion,
+          localBookmarkCount: localBookmarkCount
         });
 
-        // Check if there are deletions - require user confirmation
-        if (diff.removed.length > 0) {
+        // If local version is 0 (first sync/reset), skip conflict detection - just pull everything
+        const isFirstSync = localVersion === 0;
+
+        if (isFirstSync) {
+          console.log('[SyncFromRemote] First sync detected (version 0) - skipping conflict check, auto-pulling all data');
+        }
+
+        // Check if there are deletions AND this is not the first sync - require user confirmation
+        if (diff.removed.length > 0 && !isFirstSync) {
+          console.log('[SyncFromRemote] Deletions detected on subsequent sync - requiring user confirmation');
           // Emit event with diff data for UI to handle
           this.emitEvent('syncConflict', {
             diff,

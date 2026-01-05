@@ -4,6 +4,32 @@
  * Handles link status and safety checking
  */
 
+// Concurrency limiter to prevent overwhelming network with DNS lookups
+class ConcurrencyLimiter {
+  constructor(maxConcurrent = 10) {
+    this.maxConcurrent = maxConcurrent;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  async run(fn) {
+    while (this.running >= this.maxConcurrent) {
+      await new Promise(resolve => this.queue.push(resolve));
+    }
+    this.running++;
+    try {
+      return await fn();
+    } finally {
+      this.running--;
+      const next = this.queue.shift();
+      if (next) next();
+    }
+  }
+}
+
+// Global concurrency limiter for all network requests
+const networkLimiter = new ConcurrencyLimiter(10);
+
 // Parking domain list
 const PARKING_DOMAINS = [
   'sedoparking.com',
@@ -381,34 +407,14 @@ let apiKeys = {
 // Rate limiting flags
 let virusTotalRateLimited = false;
 
-// Performance optimization: Batch results to reduce main thread messages
-let pendingResults = [];
-let batchTimer = null;
-
 /**
- * Batch scan results to reduce main thread messages
- * Instead of sending a message for each bookmark, collect results and send in batches
+ * Send scan result immediately (no batching for smooth progress updates)
  */
 function queueResult(result) {
-  pendingResults.push(result);
-
-  // Clear existing timer
-  if (batchTimer) {
-    clearTimeout(batchTimer);
-  }
-
-  // Send batch after 500ms or when 5 results are queued (reduced frequency and batch size)
-  batchTimer = setTimeout(() => {
-    if (pendingResults.length > 0) {
-      self.postMessage({
-        action: 'batchScanComplete',
-        data: {
-          results: pendingResults
-        }
-      });
-      pendingResults = [];
-    }
-  }, 500);
+  self.postMessage({
+    action: 'scanComplete',
+    data: result
+  });
 }
 
 // Store blocklist data passed from main thread
@@ -893,10 +899,10 @@ self.addEventListener('message', async (e) => {
 
     case 'scanBookmark':
       try {
-        // Scan both link and safety
+        // Scan both link and safety with concurrency limiting
         const [linkStatus, safetyResult] = await Promise.all([
-          checkLinkStatus(data.url),
-          checkSafetyStatus(data.url)
+          networkLimiter.run(() => checkLinkStatus(data.url)),
+          networkLimiter.run(() => checkSafetyStatus(data.url))
         ]);
 
         // Use batching for better performance

@@ -601,7 +601,7 @@ async function init() {
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 11px;">v${APP_VERSION}</span>`;
-  if (logoSubtitle) logoSubtitle.textContent = 'A modern interface for your native bookmarks';
+  if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
 
   // Force update filter button icon
   const filterToggle = document.getElementById('filterToggle');
@@ -3290,30 +3290,6 @@ async function rescanFolder(folderId, folderTitle) {
 
     console.log(`[Folder Rescan] Found ${bookmarkCount} bookmark(s) in folder "${folderTitle}"`);
 
-    // Show confirmation
-    const confirmMessage = `Rescan ${bookmarkCount} bookmark(s) in "${folderTitle}" and its subfolders?\n\nThis will check link status and security for all bookmarks.`;
-    if (!confirm(confirmMessage)) {
-      return;
-    }
-
-    // Expand the rescanned folder and all its subfolders FIRST so icons can update live
-    const expandFolderTree = (nodeId) => {
-      expandedFolders.add(nodeId);
-      const node = findFolderById(nodeId, bookmarkTree);
-      if (node && node.children) {
-        node.children.forEach(child => {
-          if (child.type === 'folder' || child.children) {
-            expandFolderTree(child.id);
-          }
-        });
-      }
-    };
-    expandFolderTree(folderId);
-    renderBookmarks(); // Initial render with folders expanded
-
-    // Wait for DOM to update before starting scan
-    await new Promise(resolve => setTimeout(resolve, 100));
-
     // Update status bar to show scanning
     if (scanStatusBar) scanStatusBar.classList.add('scanning');
     if (scanProgress) scanProgress.textContent = `Preparing scan...`;
@@ -3840,7 +3816,7 @@ async function loadWhitelist() {
 // Save safety history to storage
 async function saveSafetyHistory() {
   try {
-    await safeStorage.set({ safetyHistory });
+    await safeStorage.set({ safetyHistory: JSON.stringify(safetyHistory) });
   } catch (error) {
     console.error('Failed to save safety history:', error);
   }
@@ -3851,8 +3827,15 @@ async function loadSafetyHistory() {
   try {
     const result = await safeStorage.get('safetyHistory');
     if (result.safetyHistory) {
-      safetyHistory = result.safetyHistory;
-      console.log(`Loaded safety history for ${Object.keys(safetyHistory).length} URLs`);
+      try {
+        safetyHistory = JSON.parse(result.safetyHistory);
+        console.log(`Loaded safety history for ${Object.keys(safetyHistory).length} URLs`);
+      } catch (parseError) {
+        // Old corrupted data - clear it and start fresh
+        console.log('[Safety History] Migrating to new storage format...');
+        safetyHistory = {};
+        await saveSafetyHistory(); // Save empty object in correct format to overwrite bad data
+      }
     }
   } catch (error) {
     console.error('Failed to load safety history:', error);
@@ -3863,9 +3846,9 @@ async function loadSafetyHistory() {
 function cleanupSafetyHistory() {
   if (!bookmarkTree || bookmarkTree.length === 0) return;
 
-  // Ensure safetyHistory is an object
-  if (Array.isArray(safetyHistory) || typeof safetyHistory !== 'object') {
-    console.warn('[Memory Cleanup] safetyHistory is not an object, resetting to {}');
+  // Ensure safetyHistory is a valid plain object (not null, not array)
+  if (!safetyHistory || Array.isArray(safetyHistory) || typeof safetyHistory !== 'object') {
+    console.warn('[Memory Cleanup] safetyHistory is not a valid object, resetting to {}');
     safetyHistory = {};
     saveSafetyHistory();
     return;
@@ -5202,7 +5185,13 @@ async function openChangelogModal() {
     entries.forEach(entry => {
       const date = new Date(entry.timestamp);
       const timeAgo = getTimeAgo(entry.timestamp);
-      const iconColor = entry.type === 'create' ? '#10b981' : entry.type === 'delete' ? '#ef4444' : entry.type === 'move' ? '#3b82f6' : entry.type === 'undo' ? '#8b5cf6' : '#f59e0b';
+      let iconColor;
+      if (entry.type === 'create') iconColor = '#10b981';
+      else if (entry.type === 'delete') iconColor = '#ef4444';
+      else if (entry.type === 'move') iconColor = '#3b82f6';
+      else if (entry.type === 'undo') iconColor = '#8b5cf6';
+      else if (entry.type === 'pre-sync-snapshot') iconColor = '#f59e0b';
+      else iconColor = '#f59e0b';
 
       // SVG icons for operation types
       let icon;
@@ -5214,39 +5203,53 @@ async function openChangelogModal() {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M14,18L12.6,16.6L15.2,14H4V12H15.2L12.6,9.4L14,8L19,13L14,18M20,6H10A2,2 0 0,0 8,8V11H10V8H20V20H10V17H8V20A2,2 0 0,0 10,22H20A2,2 0 0,0 22,20V8A2,2 0 0,0 20,6Z"/></svg>`;
       } else if (entry.type === 'undo') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 19.56,16H22.01C21.43,12.16 17.97,9 13.9,9H12.5V8M12.5,16C10.54,16 8.77,15.28 7.38,14.12L11,10.5H2V19.5L5.6,15.9C7.45,17.5 9.85,18.5 12.5,18.5C17.1,18.5 20.95,15.4 21.9,11.2H19.38C18.77,14.16 15.76,16.34 12.5,16Z"/></svg>`;
+      } else if (entry.type === 'pre-sync-snapshot') {
+        icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>`;
       } else {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/></svg>`;
       }
 
-      // SVG icons for item types
-      let itemIcon;
-      if (entry.itemType === 'folder') {
-        itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-primary);"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>`;
-      } else {
-        itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-secondary);"><path d="M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5C19,3.89 18.1,3 17,3Z"/></svg>`;
+      // SVG icons for item types (skip for sync snapshots)
+      let itemIcon = '';
+      if (entry.type !== 'pre-sync-snapshot') {
+        if (entry.itemType === 'folder') {
+          itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-primary);"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>`;
+        } else {
+          itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-secondary);"><path d="M17,3H7A2,2 0 0,0 5,5V21L12,18L19,21V5C19,3.89 18.1,3 17,3Z"/></svg>`;
+        }
       }
 
       let detailsHtml = '';
-      if (entry.type === 'undo') {
-        if (entry.details.undoType === 'move') {
-          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Restored to: ${entry.details.restoredToFolder}</div>`;
-        } else if (entry.details.undoType === 'update') {
-          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Reverted title from: "${entry.details.previousTitle}"</div>`;
-        } else {
-          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Undid ${entry.details.undoType} operation</div>`;
+      if (entry.details) {
+        if (entry.type === 'pre-sync-snapshot') {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">⚠️ Replaced all local bookmarks with remote data</div>`;
+        } else if (entry.type === 'undo') {
+          if (entry.details.undoType === 'move') {
+            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Restored to: ${entry.details.restoredToFolder}</div>`;
+          } else if (entry.details.undoType === 'update') {
+            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Reverted title from: "${entry.details.previousTitle}"</div>`;
+          } else {
+            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Undid ${entry.details.undoType} operation</div>`;
+          }
+        } else if (entry.details.oldTitle && entry.details.newTitle) {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${entry.details.oldTitle}</div>`;
+        } else if (entry.details.fromFolder && entry.details.toFolder) {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Moved from: ${entry.details.fromFolder} → ${entry.details.toFolder}</div>`;
+        } else if (entry.details.folderPath) {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Location: ${entry.details.folderPath}</div>`;
         }
-      } else if (entry.details && entry.details.oldTitle && entry.details.newTitle) {
-        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${entry.details.oldTitle}</div>`;
-      } else if (entry.details && entry.details.fromFolder && entry.details.toFolder) {
-        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Moved from: ${entry.details.fromFolder} → ${entry.details.toFolder}</div>`;
-      } else if (entry.details && entry.details.folderPath) {
-        detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Location: ${entry.details.folderPath}</div>`;
       }
 
       const urlHtml = entry.url ? `<div class="changelog-url" data-url="${entry.url}" style="font-size: 11px; color: var(--md-sys-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline;" title="Click to copy: ${entry.url}">${entry.url}</div>` : '';
 
       let restoreButtonHtml = '';
-      if ((entry.type === 'delete' || entry.type === 'move' || entry.type === 'update') && entry.type !== 'undo') {
+      if (entry.type === 'pre-sync-snapshot') {
+        restoreButtonHtml = `
+          <button class="changelog-restore-btn" data-entry-id="${entry.id}" title="Restore pre-sync bookmarks" style="margin-left: auto; padding: 6px 12px; border: 1px solid ${iconColor}; border-radius: 6px; background: ${iconColor}; color: #000; cursor: pointer; font-size: 12px; font-weight: 600;">
+            Restore Pre-Sync Bookmarks
+          </button>
+        `;
+      } else if ((entry.type === 'delete' || entry.type === 'move' || entry.type === 'update') && entry.type !== 'undo') {
         const restoreTitle = entry.type === 'delete' ? 'Restore this item' :
                             entry.type === 'move' ? 'Move back to original location' :
                             'Revert changes';
@@ -5344,6 +5347,51 @@ async function restoreChangelogEntry(entryId) {
     if (!entry) {
       alert('Changelog entry not found.');
       return;
+    }
+
+    // Handle pre-sync-snapshot restoration
+    if (entry.type === 'pre-sync-snapshot') {
+      if (!entry.details || !entry.details.snapshot) {
+        alert('Snapshot data not found. Cannot restore pre-sync bookmarks.');
+        return;
+      }
+
+      const confirmed = confirm(
+        `⚠️ RESTORE PRE-SYNC BOOKMARKS\n\n` +
+        `This will replace ALL your current bookmarks with the bookmarks you had BEFORE the sync operation.\n\n` +
+        `Operation: ${entry.details.operation || 'Sync'}\n` +
+        `Date: ${new Date(entry.timestamp).toLocaleString()}\n\n` +
+        `Are you sure you want to proceed?`
+      );
+
+      if (!confirmed) return;
+
+      try {
+        app.showToast('Restoring pre-sync bookmarks...', 'info');
+
+        const snapshot = entry.details.snapshot;
+
+        // Restore from snapshot (Website uses IndexedDB, no browser IDs involved)
+        await dbManager.put('metadata', { key: 'bookmarkTree', value: snapshot });
+
+        // Clear changelog since we've restored to a previous state
+        await clearChangelog();
+
+        app.showToast('✓ Pre-sync bookmarks restored successfully!', 'success');
+
+        // Refresh UI
+        await loadBookmarks();
+        await renderBookmarks();
+
+        // Close changelog modal
+        closeChangelogModal();
+
+        return;
+      } catch (error) {
+        console.error('[Restore Snapshot] Error:', error);
+        app.showToast(`Failed to restore snapshot: ${error.message}`, 'error');
+        return;
+      }
     }
 
     // Only allow restoring certain operation types
@@ -6684,6 +6732,63 @@ function setupEventListeners() {
         }
       });
     }
+
+    // Listen for scanner events to update UI
+    window.addEventListener('scanStarted', (e) => {
+      const { total } = e.detail;
+      console.log(`[Scan Started] ${total} bookmarks`);
+
+      // Show stop button, hide rescan button
+      if (stopScanBtn) stopScanBtn.style.display = 'flex';
+      if (rescanAllBtn) rescanAllBtn.style.display = 'none';
+
+      // Update status bar
+      if (scanProgress) scanProgress.textContent = `Scanning: 0/${total}`;
+      if (scanStatusBar) scanStatusBar.classList.add('scanning');
+    });
+
+    window.addEventListener('scanProgress', (e) => {
+      const { scanned, total } = e.detail;
+
+      // Update status bar with current progress
+      if (scanProgress) scanProgress.textContent = `Scanning: ${scanned}/${total}`;
+    });
+
+    window.addEventListener('scanComplete', (e) => {
+      const { scanned, total } = e.detail;
+      console.log(`[Scan Complete] ${scanned}/${total} bookmarks scanned`);
+
+      // Hide stop button, show rescan button
+      if (stopScanBtn) stopScanBtn.style.display = 'none';
+      if (rescanAllBtn) rescanAllBtn.style.display = 'flex';
+
+      // Update status bar
+      if (scanProgress) scanProgress.textContent = 'Scan complete';
+      if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+
+      // Reset to "Ready" after a brief delay
+      setTimeout(() => {
+        if (scanProgress) scanProgress.textContent = 'Ready';
+      }, 2000);
+    });
+
+    window.addEventListener('scanCancelled', (e) => {
+      const { scanned, total } = e.detail;
+      console.log(`[Scan Cancelled] ${scanned}/${total} bookmarks scanned before cancellation`);
+
+      // Hide stop button, show rescan button
+      if (stopScanBtn) stopScanBtn.style.display = 'none';
+      if (rescanAllBtn) rescanAllBtn.style.display = 'flex';
+
+      // Update status bar
+      if (scanProgress) scanProgress.textContent = 'Scan stopped';
+      if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+
+      // Reset to "Ready" after a brief delay
+      setTimeout(() => {
+        if (scanProgress) scanProgress.textContent = 'Ready';
+      }, 2000);
+    });
   }
 
   // Set Google API Key
@@ -7274,7 +7379,7 @@ async function initUI() {
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 11px;">v${APP_VERSION}</span>`;
-  if (logoSubtitle) logoSubtitle.textContent = 'A modern interface for your native bookmarks';
+  if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
 
   // Setup all UI elements and event listeners
   loadTheme();
