@@ -1609,6 +1609,16 @@ class App {
 
         // Clear local mode flag - user is now in GitLab mode
         localStorage.removeItem('bmz_local_mode');
+        await dbManager.put('settings', { key: 'bmz_local_mode', value: false });
+
+        // Update button visibility to show logout and manual sync buttons
+        const logoutBtn = document.getElementById('logoutBtn');
+        const manualSyncBtn = document.getElementById('manualSyncBtn');
+        const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
+
+        if (logoutBtn) logoutBtn.style.display = 'flex';
+        if (manualSyncBtn) manualSyncBtn.style.display = '';
+        if (headerConnectGitlabBtn) headerConnectGitlabBtn.style.display = 'none';
 
         // Close modal
         modal.classList.add('hidden');
@@ -2832,13 +2842,19 @@ class App {
     console.log('[App] Button visibility check - isLocalMode:', isLocalMode, 'logoutBtn exists:', !!logoutBtn);
 
     if (!isLocalMode) {
-      // Show logout button in GitLab mode
-      console.log('[App] GitLab mode - showing logout button');
+      // Show logout button and manual sync button in GitLab mode
+      console.log('[App] GitLab mode - showing logout button and manual sync button');
       if (logoutBtn) {
         logoutBtn.style.display = 'flex';
         console.log('[App] Logout button display set to flex');
       } else {
         console.error('[App] Logout button element not found!');
+      }
+
+      const manualSyncBtn = document.getElementById('manualSyncBtn');
+      if (manualSyncBtn) {
+        manualSyncBtn.style.display = '';
+        console.log('[App] Manual sync button shown');
       }
 
       // Check if we have a snippet set up
@@ -2877,10 +2893,16 @@ class App {
     } else {
       console.log('[App] Local mode - skipping remote sync');
 
-      // Hide logout button in local mode
+      // Hide logout button and manual sync button in local mode
       if (logoutBtn) {
         logoutBtn.style.display = 'none';
         console.log('[App] Logout button hidden for local mode');
+      }
+
+      const manualSyncBtn = document.getElementById('manualSyncBtn');
+      if (manualSyncBtn) {
+        manualSyncBtn.style.display = 'none';
+        console.log('[App] Manual sync button hidden for local mode');
       }
 
       // Show Connect GitLab button in header for local mode users
