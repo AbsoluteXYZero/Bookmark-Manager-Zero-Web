@@ -118,11 +118,48 @@ class App {
     console.log('[Auth] bmz_mode_chosen (IndexedDB):', hasChosenMode);
     console.log('[Auth] bmz_local_mode (IndexedDB):', isLocalMode);
 
-    // If user hasn't chosen a mode, always show login screen
+    // If user hasn't chosen a mode, check for local bookmarks first
     if (!hasChosenMode) {
       console.log('[Auth] User has not chosen a mode yet');
-      this.showLoginScreen();
-      return;
+
+      // Check if there are existing local bookmarks
+      const bookmarkTree = await dbManager.get('metadata', 'bookmarkTree');
+      const hasLocalBookmarks = bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots;
+
+      if (hasLocalBookmarks) {
+        // Found local bookmarks - prompt user before loading
+        console.log('[Auth] Found local bookmarks, prompting user...');
+
+        const shouldContinue = await this.showContinueWithLocalBookmarksDialog();
+
+        if (shouldContinue) {
+          // User chose to continue with local bookmarks
+          console.log('[Auth] User chose to continue with local bookmarks');
+
+          // Set local mode flags
+          await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
+          await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
+          localStorage.setItem('bmz_local_mode', 'true');
+          localStorage.setItem('bmz_mode_chosen', 'true');
+
+          this.isAuthenticated = true;
+          await this.showMainApp();
+
+          // Show friendly toast notification
+          this.showToast('Continuing with local bookmarks. You can connect GitLab anytime for cloud sync.', 'success');
+          return;
+        } else {
+          // User chose to see login options
+          console.log('[Auth] User chose to see login options');
+          this.showLoginScreen();
+          return;
+        }
+      } else {
+        // No bookmarks found, show login screen for first-time setup
+        console.log('[Auth] No existing bookmarks found, showing login screen');
+        this.showLoginScreen();
+        return;
+      }
     }
 
     // User is in local mode or GitLab mode
@@ -200,10 +237,15 @@ class App {
       loginScreen.style.display = '';
     }
 
-    // Hide logout button on login screen
+    // Hide logout and manual sync buttons on login screen
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
       logoutBtn.style.display = 'none';
+    }
+
+    const manualSyncBtn = document.getElementById('manualSyncBtn');
+    if (manualSyncBtn) {
+      manualSyncBtn.style.display = 'none';
     }
 
     // Add show-login class to html element to make login screen visible
@@ -2404,6 +2446,56 @@ class App {
     }
 
     return count;
+  }
+
+  /**
+   * Show dialog asking user if they want to continue with local bookmarks
+   * Returns true if user wants to continue, false if they want to see login options
+   */
+  async showContinueWithLocalBookmarksDialog() {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; display: flex; align-items: center; justify-content: center;';
+
+      const dialog = document.createElement('div');
+      dialog.style.cssText = 'background: var(--md-sys-color-surface, #1e293b); padding: 24px; border-radius: 12px; max-width: 500px; box-shadow: 0 10px 40px rgba(0,0,0,0.3);';
+
+      dialog.innerHTML = `
+        <h3 style="margin: 0 0 16px 0; color: var(--md-sys-color-on-surface, #f1f5f9); font-size: 20px;">📚 Local Bookmarks Found</h3>
+        <p style="margin: 0 0 24px 0; color: var(--md-sys-color-on-surface-variant, #cbd5e1); line-height: 1.6;">
+          We found existing bookmarks stored locally on this device. Would you like to continue with these bookmarks, or would you prefer to see login options?
+        </p>
+        <div style="display: flex; gap: 12px;">
+          <button id="showLoginOptions" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-surface-variant, #334155); color: var(--md-sys-color-on-surface-variant, #cbd5e1); cursor: pointer; font-size: 14px; font-weight: 500;">
+            See Login Options
+          </button>
+          <button id="continueLocal" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-primary, #818cf8); color: var(--md-sys-color-on-primary, #1e1b4b); cursor: pointer; font-size: 14px; font-weight: 500;">
+            Continue with Local Bookmarks
+          </button>
+        </div>
+      `;
+
+      document.body.appendChild(modal);
+      modal.appendChild(dialog);
+
+      dialog.querySelector('#continueLocal').addEventListener('click', () => {
+        modal.remove();
+        resolve(true);
+      });
+
+      dialog.querySelector('#showLoginOptions').addEventListener('click', () => {
+        modal.remove();
+        resolve(false);
+      });
+
+      // Allow clicking outside to dismiss and show login options
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.remove();
+          resolve(false);
+        }
+      });
+    });
   }
 
   /**
