@@ -2192,8 +2192,15 @@ function createBookmarkElement(bookmark) {
     if (multiSelectMode) {
       return;
     }
-    // Open in active tab
+    // Open in new tab
     console.log('[Bookmark Click] Opening URL:', bookmark.url);
+    const newWindow = window.open(bookmark.url, '_blank');
+    if (!newWindow) {
+      console.error('[Bookmark Click] Failed to open window - popup may be blocked');
+      alert('Popup blocked! Please allow popups for this site to open bookmarks.');
+    } else {
+      console.log('[Bookmark Click] Window opened successfully');
+    }
   });
 
   // Add menu toggle handler
