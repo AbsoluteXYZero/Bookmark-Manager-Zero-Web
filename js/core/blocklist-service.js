@@ -347,6 +347,14 @@ class BlocklistService {
       await this.updateBlocklistDatabase();
     } else {
       console.log('[Blocklist] Using cached data from today');
+      // Dispatch complete event so UI updates properly even when using cache
+      window.dispatchEvent(new CustomEvent('blocklist:complete', {
+        detail: {
+          domains: this.maliciousUrlsSet.size,
+          totalEntries: this.maliciousUrlsSet.size,
+          sources: this.BLOCKLIST_SOURCES.length
+        }
+      }));
     }
 
     if (this.blocklistLoading) {
