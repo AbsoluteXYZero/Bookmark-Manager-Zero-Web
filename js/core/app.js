@@ -1580,16 +1580,8 @@ class App {
       await bookmarkManager.reload();
       console.log('[App] Bookmark manager reloaded');
 
-      // If bookmarks were updated from remote, trigger automatic scan
-      if (updated && scannerService) {
-        console.log('[App] Bookmarks loaded from remote, triggering automatic scan...');
-        // Use setTimeout to avoid blocking the UI
-        setTimeout(() => {
-          scannerService.scanAllBookmarks(false).catch(err => {
-            console.error('[App] Auto-scan failed:', err);
-          });
-        }, 500);
-      }
+      // Automatic scan disabled for sync/merge operations
+      // Users can manually trigger scans if needed
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
       // Try to reload with local data anyway

@@ -553,6 +553,12 @@ class ScannerService {
     * Process scan queue with batch limit and better progress reporting
     */
    processQueue() {
+     // Check if scan was stopped
+     if (!this.isScanning) {
+       console.log('Scan stopped, aborting queue processing');
+       return;
+     }
+
      if (this.scanQueue.length === 0 && this.urlsBeingScanned.size === 0) {
        // Only log completion once
        if (this.isScanning) {
@@ -582,8 +588,8 @@ class ScannerService {
 
      // Delay next batch by 100ms to avoid overwhelming the network
      setTimeout(() => {
-       // Continue processing if there's more in queue OR if URLs are still being scanned
-       if (this.scanQueue.length > 0 || this.urlsBeingScanned.size > 0) {
+       // Continue processing if scan is still active and there's more work to do
+       if (this.isScanning && (this.scanQueue.length > 0 || this.urlsBeingScanned.size > 0)) {
          this.processQueue();
        }
      }, 100);
