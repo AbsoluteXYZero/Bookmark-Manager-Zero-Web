@@ -3,6 +3,8 @@
  * Manages the circular progress timer and sync enabled/disabled state
  */
 
+import { safeLocalStorage } from '../utils/storage-utils.js';
+
 class SyncTimer {
   constructor(syncManager) {
     this.syncManager = syncManager;
@@ -129,7 +131,7 @@ class SyncTimer {
       this.syncManager.stopAutoSync();
       this.syncManager.autoSyncEnabled = false;
       // Persist the setting
-      localStorage.setItem('bmz_autoSyncEnabled', 'false');
+      safeLocalStorage.setItem('bmz_autoSyncEnabled', 'false');
     }
 
     // Show disabled state
@@ -152,7 +154,7 @@ class SyncTimer {
       this.syncManager.autoSyncEnabled = true;
       this.syncManager.startAutoSync();
       // Persist the setting
-      localStorage.setItem('bmz_autoSyncEnabled', 'true');
+      safeLocalStorage.setItem('bmz_autoSyncEnabled', 'true');
     }
 
     // Hide disabled state
@@ -193,7 +195,7 @@ class SyncTimer {
    * Restore sync state from localStorage
    */
   restoreState() {
-    const savedState = localStorage.getItem('bmz_autoSyncEnabled');
+    const savedState = safeLocalStorage.getItem('bmz_autoSyncEnabled');
     if (savedState === 'false') {
       this.disableSync();
     } else {

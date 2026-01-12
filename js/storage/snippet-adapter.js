@@ -5,6 +5,7 @@
 
 import authManager from '../auth/auth-manager.js';
 import GitLabErrorHandler from '../utils/gitlab-error-handler.js';
+import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class SnippetAdapter {
   constructor() {
@@ -271,7 +272,7 @@ class SnippetAdapter {
   setSnippetId(snippetId) {
     this.snippetId = snippetId;
     // Store in localStorage so we remember it
-    localStorage.setItem('bmz_snippet_id', snippetId);
+    safeLocalStorage.setItem('bmz_snippet_id', snippetId);
     console.log('Set bookmark Snippet ID:', snippetId);
   }
 
@@ -279,7 +280,7 @@ class SnippetAdapter {
    * Load saved snippet ID from storage
    */
   loadSavedSnippetId() {
-    const savedId = localStorage.getItem('bmz_snippet_id');
+    const savedId = safeLocalStorage.getItem('bmz_snippet_id');
     if (savedId) {
       // Validate that it's a string and not an object
       if (typeof savedId === 'string' && !savedId.startsWith('{') && !savedId.startsWith('[')) {
@@ -288,7 +289,7 @@ class SnippetAdapter {
         return savedId;
       } else {
         console.warn('Invalid snippet ID in localStorage:', savedId);
-        localStorage.removeItem('bmz_snippet_id');
+        safeLocalStorage.removeItem('bmz_snippet_id');
       }
     }
     return null;
@@ -465,7 +466,7 @@ class SnippetAdapter {
           // Clear the invalid Snippet ID immediately
           console.warn('[ReadSnippet] Clearing invalid Snippet ID:', id);
           this.snippetId = null;
-          localStorage.removeItem('bmz_snippet_id');
+          safeLocalStorage.removeItem('bmz_snippet_id');
 
           throw new Error('Bookmark Snippet not found');
         } else if (response.status >= 500 && response.status < 600) {

@@ -7,6 +7,7 @@
 import dbManager from './indexeddb.js';
 import snippetAdapter from './snippet-adapter.js';
 import authManager from '../auth/auth-manager.js';
+import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class SyncManager {
   constructor() {
@@ -280,7 +281,7 @@ class SyncManager {
         this.hasUnsyncedChanges = false; // Clear the flag to prevent retry loops
 
         // Clear the stored snippet ID
-        localStorage.removeItem('bmz_snippet_id');
+        safeLocalStorage.removeItem('bmz_snippet_id');
         await dbManager.delete('metadata', 'snippetId');
         this.snippetId = null;
         snippetAdapter.snippetId = null;
@@ -554,7 +555,7 @@ class SyncManager {
       if (error.message && error.message.includes('not found')) {
         console.warn('[SyncFromRemote] Remote not found (404), clearing stored ID');
 
-        localStorage.removeItem('bmz_snippet_id');
+        safeLocalStorage.removeItem('bmz_snippet_id');
         await dbManager.delete('metadata', 'snippetId');
         this.snippetId = null;
         snippetAdapter.snippetId = null;

@@ -5,6 +5,7 @@
  */
 
 import dbManager from '../storage/indexeddb.js';
+import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class AuthManager {
   constructor() {
@@ -243,12 +244,18 @@ class AuthManager {
    * Generate a unique device ID for sync locking
    */
   getDeviceId() {
-    let deviceId = localStorage.getItem('bmz_device_id');
-    if (!deviceId) {
-      deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      localStorage.setItem('bmz_device_id', deviceId);
+    try {
+      let deviceId = safeLocalStorage.getItem('bmz_device_id');
+      if (!deviceId) {
+        deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        safeLocalStorage.setItem('bmz_device_id', deviceId);
+      }
+      return deviceId;
+    } catch (e) {
+      // localStorage not available, generate temporary device ID
+      console.warn('localStorage not available for device ID, using temporary ID');
+      return `device_temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     }
-    return deviceId;
   }
 
   /**

@@ -6,6 +6,7 @@
 
 import bookmarkManager from './bookmarks.js';
 import scannerService from './scanner.js';
+import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class UIManager {
   constructor() {
@@ -31,7 +32,7 @@ class UIManager {
     */
    async init() {
      // Load preferences from storage
-     const stored = localStorage.getItem('bmz_ui_preferences');
+     const stored = safeLocalStorage.getItem('bmz_ui_preferences');
      if (stored) {
        try {
          const prefs = JSON.parse(stored);
@@ -59,7 +60,7 @@ class UIManager {
         expandedFolders: Array.from(this.expandedFolders),
         hasSeenSetupCard: this.hasSeenSetupCard
       };
-      localStorage.setItem('bmz_ui_preferences', JSON.stringify(prefs));
+      safeLocalStorage.setItem('bmz_ui_preferences', JSON.stringify(prefs));
     } catch (e) {
       console.error('Failed to save UI preferences:', e);
     }

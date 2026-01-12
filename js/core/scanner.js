@@ -7,6 +7,7 @@
 import dbManager from '../storage/indexeddb.js';
 import blocklistService from './blocklist-service.js';
 import { decryptApiKey } from '../utils/encryption.js';
+import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class ScannerService {
   constructor() {
@@ -183,7 +184,7 @@ class ScannerService {
    */
   async getDecryptedApiKey(keyName) {
     try {
-      const encrypted = localStorage.getItem(keyName);
+      const encrypted = safeLocalStorage.getItem(keyName);
       if (encrypted) {
         return await decryptApiKey(encrypted);
       }

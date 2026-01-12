@@ -18,7 +18,7 @@ import { exportAsJSON } from '../import-export/json-exporter.js';
 import { importFromHTML } from '../import-export/html-parser.js';
 import { importFromJSON } from '../import-export/json-parser.js';
 import touchHandler from '../mobile/touch-handler.js';
-import { addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
+import { safeLocalStorage, addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
 
 class App {
   constructor() {
@@ -68,12 +68,12 @@ class App {
   async cleanupLocalStorage() {
     try {
       // Clean localStorage
-      const savedSnippetId = localStorage.getItem('bmz_snippet_id');
+      const savedSnippetId = safeLocalStorage.getItem('bmz_snippet_id');
       if (savedSnippetId) {
         // Check if it's an object instead of a string
         if (savedSnippetId.startsWith('{') || savedSnippetId.startsWith('[')) {
           console.warn('Found corrupted snippet ID in localStorage, clearing...');
-          localStorage.removeItem('bmz_snippet_id');
+          safeLocalStorage.removeItem('bmz_snippet_id');
         }
       }
 
@@ -139,8 +139,8 @@ class App {
           // Set local mode flags
           await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-          localStorage.setItem('bmz_local_mode', 'true');
-          localStorage.setItem('bmz_mode_chosen', 'true');
+          safeLocalStorage.setItem('bmz_local_mode', 'true');
+          safeLocalStorage.setItem('bmz_mode_chosen', 'true');
 
           this.isAuthenticated = true;
           await this.showMainApp();
@@ -342,8 +342,8 @@ class App {
           await authManager.storePreference('syncProvider', 'local');
           await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-          localStorage.setItem('bmz_local_mode', 'true');
-          localStorage.setItem('bmz_mode_chosen', 'true');
+          safeLocalStorage.setItem('bmz_local_mode', 'true');
+          safeLocalStorage.setItem('bmz_mode_chosen', 'true');
 
           // Show success and load main app
           await this.showMainApp();
@@ -394,8 +394,8 @@ class App {
           await authManager.storePreference('syncProvider', 'local');
           await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-          localStorage.setItem('bmz_local_mode', 'true');
-          localStorage.setItem('bmz_mode_chosen', 'true');
+          safeLocalStorage.setItem('bmz_local_mode', 'true');
+          safeLocalStorage.setItem('bmz_mode_chosen', 'true');
 
           // Load and show main app
           await this.showMainApp();
@@ -442,8 +442,8 @@ class App {
           await authManager.storePreference('syncProvider', 'local');
           await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-          localStorage.setItem('bmz_local_mode', 'true');
-          localStorage.setItem('bmz_mode_chosen', 'true');
+          safeLocalStorage.setItem('bmz_local_mode', 'true');
+          safeLocalStorage.setItem('bmz_mode_chosen', 'true');
 
           // Hide continue button since we just deleted everything
           if (continueExistingBtn) {
@@ -520,8 +520,8 @@ class App {
 
           // Mark that user has chosen GitLab mode (don't set local mode flag)
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-          localStorage.setItem('bmz_mode_chosen', 'true');
-          localStorage.removeItem('bmz_local_mode'); // Clear local mode flag
+          safeLocalStorage.setItem('bmz_mode_chosen', 'true');
+          safeLocalStorage.removeItem('bmz_local_mode'); // Clear local mode flag
 
           // Show success and load main app
           await this.showMainApp();
@@ -572,7 +572,7 @@ class App {
       await authManager.storePreference('syncProvider', 'local');
 
       // Clear snippet ID from localStorage, IndexedDB, and adapter
-      localStorage.removeItem('bmz_snippet_id');
+      safeLocalStorage.removeItem('bmz_snippet_id');
       await dbManager.delete('metadata', 'snippetId');
       snippetAdapter.snippetId = null;
 
@@ -583,8 +583,8 @@ class App {
       // Set local mode flags (IndexedDB is source of truth, localStorage is cache)
       await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
       await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
-      localStorage.setItem('bmz_local_mode', 'true');
-      localStorage.setItem('bmz_mode_chosen', 'true');
+      safeLocalStorage.setItem('bmz_local_mode', 'true');
+      safeLocalStorage.setItem('bmz_mode_chosen', 'true');
 
       console.log('[Logout] Set local mode flags');
 
@@ -653,9 +653,9 @@ class App {
       await dbManager.delete('settings', 'bmz_mode_chosen');
       await dbManager.delete('settings', 'bmz_local_mode');
       await dbManager.delete('settings', 'syncProvider');
-      localStorage.removeItem('bmz_mode_chosen');
-      localStorage.removeItem('bmz_local_mode');
-      localStorage.removeItem('bmz_snippet_id');
+      safeLocalStorage.removeItem('bmz_mode_chosen');
+      safeLocalStorage.removeItem('bmz_local_mode');
+      safeLocalStorage.removeItem('bmz_snippet_id');
 
       // Clear snippet ID from IndexedDB
       await dbManager.delete('metadata', 'snippetId');
@@ -679,7 +679,7 @@ class App {
       const allKeys = Object.keys(localStorage);
       for (const key of allKeys) {
         if (key.startsWith('bmz_') && !keysToKeep.includes(key)) {
-          localStorage.removeItem(key);
+          safeLocalStorage.removeItem(key);
         }
       }
 
@@ -796,7 +796,7 @@ class App {
         return true;
       } catch (error) {
         console.warn('Saved snippet ID is invalid, clearing:', error);
-        localStorage.removeItem('bmz_snippet_id');
+        safeLocalStorage.removeItem('bmz_snippet_id');
       }
     }
 
@@ -829,7 +829,7 @@ class App {
 
     try {
       // FIRST check if we have a saved snippet ID in localStorage
-      const savedId = localStorage.getItem('bmz_snippet_id');
+      const savedId = safeLocalStorage.getItem('bmz_snippet_id');
 
       if (savedId) {
         console.log(`[SnippetSetup] Found saved ${itemName} ID in localStorage:`, savedId);
@@ -842,7 +842,7 @@ class App {
         } catch (err) {
           console.warn(`[SnippetSetup] Saved ${itemName} ID is invalid:`, err);
           // Clear the invalid ID and continue to show setup options
-          localStorage.removeItem('bmz_snippet_id');
+          safeLocalStorage.removeItem('bmz_snippet_id');
         }
       }
 
@@ -1650,7 +1650,7 @@ class App {
         this.isAuthenticated = true;
 
         // Clear local mode flag - user is now in GitLab mode
-        localStorage.removeItem('bmz_local_mode');
+        safeLocalStorage.removeItem('bmz_local_mode');
         await dbManager.put('settings', { key: 'bmz_local_mode', value: false });
 
         // Update button visibility to show logout and manual sync buttons

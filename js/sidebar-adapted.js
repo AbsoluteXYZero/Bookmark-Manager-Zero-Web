@@ -20,6 +20,7 @@ import {
   setupGlobalErrorHandlers
 } from './utils/error-notification-manager.js';
 import {
+  safeLocalStorage,
   storeEncryptedApiKey,
   getDecryptedApiKey,
   addChangelogEntry,
@@ -205,17 +206,17 @@ const safeStorage = {
     }
     // Normal mode: use localStorage for website version
     if (typeof keys === 'string') {
-      return { [keys]: localStorage.getItem(keys) };
+      return { [keys]: safeLocalStorage.getItem(keys) };
     } else if (Array.isArray(keys)) {
       const result = {};
       keys.forEach(key => {
-        result[key] = localStorage.getItem(key);
+        result[key] = safeLocalStorage.getItem(key);
       });
       return result;
     } else if (typeof keys === 'object') {
       const result = {};
       Object.keys(keys).forEach(key => {
-        result[key] = localStorage.getItem(key) || keys[key];
+        result[key] = safeLocalStorage.getItem(key) || keys[key];
       });
       return result;
     }
@@ -234,7 +235,7 @@ const safeStorage = {
     // Normal mode: use localStorage for website version
     Object.entries(items).forEach(([key, value]) => {
       if (value !== undefined && value !== null) {
-        localStorage.setItem(key, value);
+        safeLocalStorage.setItem(key, value);
       }
     });
   },
@@ -247,7 +248,7 @@ const safeStorage = {
     }
     // Normal mode: use localStorage for website version
     const keysArray = Array.isArray(keys) ? keys : [keys];
-    keysArray.forEach(key => localStorage.removeItem(key));
+    keysArray.forEach(key => safeLocalStorage.removeItem(key));
   }
 };
 
@@ -507,7 +508,7 @@ const totalCount = document.getElementById('totalCount');
 // Load folder scan timestamps from storage
 async function loadFolderScanTimestamps() {
   try {
-    const timestampsStr = localStorage.getItem('folderScanTimestamps');
+    const timestampsStr = safeLocalStorage.getItem('folderScanTimestamps');
     if (timestampsStr) {
       folderScanTimestamps = JSON.parse(timestampsStr);
       console.log(`[Folder Scan Cache] Loaded timestamps for ${Object.keys(folderScanTimestamps).length} folders`);
@@ -521,7 +522,7 @@ async function loadFolderScanTimestamps() {
 async function saveFolderScanTimestamp(folderId) {
   try {
     folderScanTimestamps[folderId] = Date.now();
-    localStorage.setItem('folderScanTimestamps', JSON.stringify(folderScanTimestamps));
+    safeLocalStorage.setItem('folderScanTimestamps', JSON.stringify(folderScanTimestamps));
     console.log(`[Folder Scan Cache] Saved timestamp for folder ${folderId}`);
   } catch (error) {
     console.error('[Folder Scan Cache] Error saving timestamp:', error);
@@ -798,13 +799,13 @@ function applyBackgroundImage(imageData, opacity, blur, size, positionX, positio
 }
 
 function loadSavedBackgroundImage() {
-  const savedImage = localStorage.getItem('backgroundImage');
-  const savedOpacity = localStorage.getItem('backgroundOpacity');
-  const savedBlur = localStorage.getItem('backgroundBlur');
-  const savedSize = localStorage.getItem('backgroundSize');
-  const savedPositionX = localStorage.getItem('backgroundPositionX');
-  const savedPositionY = localStorage.getItem('backgroundPositionY');
-  const savedScale = localStorage.getItem('backgroundScale');
+  const savedImage = safeLocalStorage.getItem('backgroundImage');
+  const savedOpacity = safeLocalStorage.getItem('backgroundOpacity');
+  const savedBlur = safeLocalStorage.getItem('backgroundBlur');
+  const savedSize = safeLocalStorage.getItem('backgroundSize');
+  const savedPositionX = safeLocalStorage.getItem('backgroundPositionX');
+  const savedPositionY = safeLocalStorage.getItem('backgroundPositionY');
+  const savedScale = safeLocalStorage.getItem('backgroundScale');
 
   if (savedOpacity) {
     backgroundOpacitySlider.value = savedOpacity;
@@ -848,7 +849,7 @@ function applyContainerOpacity(opacity) {
 // Load saved container opacity
 function loadContainerOpacity() {
   if (!containerOpacitySlider) return;
-  const savedOpacity = localStorage.getItem('containerOpacity');
+  const savedOpacity = safeLocalStorage.getItem('containerOpacity');
   if (savedOpacity) {
     containerOpacitySlider.value = savedOpacity;
     containerOpacityValue.textContent = `${savedOpacity}%`;
@@ -899,7 +900,7 @@ function applyCustomTextColor(color) {
 // Load saved custom text color
 function loadCustomTextColor() {
   if (!textColorPicker) return;
-  const savedColor = localStorage.getItem('customTextColor');
+  const savedColor = safeLocalStorage.getItem('customTextColor');
   if (savedColor) {
     textColorPicker.value = savedColor;
     applyCustomTextColor(savedColor);
@@ -915,7 +916,7 @@ function resetCustomTextColor() {
   if (styleTag) {
     styleTag.remove();
   }
-  localStorage.removeItem('customTextColor');
+  safeLocalStorage.removeItem('customTextColor');
 }
 
 // Remove URL from whitelist
@@ -948,8 +949,8 @@ async function removeFromWhitelist(url) {
 
 // Load checking settings from localStorage
 function loadCheckingSettings() {
-  const savedLinkChecking = localStorage.getItem('linkCheckingEnabled');
-  const savedSafetyChecking = localStorage.getItem('safetyCheckingEnabled');
+  const savedLinkChecking = safeLocalStorage.getItem('linkCheckingEnabled');
+  const savedSafetyChecking = safeLocalStorage.getItem('safetyCheckingEnabled');
 
   // Default to true if not set
   linkCheckingEnabled = savedLinkChecking !== null ? savedLinkChecking === 'true' : true;
@@ -960,6 +961,66 @@ function loadCheckingSettings() {
   const safetyCheckbox = document.getElementById('enableSafetyChecking');
   if (linkCheckbox) linkCheckbox.checked = linkCheckingEnabled;
   if (safetyCheckbox) safetyCheckbox.checked = safetyCheckingEnabled;
+}
+
+// Load display options from localStorage
+function loadDisplayOptions() {
+  // Load saved values or use defaults (all true)
+  const savedTitle = safeLocalStorage.getItem('displayTitle');
+  const savedUrl = safeLocalStorage.getItem('displayUrl');
+  const savedFavicon = safeLocalStorage.getItem('displayFavicon');
+  const savedLiveStatus = safeLocalStorage.getItem('displayLiveStatus');
+  const savedSafetyStatus = safeLocalStorage.getItem('displaySafetyStatus');
+  const savedPreview = safeLocalStorage.getItem('displayPreview');
+  const savedPreviewPopup = safeLocalStorage.getItem('displayPreviewPopup');
+
+  // Update displayOptions object (default to true if not set)
+  displayOptions.title = savedTitle !== null ? savedTitle === 'true' : true;
+  displayOptions.url = savedUrl !== null ? savedUrl === 'true' : true;
+  displayOptions.favicon = savedFavicon !== null ? savedFavicon === 'true' : true;
+  displayOptions.liveStatus = savedLiveStatus !== null ? savedLiveStatus === 'true' : true;
+  displayOptions.safetyStatus = savedSafetyStatus !== null ? savedSafetyStatus === 'true' : true;
+  displayOptions.preview = savedPreview !== null ? savedPreview === 'true' : true;
+
+  // Update previewPopupEnabled variable (default to true if not set)
+  previewPopupEnabled = savedPreviewPopup !== null ? savedPreviewPopup === 'true' : true;
+
+  // Update checkbox states
+  const titleCheckbox = document.getElementById('displayTitle');
+  const urlCheckbox = document.getElementById('displayUrl');
+  const faviconCheckbox = document.getElementById('displayFavicon');
+  const liveStatusCheckbox = document.getElementById('displayLiveStatus');
+  const safetyStatusCheckbox = document.getElementById('displaySafetyStatus');
+  const previewCheckbox = document.getElementById('displayPreview');
+  const previewPopupCheckbox = document.getElementById('displayPreviewPopup');
+
+  if (titleCheckbox) titleCheckbox.checked = displayOptions.title;
+  if (urlCheckbox) urlCheckbox.checked = displayOptions.url;
+  if (faviconCheckbox) faviconCheckbox.checked = displayOptions.favicon;
+  if (liveStatusCheckbox) liveStatusCheckbox.checked = displayOptions.liveStatus;
+  if (safetyStatusCheckbox) safetyStatusCheckbox.checked = displayOptions.safetyStatus;
+  if (previewCheckbox) previewCheckbox.checked = displayOptions.preview;
+  if (previewPopupCheckbox) previewPopupCheckbox.checked = previewPopupEnabled;
+}
+
+// Load active filters from localStorage
+function loadActiveFilters() {
+  const savedFilters = safeLocalStorage.getItem('activeFilters');
+  if (savedFilters) {
+    try {
+      activeFilters = JSON.parse(savedFilters);
+      // Update filter chip states
+      document.querySelectorAll('.filter-chip').forEach(chip => {
+        const filter = chip.dataset.filter;
+        if (activeFilters.includes(filter)) {
+          chip.classList.add('active');
+        }
+      });
+    } catch (error) {
+      console.error('Error loading active filters:', error);
+      activeFilters = [];
+    }
+  }
 }
 
 // Apply zoom
@@ -1408,13 +1469,58 @@ async function openBookmarkUrl(url, openInNewTab = false) {
 function renderBookmarks() {
   const filtered = filterAndSearchBookmarks(bookmarkTree);
 
-  if (filtered.length === 0) {
+  if (filtered.length === 0 && hasSeenSetupCard) {
     bookmarkList.innerHTML = `
       <div style="text-align: center; padding: 40px 20px; color: var(--md-sys-color-on-surface-variant);">
         <div style="font-size: 48px; margin-bottom: 12px; opacity: 0.5;">🔍</div>
-        <div style="font-size: 14px;">No bookmarks found</div>
+        <div style="font-size: 14px; margin-bottom: 16px;">No bookmarks found</div>
+        <button onclick="location.reload()" style="padding: 8px 16px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: 8px; cursor: pointer; font-size: 14px;">Return to Bookmark Manager Setup</button>
       </div>
     `;
+
+    return;
+  }
+
+  // Show setup card when no bookmarks AND user hasn't dismissed it
+  if (filtered.length === 0 && !hasSeenSetupCard) {
+    bookmarkList.innerHTML = '';
+
+    const setupCard = document.createElement('div');
+    setupCard.className = 'setup-card';
+    setupCard.innerHTML = `
+      <div class="setup-card-header">🎆 Welcome to Bookmark Manager Zero! 🎆</div>
+      <div class="setup-card-subheader">Your bookmarks are already here!</div>
+      <button class="setup-card-scan-btn" id="setupScanBtn">🔍 Scan All Bookmarks Now</button>
+      <div class="setup-card-info">
+        Bookmarks auto-scan when you expand folders (every 7 days). Progress appears in the status bar below.
+        You'll be alerted if safe bookmarks turn malicious.
+      </div>
+      <div class="setup-card-disclaimer">
+        <strong>Note:</strong> Scanning relies on community-submitted threat lists and automated link validation.
+        This may produce false positive/negative results. Use Bookmark Manager Zero as a helpful safety tool,
+        not a security guarantee.
+      </div>
+      <button class="setup-card-dismiss-btn" id="setupDismissBtn">Got it, don't show this again</button>
+    `;
+    bookmarkList.appendChild(setupCard);
+
+    // Add event listeners
+    setTimeout(() => {
+      const scanBtn = document.getElementById('setupScanBtn');
+      const dismissBtn = document.getElementById('setupDismissBtn');
+
+      if (scanBtn) {
+        scanBtn.addEventListener('click', async () => {
+          await dismissSetupCard();
+          await rescanAllBookmarks();
+        });
+      }
+
+      if (dismissBtn) {
+        dismissBtn.addEventListener('click', dismissSetupCard);
+      }
+    }, 0);
+
     return;
   }
 
@@ -2614,26 +2720,6 @@ function hideQRCodePopup() {
     qrCodePopup.classList.remove('show');
   }
 }
-
-// Load preview popup setting
-async function loadPreviewPopupSetting() {
-  try {
-    const result = await safeStorage.get('previewPopupEnabled');
-    if (result.previewPopupEnabled !== undefined) {
-      previewPopupEnabled = result.previewPopupEnabled;
-      // Update checkbox state
-      const checkbox = document.getElementById('displayPreviewPopup');
-      if (checkbox) {
-        checkbox.checked = previewPopupEnabled;
-      }
-    }
-  } catch (error) {
-    console.error('Error loading preview popup setting:', error);
-  }
-}
-
-// Initialize preview popup setting
-loadPreviewPopupSetting();
 
 // Drag and drop helper functions
 function handleDragOver(e, targetElement) {
@@ -4264,12 +4350,12 @@ async function openAddBookmarkModal() {
 
   // Load sort preference and populate dropdown
   const sortCheckbox = document.getElementById('sortBookmarkFoldersAlpha');
-  const sortPref = localStorage.getItem('sortFoldersAlphabetically') === 'true';
+  const sortPref = safeLocalStorage.getItem('sortFoldersAlphabetically') === 'true';
   sortCheckbox.checked = sortPref;
   populateFolderDropdown(folderSelect, sortPref);
 
   // Set default folder - prefer last used, then Bookmarks Menu, then first available
-  const lastUsedFolder = localStorage.getItem('lastBookmarkFolder');
+  const lastUsedFolder = safeLocalStorage.getItem('lastBookmarkFolder');
   if (lastUsedFolder && folderSelect.querySelector(`option[value="${lastUsedFolder}"]`)) {
     folderSelect.value = lastUsedFolder;
   } else {
@@ -4288,7 +4374,7 @@ async function openAddBookmarkModal() {
   // Add event listener for sort checkbox
   sortCheckbox.addEventListener('change', (e) => {
     const sortAlpha = e.target.checked;
-    localStorage.setItem('sortFoldersAlphabetically', sortAlpha);
+    safeLocalStorage.setItem('sortFoldersAlphabetically', sortAlpha);
     populateFolderDropdown(folderSelect, sortAlpha);
   });
 
@@ -4356,7 +4442,7 @@ async function saveNewBookmark() {
 
     // Remember the selected folder for next time
     if (parentId) {
-      localStorage.setItem('lastBookmarkFolder', parentId);
+      safeLocalStorage.setItem('lastBookmarkFolder', parentId);
     }
 
     await loadBookmarks();
@@ -4378,12 +4464,12 @@ function openAddFolderModal() {
 
   // Load sort preference and populate dropdown
   const sortCheckbox = document.getElementById('sortFolderParentsAlpha');
-  const sortPref = localStorage.getItem('sortFoldersAlphabetically') === 'true';
+  const sortPref = safeLocalStorage.getItem('sortFoldersAlphabetically') === 'true';
   sortCheckbox.checked = sortPref;
   populateFolderDropdown(parentSelect, sortPref);
 
   // Set default folder - prefer last used, then Bookmarks Menu, then first available
-  const lastUsedParent = localStorage.getItem('lastFolderParent');
+  const lastUsedParent = safeLocalStorage.getItem('lastFolderParent');
   if (lastUsedParent && parentSelect.querySelector(`option[value="${lastUsedParent}"]`)) {
     parentSelect.value = lastUsedParent;
   } else {
@@ -4402,7 +4488,7 @@ function openAddFolderModal() {
   // Add event listener for sort checkbox
   sortCheckbox.addEventListener('change', (e) => {
     const sortAlpha = e.target.checked;
-    localStorage.setItem('sortFoldersAlphabetically', sortAlpha);
+    safeLocalStorage.setItem('sortFoldersAlphabetically', sortAlpha);
     populateFolderDropdown(parentSelect, sortAlpha);
   });
 
@@ -4449,7 +4535,7 @@ async function saveNewFolder() {
 
     // Remember the selected parent folder for next time
     if (parentId) {
-      localStorage.setItem('lastFolderParent', parentId);
+      safeLocalStorage.setItem('lastFolderParent', parentId);
     }
 
     await loadBookmarks();
@@ -6035,6 +6121,7 @@ function setupEventListeners() {
       return;
     }
     displayOptions.title = e.target.checked;
+    safeLocalStorage.setItem('displayTitle', e.target.checked);
     renderBookmarks();
   });
 
@@ -6045,12 +6132,14 @@ function setupEventListeners() {
       return;
     }
     displayOptions.url = e.target.checked;
+    safeLocalStorage.setItem('displayUrl', e.target.checked);
     renderBookmarks();
   });
 
   const displayFavicon = document.getElementById('displayFavicon');
   displayFavicon.addEventListener('change', (e) => {
     displayOptions.favicon = e.target.checked;
+    safeLocalStorage.setItem('displayFavicon', e.target.checked);
     renderBookmarks();
   });
 
@@ -6060,23 +6149,26 @@ function setupEventListeners() {
 
   displayLiveStatus.addEventListener('change', (e) => {
     displayOptions.liveStatus = e.target.checked;
+    safeLocalStorage.setItem('displayLiveStatus', e.target.checked);
     renderBookmarks();
   });
 
   displaySafetyStatus.addEventListener('change', (e) => {
     displayOptions.safetyStatus = e.target.checked;
+    safeLocalStorage.setItem('displaySafetyStatus', e.target.checked);
     renderBookmarks();
   });
 
   displayPreview.addEventListener('change', (e) => {
     displayOptions.preview = e.target.checked;
+    safeLocalStorage.setItem('displayPreview', e.target.checked);
     renderBookmarks();
   });
 
   const displayPreviewPopup = document.getElementById('displayPreviewPopup');
-  displayPreviewPopup.addEventListener('change', async (e) => {
+  displayPreviewPopup.addEventListener('change', (e) => {
     previewPopupEnabled = e.target.checked;
-    await safeStorage.set({ previewPopupEnabled: previewPopupEnabled });
+    safeLocalStorage.setItem('displayPreviewPopup', e.target.checked);
     if (!previewPopupEnabled) {
       hidePreviewPopup();
     }
@@ -6098,6 +6190,8 @@ function setupEventListeners() {
         chip.classList.add('active');
       }
 
+      // Save to localStorage
+      safeLocalStorage.setItem('activeFilters', JSON.stringify(activeFilters));
       renderBookmarks();
     });
   });
@@ -6300,7 +6394,7 @@ function setupEventListeners() {
       e.stopPropagation();
       const opacity = e.target.value;
       containerOpacityValue.textContent = `${opacity}%`;
-      localStorage.setItem('containerOpacity', opacity);
+      safeLocalStorage.setItem('containerOpacity', opacity);
       applyContainerOpacity(opacity);
     });
 
@@ -6317,7 +6411,7 @@ function setupEventListeners() {
     textColorPicker.addEventListener('input', (e) => {
       const color = e.target.value;
       applyCustomTextColor(color);
-      localStorage.setItem('customTextColor', color);
+      safeLocalStorage.setItem('customTextColor', color);
     });
   }
 
@@ -6338,7 +6432,7 @@ function setupEventListeners() {
   if (enableLinkCheckingToggle) {
     enableLinkCheckingToggle.addEventListener('change', (e) => {
       linkCheckingEnabled = e.target.checked;
-      localStorage.setItem('linkCheckingEnabled', linkCheckingEnabled);
+      safeLocalStorage.setItem('linkCheckingEnabled', linkCheckingEnabled);
       console.log(`Link checking ${linkCheckingEnabled ? 'enabled' : 'disabled'}`);
     });
   }
@@ -6348,7 +6442,7 @@ function setupEventListeners() {
   if (enableSafetyCheckingToggle) {
     enableSafetyCheckingToggle.addEventListener('change', (e) => {
       safetyCheckingEnabled = e.target.checked;
-      localStorage.setItem('safetyCheckingEnabled', safetyCheckingEnabled);
+      safeLocalStorage.setItem('safetyCheckingEnabled', safetyCheckingEnabled);
       console.log(`Safety checking ${safetyCheckingEnabled ? 'enabled' : 'disabled'}`);
     });
   }
@@ -6358,7 +6452,7 @@ function setupEventListeners() {
     accentColorPicker.addEventListener('input', (e) => {
       const color = e.target.value;
       applyAccentColor(color);
-      localStorage.setItem('customAccentColor', color);
+      safeLocalStorage.setItem('customAccentColor', color);
     });
 
     // Reset accent color
@@ -6366,13 +6460,13 @@ function setupEventListeners() {
       const defaultColor = getDefaultAccentColor();
       accentColorPicker.value = defaultColor;
       applyAccentColor(defaultColor);
-      localStorage.removeItem('customAccentColor');
+      safeLocalStorage.removeItem('customAccentColor');
     });
   }
 
   // Load saved accent color on startup
   function loadSavedAccentColor() {
-    const savedColor = localStorage.getItem('customAccentColor');
+    const savedColor = safeLocalStorage.getItem('customAccentColor');
     if (savedColor) {
       accentColorPicker.value = savedColor;
       applyAccentColor(savedColor);
@@ -6417,14 +6511,14 @@ function setupEventListeners() {
         const reader = new FileReader();
         reader.onload = (event) => {
           const imageData = event.target.result;
-          localStorage.setItem('backgroundImage', imageData);
+          safeLocalStorage.setItem('backgroundImage', imageData);
           applyBackgroundImage(
             imageData,
             backgroundOpacitySlider.value,
             backgroundBlurSlider.value,
             backgroundSizeSelect.value,
-            localStorage.getItem('backgroundPositionX') || 50,
-            localStorage.getItem('backgroundPositionY') || 50,
+            safeLocalStorage.getItem('backgroundPositionX') || 50,
+            safeLocalStorage.getItem('backgroundPositionY') || 50,
             backgroundScaleSlider.value
           );
         };
@@ -6436,13 +6530,13 @@ function setupEventListeners() {
   // Remove background image
   if (removeBackgroundImageBtn && backgroundOpacitySlider && backgroundBlurSlider && backgroundSizeSelect && backgroundScaleSlider && opacityValue && blurValue && scaleValue) {
     removeBackgroundImageBtn.addEventListener('click', () => {
-      localStorage.removeItem('backgroundImage');
-      localStorage.removeItem('backgroundOpacity');
-      localStorage.removeItem('backgroundBlur');
-      localStorage.removeItem('backgroundSize');
-      localStorage.removeItem('backgroundPositionX');
-      localStorage.removeItem('backgroundPositionY');
-      localStorage.removeItem('backgroundScale');
+      safeLocalStorage.removeItem('backgroundImage');
+      safeLocalStorage.removeItem('backgroundOpacity');
+      safeLocalStorage.removeItem('backgroundBlur');
+      safeLocalStorage.removeItem('backgroundSize');
+      safeLocalStorage.removeItem('backgroundPositionX');
+      safeLocalStorage.removeItem('backgroundPositionY');
+      safeLocalStorage.removeItem('backgroundScale');
       applyBackgroundImage(null);
       backgroundOpacitySlider.value = 100;
       opacityValue.textContent = '100%';
@@ -6457,16 +6551,16 @@ function setupEventListeners() {
     backgroundOpacitySlider.addEventListener('input', (e) => {
       const opacity = e.target.value;
       opacityValue.textContent = `${opacity}%`;
-      const savedImage = localStorage.getItem('backgroundImage');
+      const savedImage = safeLocalStorage.getItem('backgroundImage');
       if (savedImage) {
-        localStorage.setItem('backgroundOpacity', opacity);
+        safeLocalStorage.setItem('backgroundOpacity', opacity);
         applyBackgroundImage(
           savedImage,
           opacity,
           backgroundBlurSlider.value,
           backgroundSizeSelect.value,
-          localStorage.getItem('backgroundPositionX') || 50,
-          localStorage.getItem('backgroundPositionY') || 50,
+          safeLocalStorage.getItem('backgroundPositionX') || 50,
+          safeLocalStorage.getItem('backgroundPositionY') || 50,
           backgroundScaleSlider.value
         );
       }
@@ -6476,16 +6570,16 @@ function setupEventListeners() {
     backgroundBlurSlider.addEventListener('input', (e) => {
       const blur = e.target.value;
       blurValue.textContent = `${blur}px`;
-      const savedImage = localStorage.getItem('backgroundImage');
+      const savedImage = safeLocalStorage.getItem('backgroundImage');
       if (savedImage) {
-        localStorage.setItem('backgroundBlur', blur);
+        safeLocalStorage.setItem('backgroundBlur', blur);
         applyBackgroundImage(
           savedImage,
           backgroundOpacitySlider.value,
           blur,
           backgroundSizeSelect.value,
-          localStorage.getItem('backgroundPositionX') || 50,
-          localStorage.getItem('backgroundPositionY') || 50,
+          safeLocalStorage.getItem('backgroundPositionX') || 50,
+          safeLocalStorage.getItem('backgroundPositionY') || 50,
           backgroundScaleSlider.value
         );
       }
@@ -6494,16 +6588,16 @@ function setupEventListeners() {
     // Size select
     backgroundSizeSelect.addEventListener('change', (e) => {
       const size = e.target.value;
-      const savedImage = localStorage.getItem('backgroundImage');
+      const savedImage = safeLocalStorage.getItem('backgroundImage');
       if (savedImage) {
-        localStorage.setItem('backgroundSize', size);
+        safeLocalStorage.setItem('backgroundSize', size);
         applyBackgroundImage(
           savedImage,
           backgroundOpacitySlider.value,
           backgroundBlurSlider.value,
           size,
-          localStorage.getItem('backgroundPositionX') || 50,
-          localStorage.getItem('backgroundPositionY') || 50,
+          safeLocalStorage.getItem('backgroundPositionX') || 50,
+          safeLocalStorage.getItem('backgroundPositionY') || 50,
           backgroundScaleSlider.value
         );
       }
@@ -6513,16 +6607,16 @@ function setupEventListeners() {
     backgroundScaleSlider.addEventListener('input', (e) => {
       const scale = e.target.value;
       scaleValue.textContent = `${scale}%`;
-      const savedImage = localStorage.getItem('backgroundImage');
+      const savedImage = safeLocalStorage.getItem('backgroundImage');
       if (savedImage) {
-        localStorage.setItem('backgroundScale', scale);
+        safeLocalStorage.setItem('backgroundScale', scale);
         applyBackgroundImage(
           savedImage,
           backgroundOpacitySlider.value,
           backgroundBlurSlider.value,
           backgroundSizeSelect.value,
-          localStorage.getItem('backgroundPositionX') || 50,
-          localStorage.getItem('backgroundPositionY') || 50,
+          safeLocalStorage.getItem('backgroundPositionX') || 50,
+          safeLocalStorage.getItem('backgroundPositionY') || 50,
           scale
         );
       }
@@ -6534,7 +6628,7 @@ function setupEventListeners() {
     repositionBackgroundBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const savedImage = localStorage.getItem('backgroundImage');
+      const savedImage = safeLocalStorage.getItem('backgroundImage');
       if (!savedImage) {
         return;
       }
@@ -6543,8 +6637,8 @@ function setupEventListeners() {
       if (!bgOverlay) return;
 
     // Reload current position from localStorage when entering drag mode
-    let currentPosX = parseFloat(localStorage.getItem('backgroundPositionX')) || 50;
-    let currentPosY = parseFloat(localStorage.getItem('backgroundPositionY')) || 50;
+    let currentPosX = parseFloat(safeLocalStorage.getItem('backgroundPositionX')) || 50;
+    let currentPosY = parseFloat(safeLocalStorage.getItem('backgroundPositionY')) || 50;
     let dragStartX = 0;
     let dragStartY = 0;
 
@@ -6604,8 +6698,8 @@ function setupEventListeners() {
     const handleMouseUp = () => {
       if (isDragging) {
         isDragging = false;
-        localStorage.setItem('backgroundPositionX', currentPosX);
-        localStorage.setItem('backgroundPositionY', currentPosY);
+        safeLocalStorage.setItem('backgroundPositionX', currentPosX);
+        safeLocalStorage.setItem('backgroundPositionY', currentPosY);
       }
     };
 
@@ -6625,7 +6719,7 @@ function setupEventListeners() {
       scaleValue.textContent = `${currentScale}%`;
 
       // Save to localStorage
-      localStorage.setItem('backgroundScale', currentScale);
+      safeLocalStorage.setItem('backgroundScale', currentScale);
 
       // Apply the new scale
       applyBackgroundImage(
@@ -6656,8 +6750,8 @@ function setupEventListeners() {
       closeDragModeBtn.removeEventListener('click', stopDragging);
 
       // Save final position
-      localStorage.setItem('backgroundPositionX', currentPosX);
-      localStorage.setItem('backgroundPositionY', currentPosY);
+      safeLocalStorage.setItem('backgroundPositionX', currentPosX);
+      safeLocalStorage.setItem('backgroundPositionY', currentPosY);
     };
 
     // Listen on document instead of bgOverlay to bypass any blocking elements
@@ -6676,7 +6770,7 @@ function setupEventListeners() {
     guiScaleSelect.addEventListener('change', (e) => {
       guiScale = parseInt(e.target.value);
       window.guiScale = guiScale;
-      localStorage.setItem('guiScale', guiScale.toString());
+      safeLocalStorage.setItem('guiScale', guiScale.toString());
       applyGuiScale();
     });
   }
@@ -6984,11 +7078,11 @@ function setupEventListeners() {
       headerCollapseBtn.title = isCollapsed ? 'Expand header' : 'Collapse header';
 
       // Save state to localStorage
-      localStorage.setItem('headerCollapsed', isCollapsed);
+      safeLocalStorage.setItem('headerCollapsed', isCollapsed);
     });
 
     // Restore header collapse state
-    const headerCollapsed = localStorage.getItem('headerCollapsed') === 'true';
+    const headerCollapsed = safeLocalStorage.getItem('headerCollapsed') === 'true';
     if (headerCollapsed) {
       collapsibleHeader.classList.add('collapsed');
       headerCollapseBtn.classList.add('collapsed');
@@ -7397,6 +7491,8 @@ async function initUI() {
   loadBackgroundImage();
   loadContainerOpacity();
   loadCheckingSettings();
+  loadDisplayOptions();
+  loadActiveFilters();
   await loadAutoClearSetting();
   setupEventListeners();
   setupBlocklistProgressListener();

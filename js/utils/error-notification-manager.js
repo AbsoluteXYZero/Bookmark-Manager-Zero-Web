@@ -3,6 +3,8 @@
  * Handles error toasts and logging for the application
  */
 
+import { safeLocalStorage } from './storage-utils.js';
+
 const MAX_ERROR_LOGS = 50;
 
 let errorToast;
@@ -74,7 +76,7 @@ async function logError(error, context = '') {
     };
 
     // Get existing error logs
-    const errorLogsStr = localStorage.getItem('errorLogs');
+    const errorLogsStr = safeLocalStorage.getItem('errorLogs');
     let errorLogs = errorLogsStr ? JSON.parse(errorLogsStr) : [];
 
     // Add new error
@@ -86,7 +88,7 @@ async function logError(error, context = '') {
     }
 
     // Save to storage
-    localStorage.setItem('errorLogs', JSON.stringify(errorLogs));
+    safeLocalStorage.setItem('errorLogs', JSON.stringify(errorLogs));
     console.error(`[Error Logged] ${context}:`, error);
   } catch (storageError) {
     console.error('Failed to log error to storage:', storageError);

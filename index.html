@@ -2443,13 +2443,20 @@
     // Synchronous check to prevent login screen flash on refresh
     // Check immediately and set body class before rendering
     (function() {
-      const hasToken = localStorage.getItem('bmz_gitlab_token');
-      const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
+      try {
+        const hasToken = localStorage.getItem('bmz_gitlab_token');
+        const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
 
-      // Only show login screen if user has neither a token nor is in local mode
-      if (!hasToken && !isLocalMode) {
-        // No token and not in local mode - we need to show login screen
-        // Add a class that will be checked when body renders
+        // Only show login screen if user has neither a token nor is in local mode
+        if (!hasToken && !isLocalMode) {
+          // No token and not in local mode - we need to show login screen
+          // Add a class that will be checked when body renders
+          document.documentElement.classList.add('show-login');
+        }
+      } catch (e) {
+        // localStorage not available (Edge security, private browsing, etc.)
+        // Show login screen by default
+        console.warn('localStorage not available:', e);
         document.documentElement.classList.add('show-login');
       }
     })();

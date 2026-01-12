@@ -9,6 +9,8 @@
  * - window.expandedFolders, window.bookmarkTree
  */
 
+import { safeLocalStorage } from './storage-utils.js';
+
 function loadTheme() {
   if (window.isPreviewMode) {
     window.theme = 'enhanced-blue';
@@ -50,7 +52,7 @@ function applyTheme() {
     loadTintSettings();
   }
 
-  const savedColor = localStorage.getItem('customAccentColor');
+  const savedColor = safeLocalStorage.getItem('customAccentColor');
   if (savedColor) {
     applyCustomAccentColor(savedColor);
   }
@@ -319,7 +321,7 @@ function updateFontSizeDisplay() {
 }
 
 function loadGuiScale() {
-  const savedScale = localStorage.getItem('guiScale');
+  const savedScale = safeLocalStorage.getItem('guiScale');
   window.guiScale = savedScale ? parseInt(savedScale) : 100;
   applyGuiScale();
   
