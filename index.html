@@ -2470,9 +2470,141 @@
     html.show-login #loginScreen {
       display: block;
     }
+    /* Edge incompatibility overlay */
+    #edgeWarningOverlay {
+      display: none;
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100vw;
+      height: 100vh;
+      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      z-index: 999999;
+      justify-content: center;
+      align-items: center;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #edgeWarningOverlay.show {
+      display: flex;
+    }
+    .edge-warning-content {
+      max-width: 600px;
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 16px;
+      padding: 48px;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+    .edge-warning-icon {
+      font-size: 72px;
+      margin-bottom: 24px;
+      animation: pulse 2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+    }
+    .edge-warning-title {
+      font-size: 32px;
+      font-weight: 700;
+      color: #ef4444;
+      margin-bottom: 16px;
+      text-shadow: 0 2px 10px rgba(239, 68, 68, 0.3);
+    }
+    .edge-warning-subtitle {
+      font-size: 20px;
+      font-weight: 600;
+      color: #f1f5f9;
+      margin-bottom: 24px;
+    }
+    .edge-warning-text {
+      font-size: 16px;
+      line-height: 1.6;
+      color: #cbd5e1;
+      margin-bottom: 32px;
+    }
+    .edge-warning-browsers {
+      display: flex;
+      gap: 24px;
+      justify-content: center;
+      margin-bottom: 32px;
+    }
+    .edge-browser-option {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      padding: 16px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 12px;
+      transition: all 0.3s ease;
+      cursor: pointer;
+      text-decoration: none;
+      color: #f1f5f9;
+      min-width: 100px;
+    }
+    .edge-browser-option:hover {
+      background: rgba(255, 255, 255, 0.1);
+      border-color: rgba(255, 255, 255, 0.2);
+      transform: translateY(-2px);
+    }
+    .edge-browser-icon {
+      font-size: 48px;
+    }
+    .edge-browser-name {
+      font-size: 14px;
+      font-weight: 600;
+    }
+    .edge-warning-footer {
+      font-size: 13px;
+      color: #94a3b8;
+      margin-top: 24px;
+      padding-top: 24px;
+      border-top: 1px solid rgba(255, 255, 255, 0.1);
+    }
   </style>
 </head>
 <body class="enhanced-blue">
+  <!-- Edge Browser Warning Overlay -->
+  <div id="edgeWarningOverlay">
+    <div class="edge-warning-content">
+      <div class="edge-warning-icon">⚠️</div>
+      <div class="edge-warning-title">Browser Not Supported</div>
+      <div class="edge-warning-subtitle">Microsoft Edge Incompatibility Detected</div>
+      <div class="edge-warning-text">
+        Microsoft Edge blocks the storage APIs required for this application to function, even with all security settings disabled. This is a known Edge browser limitation that cannot be fixed on our end.
+        <br><br>
+        <strong>Please switch to a compatible browser:</strong>
+      </div>
+      <div class="edge-warning-browsers">
+        <a href="https://www.google.com/chrome/" target="_blank" class="edge-browser-option">
+          <div class="edge-browser-icon">
+            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/chrome/chrome-original.svg" alt="Chrome" width="48" height="48" />
+          </div>
+          <div class="edge-browser-name">Chrome</div>
+        </a>
+        <a href="https://www.mozilla.org/firefox/" target="_blank" class="edge-browser-option">
+          <div class="edge-browser-icon">
+            <img src="https://cdn.jsdelivr.net/gh/devicons/devicon/icons/firefox/firefox-original.svg" alt="Firefox" width="48" height="48" />
+          </div>
+          <div class="edge-browser-name">Firefox</div>
+        </a>
+        <a href="https://brave.com/" target="_blank" class="edge-browser-option">
+          <div class="edge-browser-icon">
+            <img src="https://brave.com/static-assets/images/brave-logo-sans-text.svg" alt="Brave" width="48" height="48" />
+          </div>
+          <div class="edge-browser-name">Brave</div>
+        </a>
+      </div>
+      <div class="edge-warning-footer">
+        This application works perfectly in Chrome, Firefox, Brave, and other modern browsers.
+      </div>
+    </div>
+  </div>
   <div class="header">
     <div class="header-settings">
       <button id="manualSyncBtn" class="btn btn-icon" title="Sync bookmarks with GitLab snippets (Shift+Click to force push)">
@@ -3545,6 +3677,26 @@
   <input type="file" id="importFileInput" accept=".html,.json" style="display: none;" />
 
   <script src="js/lib/qrcode-lib.js"></script>
+
+  <!-- Edge Detection Script -->
+  <script>
+    (function() {
+      // Detect if browser is Edge
+      const isEdge = /Edg/i.test(navigator.userAgent);
+
+      if (isEdge) {
+        // Show the warning overlay
+        const overlay = document.getElementById('edgeWarningOverlay');
+        if (overlay) {
+          overlay.classList.add('show');
+        }
+
+        // Log to console for debugging
+        console.error('Microsoft Edge detected. This browser blocks required storage APIs.');
+      }
+    })();
+  </script>
+
   <script type="module" src="js/sidebar-adapted.js"></script>
   <script type="module" src="js/core/app.js"></script>
 </body>
