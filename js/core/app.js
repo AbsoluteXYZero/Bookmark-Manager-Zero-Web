@@ -1580,6 +1580,12 @@ class App {
       await bookmarkManager.reload();
       console.log('[App] Bookmark manager reloaded');
 
+      // Re-render the UI to show updated bookmarks
+      if (window.renderBookmarks) {
+        window.renderBookmarks();
+        console.log('[App] UI re-rendered with updated bookmarks');
+      }
+
       // Automatic scan disabled for sync/merge operations
       // Users can manually trigger scans if needed
     } catch (error) {
@@ -1587,6 +1593,9 @@ class App {
       // Try to reload with local data anyway
       try {
         await bookmarkManager.reload();
+        if (window.renderBookmarks) {
+          window.renderBookmarks();
+        }
       } catch (reloadError) {
         console.error('Failed to reload bookmarks:', reloadError);
       }
