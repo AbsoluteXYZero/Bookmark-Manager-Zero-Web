@@ -651,7 +651,7 @@ class SyncManager {
    * Merge bookmarks from one tree into another tree
    * Preserves folder structure and merges into existing folders with same names
    */
-  mergeBookmarksIntoTree(sourceBookmarks, targetTree) {
+  mergeBookmarksIntoTree(sourceTree, targetTree) {
     try {
       console.log('[mergeBookmarksIntoTree] Merging bookmarks with folder structure preservation...');
 
@@ -717,9 +717,46 @@ class SyncManager {
         }
       };
 
-      // Process each root folder from source bookmarks
-      if (sourceBookmarks && Array.isArray(sourceBookmarks)) {
-        // Group source bookmarks by their root folder type
+      // Handle both tree structures (with roots) and flat arrays (legacy)
+      if (sourceTree && sourceTree.roots) {
+        // Source is a tree structure - merge each root
+        console.log('[mergeBookmarksIntoTree] Merging tree structure...');
+
+        ['bookmark_bar', 'menu', 'other', 'mobile'].forEach(rootKey => {
+          const sourceRoot = sourceTree.roots[rootKey];
+          const targetRoot = mergedTree.roots[rootKey];
+
+          if (sourceRoot && sourceRoot.children && targetRoot) {
+            if (!targetRoot.children) {
+              targetRoot.children = [];
+            }
+
+            sourceRoot.children.forEach(child => {
+              if (child.type === 'folder') {
+                mergeFolder(child, targetRoot.children);
+              } else if (child.url) {
+                // Add bookmark if it doesn't already exist (by URL)
+                const bookmarkExists = targetRoot.children.some(existingChild =>
+                  existingChild.url === child.url
+                );
+                if (!bookmarkExists) {
+                  targetRoot.children.push({
+                    ...child,
+                    id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                    dateAdded: Date.now()
+                  });
+                  console.log(`[mergeBookmarksIntoTree] Added bookmark to ${rootKey}: ${child.title}`);
+                } else {
+                  console.log(`[mergeBookmarksIntoTree] Skipped duplicate bookmark in ${rootKey}: ${child.title}`);
+                }
+              }
+            });
+          }
+        });
+      } else if (sourceTree && Array.isArray(sourceTree)) {
+        // Legacy: Source is a flat array - categorize into roots
+        console.log('[mergeBookmarksIntoTree] Merging flat array...');
+
         const sourceRoots = {
           bookmark_bar: [],
           menu: [],
@@ -727,29 +764,21 @@ class SyncManager {
           mobile: []
         };
 
-        // Categorize source bookmarks into appropriate root folders
-        sourceBookmarks.forEach(bookmark => {
+        sourceTree.forEach(bookmark => {
           if (bookmark.type === 'folder') {
-            // Determine which root this folder should go into
-            // Default to 'other' if we can't determine
             let targetRoot = 'other';
-
-            // Simple heuristic: check if folder title suggests toolbar/menu placement
             const title = bookmark.title?.toLowerCase() || '';
             if (title.includes('toolbar') || title.includes('bar')) {
               targetRoot = 'bookmark_bar';
             } else if (title.includes('menu')) {
               targetRoot = 'menu';
             }
-
             sourceRoots[targetRoot].push(bookmark);
           } else if (bookmark.url) {
-            // Individual bookmarks go to 'other' by default
             sourceRoots.other.push(bookmark);
           }
         });
 
-        // Merge each categorized group into the corresponding target root
         Object.keys(sourceRoots).forEach(rootKey => {
           const sourceItems = sourceRoots[rootKey];
           const targetRoot = mergedTree.roots[rootKey];
@@ -759,14 +788,13 @@ class SyncManager {
               if (item.type === 'folder') {
                 mergeFolder(item, targetRoot.children);
               } else if (item.url) {
-                // Add individual bookmarks, avoiding duplicates
                 const bookmarkExists = targetRoot.children.some(existingChild =>
                   existingChild.url === item.url
                 );
                 if (!bookmarkExists) {
                   targetRoot.children.push({
                     ...item,
-                    id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`, // New ID
+                    id: `merged-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
                     dateAdded: Date.now()
                   });
                   console.log(`[mergeBookmarksIntoTree] Added individual bookmark to ${rootKey}: ${item.title}`);
