@@ -324,13 +324,13 @@ class App {
           selectFileBtn.disabled = true;
           selectFileBtn.textContent = 'Importing...';
 
-          const text = await file.text();
+          // const text = await file.text();
           let bookmarks;
 
           if (file.name.endsWith('.json')) {
-            bookmarks = await importFromJSON(text);
+            bookmarks = await importFromJSON(file);
           } else if (file.name.endsWith('.html')) {
-            bookmarks = await importFromHTML(text);
+            bookmarks = await importFromHTML(file);
           } else {
             throw new Error('Unsupported file format. Please use .html or .json files.');
           }

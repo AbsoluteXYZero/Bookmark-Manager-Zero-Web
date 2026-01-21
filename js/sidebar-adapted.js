@@ -1026,6 +1026,73 @@ function loadActiveFilters() {
 // Apply zoom
 // Zoom and font size functions are imported from utils/theme-settings-manager.js
 
+// Helper function to validate cache entries
+function isValidCache(cached) {
+  const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
+  return cached && (Date.now() - cached.timestamp < CACHE_TTL);
+}
+
+// Restore cached bookmark statuses from persistent storage
+async function restoreCachedBookmarkStatuses() {
+  try {
+    // Load both caches from storage
+    const result = await safeStorage.get(['linkStatusCache', 'safetyStatusCache']);
+    const linkCache = result.linkStatusCache || {};
+    const safetyCache = result.safetyStatusCache || {};
+
+    let restored = 0;
+
+    // Recursively traverse bookmark tree
+    function restoreStatuses(nodes) {
+      nodes.forEach(node => {
+        if (node.url) {
+          console.log(`[DEBUG] Restoring status for "${node.title}": current linkStatus=${node.linkStatus}, safetyStatus=${node.safetyStatus}`);
+          // Check if URL is whitelisted (takes priority over cache)
+          try {
+            const hostname = new URL(node.url).hostname;
+            if (whitelistedUrls.has(hostname)) {
+              node.safetyStatus = 'safe';
+              node.safetySources = ['Whitelisted by user'];
+              node.linkStatus = node.linkStatus || 'unknown'; // Keep existing link status if present
+              restored++;
+            }
+          } catch (e) {
+            // Invalid URL, skip whitelist check
+          }
+
+          // Check link status cache (only if not already set by whitelist)
+          if (!node.linkStatus) {
+            const linkCached = linkCache[node.url];
+            if (linkCached && isValidCache(linkCached)) {
+              node.linkStatus = linkCached.result;
+              restored++;
+            }
+          }
+
+          // Check safety status cache (only if not whitelisted)
+          if (!node.safetyStatus) {
+            const safetyCached = safetyCache[node.url];
+            if (safetyCached && isValidCache(safetyCached)) {
+              node.safetyStatus = safetyCached.result?.status || safetyCached.result;
+              node.safetySources = safetyCached.result?.sources || [];
+              restored++;
+            }
+          }
+        }
+
+        if (node.children) {
+          restoreStatuses(node.children);
+        }
+      });
+    }
+
+    restoreStatuses(bookmarkTree);
+    console.log(`[Cache Restore] Restored ${restored} cached status indicators`);
+  } catch (error) {
+    console.error('[Cache Restore] Error restoring cached statuses:', error);
+  }
+}
+
 // Load bookmarks from Firefox API
 async function loadBookmarks() {
   try {
@@ -1077,8 +1144,8 @@ async function loadBookmarks() {
     };
     bookmarkTree = restoreStatuses(bookmarkTree);
 
-    // Cache restoration now happens in scanner.js during scannerService.init()
-    // This runs after initSidebar() completes and operates on the same bookmark objects
+    // Restore cached statuses for ALL bookmarks (fixes the search icon issue)
+    await restoreCachedBookmarkStatuses();
 
     // Clear checked bookmarks when loading fresh data
     checkedBookmarks.clear();
@@ -1093,12 +1160,6 @@ async function loadBookmarks() {
     // Ensure window property is updated even in error cases
     window.bookmarkTree = bookmarkTree;
   }
-}
-
-// Helper function to validate cache entries
-function isValidCache(cached) {
-  const CACHE_TTL = 7 * 24 * 60 * 60 * 1000; // 7 days
-  return cached && (Date.now() - cached.timestamp < CACHE_TTL);
 }
 
 // Cached bookmark statuses are restored when bookmarks are loaded
@@ -2089,6 +2150,9 @@ function createBookmarkElement(bookmark) {
   const linkStatus = bookmark.linkStatus || 'unknown';
   const safetyStatus = bookmark.safetyStatus || 'unknown';
   const safetySources = bookmark.safetySources || [];
+
+  // Debug logging for search issue
+  console.log(`[DEBUG] Bookmark "${bookmark.title}" status: link=${linkStatus}, safety=${safetyStatus}, sources=${JSON.stringify(safetySources)}`);
 
   // Build status indicators HTML based on display options
   let statusIndicatorsHtml = '';
