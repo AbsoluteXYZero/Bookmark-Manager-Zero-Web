@@ -1656,8 +1656,14 @@ class App {
       searchInput.addEventListener('input', (e) => {
         clearTimeout(searchDebounceTimer);
         searchDebounceTimer = setTimeout(() => {
-          const tree = bookmarkManager.getTree();
-          uiManager.renderBookmarks(tree);
+          // Update search term globally for sidebar-adapted.js
+          if (window.searchTerm !== undefined) {
+            window.searchTerm = e.target.value;
+          }
+          // Use the global renderBookmarks function from sidebar-adapted.js
+          if (window.renderBookmarks) {
+            window.renderBookmarks();
+          }
         }, 300); // Wait 300ms after user stops typing
       });
     }
@@ -1991,7 +1997,9 @@ class App {
 
     // Close menus when clicking outside
     document.addEventListener('click', () => {
-      uiManager.closeAllMenus();
+      if (window.closeAllMenus) {
+        window.closeAllMenus();
+      }
     });
 
     // Keyboard shortcuts
@@ -2001,7 +2009,9 @@ class App {
         document.querySelectorAll('.modal').forEach(modal => {
           modal.classList.add('hidden');
         });
-        uiManager.closeAllMenus();
+        if (window.closeAllMenus) {
+          window.closeAllMenus();
+        }
       }
 
       // Ctrl/Cmd + K - Focus search
@@ -2147,9 +2157,10 @@ class App {
         // Load the imported tree
         await bookmarkManager.replaceTree(bookmarkTree);
 
-        // Re-render UI first
-        const tree = bookmarkManager.getTree();
-        uiManager.renderBookmarks(tree);
+        // Re-render UI first using global function
+        if (window.renderBookmarks) {
+          window.renderBookmarks();
+        }
 
         // Force sync to remote after import (use forcePush=true to ensure sync happens)
         console.log('[Import] Starting forced sync to remote after import...');
@@ -2274,9 +2285,10 @@ class App {
       // Perform the move
       await bookmarkManager.move(draggedId, destination);
 
-      // Re-render UI
-      const tree = bookmarkManager.getTree();
-      uiManager.renderBookmarks(tree);
+      // Re-render UI using global function
+      if (window.renderBookmarks) {
+        window.renderBookmarks();
+      }
 
       this.showToast('Bookmark moved', 'success');
     } catch (error) {

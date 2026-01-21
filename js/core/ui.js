@@ -389,23 +389,43 @@ class UIManager {
         <button class="bookmark-menu-btn folder-menu-btn" aria-label="More actions">⋮</button>
         <div class="bookmark-actions">
           <button class="action-btn" data-action="rescan-folder">
-            <span class="icon">📡</span>
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M12,1L3,5V11C3,16.55 6.84,21.74 12,23C17.16,21.74 21,16.55 21,11V5L12,1M12,5A3,3 0 0,1 15,8A3,3 0 0,1 12,11A3,3 0 0,1 9,8A3,3 0 0,1 12,5M17.13,17C15.92,18.85 14.11,20.24 12,20.92C9.89,20.24 8.08,18.85 6.87,17C6.53,16.5 6.24,16 6,15.47C6,13.82 8.71,12.47 12,12.47C15.29,12.47 18,13.79 18,15.47C17.76,16 17.47,16.5 17.13,17Z"/>
+              </svg>
+            </span>
             <span>Rescan Bookmarks in Folder</span>
           </button>
           <button class="action-btn" data-action="add-bookmark">
-            <span class="icon">➕</span>
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19,13H13V19H11V13H5V11H11V5H13V11H19V13Z"/>
+              </svg>
+            </span>
             <span>Add Bookmark Here</span>
           </button>
           <button class="action-btn" data-action="add-subfolder">
-            <span class="icon">📁</span>
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M10,4H4A2,2 0 0,0 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8A2,2 0 0,0 20,6H12L10,4M20,18H4V6H12V8H20V18Z"/>
+              </svg>
+            </span>
             <span>Add Subfolder Here</span>
           </button>
           <button class="action-btn" data-action="rename">
-            <span class="icon">✏️</span>
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+              </svg>
+            </span>
             <span>Rename</span>
           </button>
           <button class="action-btn danger" data-action="delete">
-            <span class="icon">🗑️</span>
+            <span class="icon">
+              <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+              </svg>
+            </span>
             <span>Delete</span>
           </button>
         </div>
@@ -487,31 +507,59 @@ class UIManager {
       <button class="bookmark-menu-btn" aria-label="More actions">⋮</button>
       <div class="bookmark-actions">
         <button class="action-btn" data-action="open">
-          <span class="icon">🔗</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3.9,12C3.9,10.29 5.29,8.9 7,8.9H11V7H7A5,5 0 0,0 2,12A5,5 0 0,0 7,17H11V15.1H7C5.29,15.1 3.9,13.71 3.9,12M8,13H16V11H8V13M17,7H13V8.9H17C18.71,8.9 20.1,10.29 20.1,12C20.1,13.71 18.71,15.1 17,15.1H13V17H17A5,5 0 0,0 22,12A5,5 0 0,0 17,7Z"/>
+            </svg>
+          </span>
           <span>Open</span>
         </button>
         <button class="action-btn" data-action="open-new-tab">
-          <span class="icon">🆕</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M14,3V5H17.59L7.76,14.83L9.17,16.24L19,6.41V10H21V3M19,19H5V5H12V3H5C3.89,3 3,3.9 3,5V19A2,2 0 0,0 5,21H19A2,2 0 0,0 21,19V12H19V19Z"/>
+            </svg>
+          </span>
           <span>Open in New Tab</span>
         </button>
         <button class="action-btn" data-action="copy-url">
-          <span class="icon">📋</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19,21H8V7H19M19,5H8A2,2 0 0,0 6,7V21A2,2 0 0,0 8,23H19A2,2 0 0,0 21,21V7A2,2 0 0,0 19,5M16,1H4A2,2 0 0,0 2,3V17H4V3H16V1Z"/>
+            </svg>
+          </span>
           <span>Copy URL</span>
         </button>
         <button class="action-btn" data-action="qr-code">
-          <span class="icon">📱</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M3,11H11V3H3M5,5H9V9H5M13,3V11H21V3M19,9H15V5H19M3,21H11V13H3M5,15H9V19H5M19,19V21H21V19M13,13H15V15H13M15,15H17V17H15M17,17H19V19H17M19,13V15H21V13M13,21H15V19H13M15,19H17V21H15Z"/>
+            </svg>
+          </span>
           <span>Generate QR Code</span>
         </button>
         <button class="action-btn" data-action="edit">
-          <span class="icon">✏️</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M20.71,7.04C21.1,6.65 21.1,6 20.71,5.63L18.37,3.29C18,2.9 17.35,2.9 16.96,3.29L15.12,5.12L18.87,8.87M3,17.25V21H6.75L17.81,9.93L14.06,6.18L3,17.25Z"/>
+            </svg>
+          </span>
           <span>Edit</span>
         </button>
         <button class="action-btn" data-action="recheck">
-          <span class="icon">🔄</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+            </svg>
+          </span>
           <span>Recheck Security Status</span>
         </button>
         <button class="action-btn danger" data-action="delete">
-          <span class="icon">🗑️</span>
+          <span class="icon">
+            <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M19,4H15.5L14.5,3H9.5L8.5,4H5V6H19M6,19A2,2 0 0,0 8,21H16A2,2 0 0,0 18,19V7H6V19Z"/>
+            </svg>
+          </span>
           <span>Delete</span>
         </button>
       </div>

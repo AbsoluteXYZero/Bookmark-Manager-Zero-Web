@@ -1529,6 +1529,12 @@ async function openBookmarkUrl(url, openInNewTab = false) {
 // Render bookmarks
 function renderBookmarks() {
   const filtered = filterAndSearchBookmarks(bookmarkTree);
+  const isSearching = searchTerm.length > 0;
+
+  // Ensure cached statuses are loaded for search results
+  if (isSearching) {
+    restoreCachedBookmarkStatuses();
+  }
 
   if (filtered.length === 0 && hasSeenSetupCard) {
     bookmarkList.innerHTML = `
@@ -1627,7 +1633,23 @@ function renderBookmarks() {
     }, 0);
   }
 
+  // Force list view for search results to ensure status icons are visible
+  const originalViewMode = window.viewMode;
+  if (isSearching) {
+    // Temporarily apply list view for search results
+    bookmarkList.classList.remove('grid-view', 'grid-2', 'grid-3', 'grid-4', 'grid-5', 'grid-6');
+  }
+
   renderNodes(filtered, bookmarkList);
+
+  // Restore original view mode after rendering if we temporarily changed it
+  // Don't restore grid view for search results to keep status icons visible
+  if (!isSearching && originalViewMode !== 'list') {
+    // Re-apply the original view mode
+    if (originalViewMode && originalViewMode !== 'list') {
+      bookmarkList.classList.add('grid-view', originalViewMode);
+    }
+  }
 
   // Restore open menu state if menu was open before re-render
   if (openMenuBookmarkId) {
@@ -1676,6 +1698,9 @@ function renderBookmarks() {
 
   // Sync bookmarkTree to window for extracted modules
   window.bookmarkTree = bookmarkTree;
+
+  // Ensure theme is applied to newly rendered elements
+  applyTheme(theme);
 }
 
 // Create a drop zone element that fills the gap between items
@@ -1970,7 +1995,7 @@ function createFolderElement(folder) {
   folderDiv.dataset.id = folder.id;
   // Don't make the entire folderDiv draggable - only the header will be draggable
 
-  const isExpanded = expandedFolders.has(folder.id);
+  const isExpanded = expandedFolders.has(folder.id) || (searchTerm && folder.children && folder.children.length > 0);
   const childCount = countBookmarks(folder);
 
   const folderTitle = folder.title || folder.name || 'Unnamed Folder';
@@ -2150,9 +2175,6 @@ function createBookmarkElement(bookmark) {
   const linkStatus = bookmark.linkStatus || 'unknown';
   const safetyStatus = bookmark.safetyStatus || 'unknown';
   const safetySources = bookmark.safetySources || [];
-
-  // Debug logging for search issue
-  console.log(`[DEBUG] Bookmark "${bookmark.title}" status: link=${linkStatus}, safety=${safetyStatus}, sources=${JSON.stringify(safetySources)}`);
 
   // Build status indicators HTML based on display options
   let statusIndicatorsHtml = '';
@@ -2337,6 +2359,7 @@ function createBookmarkElement(bookmark) {
       <img class="preview-image" alt="Preview" data-url="${escapeHtml(bookmark.url)}" />
     </div>
   `;
+
 
   // Add favicon error handler to hide broken images
   const favicon = bookmarkDiv.querySelector('.bookmark-favicon');
