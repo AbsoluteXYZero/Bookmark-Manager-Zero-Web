@@ -2190,8 +2190,15 @@ function createBookmarkElement(bookmark) {
   if (displayOptions.title) {
     bookmarkInfoHtml += `<div class="bookmark-title" title="${escapeHtml(bookmark.url)}">${escapeHtml(bookmark.title || bookmark.url)}</div>`;
   }
+  let displayUrl = bookmark.url;
+  try {
+    displayUrl = new URL(bookmark.url).hostname;
+  } catch (e) {
+    // Fall back to full URL if invalid
+    displayUrl = bookmark.url;
+  }
   if (displayOptions.url) {
-    bookmarkInfoHtml += `<div class="bookmark-url" title="${escapeHtml(bookmark.url)}">${escapeHtml(new URL(bookmark.url).hostname)}</div>`;
+    bookmarkInfoHtml += `<div class="bookmark-url" title="${escapeHtml(bookmark.url)}">${escapeHtml(displayUrl)}</div>`;
   }
 
   const bookmarkTitle = bookmark.title || bookmark.url;
@@ -4471,6 +4478,13 @@ async function saveNewBookmark() {
   // Add https:// if no protocol is specified
   if (!url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:/)) {
     url = 'https://' + url;
+  }
+
+  try {
+    new URL(url);
+  } catch (e) {
+    alert('The URL is not valid. Please check the format and try again.');
+    return;
   }
 
   // Check if trying to create bookmark at root level
