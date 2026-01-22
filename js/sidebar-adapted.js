@@ -1336,25 +1336,55 @@ async function autoCheckBookmarkStatuses() {
   // Mark these bookmarks as being checked to prevent re-checking
   bookmarksToCheck.forEach(item => checkedBookmarks.add(item.id));
 
+  // Use scanner service queue system for consistent progress updates (same as manual scans)
+  if (window.scannerService && window.scannerService.worker) {
+    // Set up scan state similar to manual scans
+    window.scannerService.scanQueue = [...bookmarksToCheck];
+    window.scannerService.totalCount = bookmarksToCheck.length;
+    window.scannerService.scannedCount = 0;
+    window.scannerService.isScanning = true;
+    window.scannerService.bypassCache = false; // Don't bypass cache for auto-scan
+    
+    // Update status bar to show scanning state
+    if (scanStatusBar) scanStatusBar.classList.add('scanning');
+    if (scanProgress) scanProgress.textContent = `Scanning: 0/${bookmarksToCheck.length}`;
+    
+    // Show stop button, hide rescan button (same as manual scans)
+    const stopBtn = document.getElementById('stopScanBtn');
+    if (stopBtn) stopBtn.style.display = 'flex';
+    
+    // Start queue processing (this will handle progress updates automatically)
+    window.scannerService.processQueue();
+    
+    return; // Exit early, queue processing will handle the rest
+  }
+
+  // Fallback to batch processing if scanner service is not available
+  console.warn('[Auto-Check] Scanner service not available, using fallback batch processing');
+  
   // Process bookmarks in batches to prevent browser/network overload
   const BATCH_SIZE = 10; // Check 10 bookmarks at a time
   const BATCH_DELAY = 300; // 300ms delay between batches (balance speed vs network load)
-
+  
   // Update status bar to show scanning state
   const totalToScan = bookmarksToCheck.length;
   let scannedCount = 0;
   if (scanStatusBar) scanStatusBar.classList.add('scanning');
   if (scanProgress) scanProgress.textContent = `Scanning: 0/${totalToScan}`;
-
+  
+  // Show stop button, hide rescan button (same as manual scans)
+  const stopBtn = document.getElementById('stopScanBtn');
+  if (stopBtn) stopBtn.style.display = 'flex';
+  
   for (let i = 0; i < bookmarksToCheck.length; i += BATCH_SIZE) {
     // Check if scan was cancelled
     if (scanCancelled) {
       console.log('Scan cancelled, stopping...');
       return;
     }
-
+  
     const batch = bookmarksToCheck.slice(i, i + BATCH_SIZE);
-
+  
     // Set batch to checking status (update data only, don't render yet)
     batch.forEach(item => {
       const updates = {};
@@ -1362,25 +1392,25 @@ async function autoCheckBookmarkStatuses() {
       if (safetyCheckingEnabled) updates.safetyStatus = 'checking';
       updateBookmarkInTree(item.id, updates);
     });
-
+  
     // Check this batch - use scanner service (Web Worker) instead of main thread
     const checkPromises = batch.map(async (item) => {
       try {
         // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
         if (window.scannerService && window.scannerService.worker) {
           await window.scannerService.scanBookmark(item, false); // Don't bypass cache for auto-scan
-
+  
           // Update progress immediately after each bookmark completes
           scannedCount++;
           if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
-
+  
           // scanBookmark will update the bookmark object and DOM, so just return the ID
           return { id: item.id };
         } else {
           // Worker not available - log warning and skip scanning
           console.warn('[Auto-Check] Scanner worker not available, skipping bookmark:', item.url);
           const result = { id: item.id };
-
+  
           // Set status to unknown since we can't properly check without worker
           if (linkCheckingEnabled) {
             result.linkStatus = 'unknown';
@@ -1389,11 +1419,11 @@ async function autoCheckBookmarkStatuses() {
             result.safetyStatus = 'unknown';
             result.safetySources = ['Scanner unavailable'];
           }
-
+  
           // Update progress even when worker unavailable
           scannedCount++;
           if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
-
+  
           return result;
         }
       } catch (error) {
@@ -1404,36 +1434,36 @@ async function autoCheckBookmarkStatuses() {
           errorResult.safetyStatus = 'unknown';
           errorResult.safetySources = [];
         }
-
+  
         // Update progress even on error
         scannedCount++;
         if (scanProgress) scanProgress.textContent = `Scanning: ${scannedCount}/${totalToScan}`;
-
+  
         return errorResult;
       }
     });
-
+  
     const results = await Promise.all(checkPromises);
-
+  
     // Update results for this batch (update data and DOM immediately)
     results.forEach(result => {
       // Find the original bookmark to get the URL
       const bookmark = batch.find(b => b.id === result.id);
       const url = bookmark ? bookmark.url : '';
-
+  
       // Update the data structure
       updateBookmarkInTree(result.id, {
         linkStatus: result.linkStatus,
         safetyStatus: result.safetyStatus,
         safetySources: result.safetySources
       });
-
+  
       // Update the DOM immediately for this bookmark
       updateBookmarkStatusInDOM(result.id, result.linkStatus, result.safetyStatus, result.safetySources, url);
     });
-
+  
     console.log(`Checked batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(bookmarksToCheck.length / BATCH_SIZE)} (${results.length} bookmarks)`);
-
+  
     // Wait before processing next batch (except for the last batch)
     if (i + BATCH_SIZE < bookmarksToCheck.length) {
       await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
@@ -1446,6 +1476,9 @@ async function autoCheckBookmarkStatuses() {
   // Update status bar to show complete
   if (scanProgress) scanProgress.textContent = 'Scan complete';
   if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+  
+  // Hide stop button, show rescan button (same as manual scans)
+  if (stopBtn) stopBtn.style.display = 'none';
 
   // Clear checkedBookmarks to free memory after scan completes
   checkedBookmarks.clear();
