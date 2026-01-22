@@ -11,7 +11,6 @@ import snippetAdapter from '../storage/snippet-adapter.js';
 import syncManager from '../storage/sync-manager.js';
 import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
-import uiManager from './ui.js';
 import scannerService from './scanner.js';
 import { exportAsHTML } from '../import-export/html-exporter.js';
 import { exportAsJSON } from '../import-export/json-exporter.js';
