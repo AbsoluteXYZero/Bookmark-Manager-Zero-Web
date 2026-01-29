@@ -55,6 +55,12 @@ class BlocklistService {
         name: 'OISD Big',
         url: 'https://raw.githubusercontent.com/sjhgvr/oisd/refs/heads/main/domainswild2_big.txt',
         format: 'domains'
+      },
+      {
+        name: 'FMHY Filterlist',
+        // FMHY unsafe sites list - fake activators, malware distributors, unsafe piracy sites
+        url: 'https://raw.githubusercontent.com/fmhy/FMHYFilterlist/main/filterlist-basic-domains.txt',
+        format: 'domains'
       }
     ];
 

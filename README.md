@@ -313,7 +313,7 @@ The website can optionally use external services for enhanced features. **All ca
 - **WordPress mshots** - Website screenshot previews via `https://s0.wp.com/mshots/v1/`
 - **Google Favicons** - Website icons via `https://www.google.com/s2/favicons`
 - **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/` (uses CORS proxy, no API key required)
-- **8 Free Blocklist Sources** - Community-maintained threat databases (~1.35M domains):
+- **9 Free Blocklist Sources** - Community-maintained threat databases (~1.35M domains):
   - URLhaus Active (abuse.ch) - ~107K actively distributing malware
   - URLhaus Historical (CDN mirror) - ~37K historical threats
   - BlockList Project Malware - ~300K malware domains
@@ -322,6 +322,7 @@ The website can optionally use external services for enhanced features. **All ca
   - HaGeZi TIF - ~608K comprehensive threat intel
   - Phishing-Filter - ~21K aggregated phishing database
   - OISD Big - ~215K multi-source blocklist aggregator
+  - FMHY Filterlist - ~282 curated unsafe sites (fake activators, malware distributors)
 
 ### User-Configured Services (require API keys)
 - **Google Safe Browsing API** - Additional malware/phishing protection
@@ -436,7 +437,7 @@ The website checks URLs against multiple threat databases to identify malicious,
 
 #### Phase 1: Blocklist Lookup (Free, No API Key Required)
 
-URLs are checked against eight community-maintained blocklists with dual URLhaus coverage:
+URLs are checked against nine community-maintained blocklists with dual URLhaus coverage:
 
 | Source | Type | Description | Entries |
 |--------|------|-------------|---------|
@@ -448,6 +449,7 @@ URLs are checked against eight community-maintained blocklists with dual URLhaus
 | **[HaGeZi TIF](https://github.com/hagezi/dns-blocklists)** | Threat Intel Feeds | Comprehensive malware, phishing, and scam domains | 608K |
 | **[Phishing-Filter](https://gitlab.com/malware-filter/phishing-filter)** | Phishing URLs | Aggregated phishing database | ~21K |
 | **[OISD Big](https://oisd.nl/)** | Multi-source | Comprehensive blocklist aggregator | ~215K |
+| **[FMHY Filterlist](https://github.com/fmhy/FMHYFilterlist)** | Unsafe Sites | Fake activators, malware distributors, unsafe download sites | ~282 |
 
 **Total Coverage**: **~1.35M unique malicious domains** after deduplication
 
@@ -715,6 +717,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **[HaGeZi TIF](https://github.com/hagezi/dns-blocklists)** - Threat Intelligence Feeds (608K entries)
 - **[Phishing-Filter](https://gitlab.com/malware-filter/phishing-filter)** - Phishing database (~21K entries)
 - **[OISD Big](https://oisd.nl/)** - Comprehensive blocklist aggregator (~215K entries)
+- **[FMHY Filterlist](https://github.com/fmhy/FMHYFilterlist)** - Curated unsafe sites list (~282 entries)
 - **[URLVoid](https://www.urlvoid.com/)** - Multi-engine reputation checking service
 - **[Google Safe Browsing API](https://developers.google.com/safe-browsing)** - Optional threat intelligence
 - **[Yandex Safe Browsing](https://yandex.com/dev/safebrowsing/)** - Optional geographic threat diversity
