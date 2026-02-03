@@ -61,6 +61,12 @@ class BlocklistService {
         // FMHY unsafe sites list - fake activators, malware distributors, unsafe piracy sites
         url: 'https://raw.githubusercontent.com/fmhy/FMHYFilterlist/main/filterlist-basic-domains.txt',
         format: 'domains'
+      },
+      {
+        name: 'Dandelion Sprout Anti-Malware',
+        // Curated anti-malware list - scams, phishing, malware domains
+        url: 'https://raw.githubusercontent.com/DandelionSprout/adfilt/master/Alternate%20versions%20Anti-Malware%20List/AntiMalwareHosts.txt',
+        format: 'hosts'
       }
     ];
 
