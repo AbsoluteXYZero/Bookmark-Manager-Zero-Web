@@ -3894,6 +3894,12 @@ window.updateBookmarkInTree = updateBookmarkInTree;
 window.updateBookmarkStatusInDOM = updateBookmarkStatusInDOM;
 window.renderBookmarks = renderBookmarks;
 
+// Reload bookmark UI after sync operations - reloads from storage and re-renders
+window.reloadBookmarkUI = async function() {
+  await loadBookmarks();
+  renderBookmarks();
+};
+
 // Recheck bookmark status (link + safety)
 async function recheckBookmarkStatus(bookmarkId) {
   const bookmark = findBookmarkById(bookmarkTree, bookmarkId);
