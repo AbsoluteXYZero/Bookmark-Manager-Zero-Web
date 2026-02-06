@@ -1046,7 +1046,6 @@ async function restoreCachedBookmarkStatuses() {
     function restoreStatuses(nodes) {
       nodes.forEach(node => {
         if (node.url) {
-          console.log(`[DEBUG] Restoring status for "${node.title}": current linkStatus=${node.linkStatus}, safetyStatus=${node.safetyStatus}`);
           // Check if URL is whitelisted (takes priority over cache)
           try {
             const hostname = new URL(node.url).hostname;
