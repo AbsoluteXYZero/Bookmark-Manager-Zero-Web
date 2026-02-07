@@ -46,7 +46,6 @@ class IndexedDBManager {
 
       request.onsuccess = () => {
         this.db = request.result;
-        console.log('IndexedDB opened successfully');
         resolve(this.db);
       };
 

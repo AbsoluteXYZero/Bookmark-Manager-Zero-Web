@@ -555,38 +555,52 @@ async function checkURLVoidScraping(url) {
   try {
     const urlObj = new URL(url);
     const hostname = urlObj.hostname.toLowerCase();
-
-    console.log(`[URLVoid Scraping] Checking ${hostname}`);
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 5000); // 5s timeout
-
     const urlvoidUrl = `https://www.urlvoid.com/scan/${encodeURIComponent(hostname)}/`;
 
-    // Website version needs CORS proxy (unlike browser extensions)
-    const proxiedUrl = `https://corsproxy.io/?${encodeURIComponent(urlvoidUrl)}`;
+    // Race all CORS proxies in parallel, use first successful response
+    const corsProxies = [
+      `https://corsproxy.io/?${encodeURIComponent(urlvoidUrl)}`,
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(urlvoidUrl)}`,
+      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(urlvoidUrl)}`
+    ];
 
-    const response = await fetch(proxiedUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:91.0) Gecko/20100101 Firefox/91.0'
+    // Create fetch promises for all proxies
+    const fetchPromises = corsProxies.map(async (proxiedUrl) => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000);
+      const proxyName = proxiedUrl.split('?')[0].split('/').slice(2, 3).join('');
+
+      try {
+        const response = await fetch(proxiedUrl, { signal: controller.signal });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const html = await response.text();
+        return { html, proxyName };
+      } catch (error) {
+        clearTimeout(timeout);
+        throw error;
       }
     });
 
-    clearTimeout(timeout);
-
-    if (!response.ok) {
-      console.log(`[URLVoid Scraping] Failed to fetch URLVoid for ${hostname}: ${response.status}`);
+    // Use Promise.any() - resolves with first success, rejects only if ALL fail
+    let result;
+    try {
+      result = await Promise.any(fetchPromises);
+    } catch (aggregateError) {
+      console.log(`[URLVoid Scraping] All proxies failed for ${hostname}`);
       return 'unknown';
     }
 
-    const html = await response.text();
-
     const detectedPattern = /detected/gi;
-    const detectedMatches = html.match(detectedPattern) || [];
+    const detectedMatches = result.html.match(detectedPattern) || [];
     const detectedCount = detectedMatches.length;
 
-    console.log(`[URLVoid Scraping] ${hostname} - Detected: ${detectedCount}`);
+    const countColor = detectedCount === 0 ? 'color: #4dabf7' : 'color: #ff6b6b';
+    console.log(`[URLVoid Scraping] ${hostname} - Detected: %c${detectedCount}%c (via ${result.proxyName})`, countColor, 'color: inherit');
 
     if (detectedCount >= 2) {
       return 'unsafe'; // 2 or more scanners detected malicious
@@ -727,8 +741,6 @@ function checkSuspiciousPatterns(url, domain) {
  * Check safety status (full implementation)
  */
 async function checkSafetyStatus(url) {
-  console.log(`[Safety Check] Starting safety check for ${url}`);
-
   try {
     // Normalize URL for lookup
     const normalizedUrl = url.toLowerCase()
@@ -771,8 +783,6 @@ async function checkSafetyStatus(url) {
         console.log(`[Blocklist] URL found in malicious database (sources: ${blocklistSources.join(', ')})`);
         return { status: 'unsafe', sources: blocklistSources };
       }
-
-      console.log(`[Blocklist] URL not in malicious database`);
     }
 
     let finalStatus = 'safe';
@@ -799,7 +809,6 @@ async function checkSafetyStatus(url) {
     }
 
     // Check URLVoid Scraping (always runs, no API key needed)
-    console.log(`[Safety Check] Checking URLVoid scraping...`);
     const vtScrapingResult = await checkURLVoidScraping(url);
     if (vtScrapingResult === 'unsafe') {
       finalStatus = 'unsafe';
@@ -859,32 +868,22 @@ self.addEventListener('message', async (e) => {
       // Initialize with API keys and blocklist data
       if (data.apiKeys) {
         apiKeys = data.apiKeys;
-        console.log('[Worker] API keys initialized:', {
-          google: !!apiKeys.googleSafeBrowsingApiKey,
-          yandex: !!apiKeys.yandexApiKey,
-          virustotal: !!apiKeys.virusTotalApiKey
-        });
       }
       if (data.blocklist) {
         blocklist = new Set(data.blocklist);
-        console.log(`[Worker] Blocklist initialized with ${blocklist.size} domains`);
       }
       if (data.domainSourceMap) {
         domainSourceMap = new Map(data.domainSourceMap);
-        console.log(`[Worker] Domain source map initialized with ${domainSourceMap.size} entries`);
       }
       if (data.domainOnlyMap) {
         domainOnlyMap = new Map(data.domainOnlyMap);
-        console.log(`[Worker] Domain-only map initialized with ${domainOnlyMap.size} entries`);
       }
       if (data.trustedDomains) {
         trustedDomains = data.trustedDomains;
-        console.log(`[Worker] Trusted domains list initialized with ${trustedDomains.length} domains`);
       }
 
       // Mark worker as initialized
       isWorkerInitialized = true;
-      console.log('[Worker] Initialization complete');
 
       self.postMessage({
         action: 'initComplete',
@@ -894,7 +893,6 @@ self.addEventListener('message', async (e) => {
 
     case 'resetRateLimit':
       virusTotalRateLimited = false;
-      console.log('[Worker] Rate limit reset for new scan');
       break;
 
     case 'scanBookmark':
@@ -930,5 +928,3 @@ self.addEventListener('message', async (e) => {
       console.warn('Unknown action:', action);
   }
 });
-
-console.log('Scanner worker initialized');

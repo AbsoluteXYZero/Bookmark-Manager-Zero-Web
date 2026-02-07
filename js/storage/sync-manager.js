@@ -55,9 +55,7 @@ class SyncManager {
     }
     this._initialized = true;
 
-    console.log('[Init] Sync manager initializing...');
     this.provider = await authManager.getPreference('syncProvider') || 'gitlab';
-    console.log('Sync provider set to:', this.provider);
 
     // Initialize adapter
     this.adapter = snippetAdapter;
@@ -73,7 +71,6 @@ class SyncManager {
     // Initialize auto-sync
     // Note: Auto-sync is disabled by default - we use event-driven sync only
     // to prevent rate limiting and account flagging
-    console.log('[Init] Timer-based auto-sync disabled - using event-driven sync only');
   }
 
   /**
@@ -610,11 +607,8 @@ class SyncManager {
    * Load bookmarks from IndexedDB
    */
   async loadLocalBookmarks() {
-    console.log('[SyncManager.loadLocalBookmarks] Loading from IndexedDB...');
     const bookmarksRecord = await dbManager.get('metadata', 'bookmarkTree');
-    console.log('[SyncManager.loadLocalBookmarks] Retrieved:', bookmarksRecord);
     const result = bookmarksRecord ? bookmarksRecord.value : this.getEmptyBookmarkTree();
-    console.log('[SyncManager.loadLocalBookmarks] Returning:', result);
     return result;
   }
 

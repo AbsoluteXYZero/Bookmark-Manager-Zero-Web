@@ -26,11 +26,8 @@ class ScannerService {
    */
   async init() {
     try {
-      console.log('Initializing scanner service...');
-
       // Initialize Web Worker with cache busting
       this.worker = new Worker(`workers/scanner-worker.js?v=${Date.now()}`);
-      console.log('Scanner worker created');
 
       // Set up message handler
       this.worker.onmessage = (e) => this.handleWorkerMessage(e);
@@ -40,15 +37,11 @@ class ScannerService {
         console.error('Scanner worker error:', error);
       };
 
-      console.log('Scanner service initialized');
-
       // Initialize worker with API keys and blocklist
       await this.initializeWorker();
 
       // Restore cached statuses for all bookmarks (bookmarks should be loaded before scanner init)
       await this.restoreCachedStatuses();
-
-      console.log('Scanner service fully initialized');
     } catch (error) {
       console.error('Failed to initialize scanner worker:', error);
       // Gracefully degrade - scanning just won't work
@@ -113,11 +106,9 @@ class ScannerService {
       }
 
       const restored = linkRestored + safetyRestored;
-      console.log(`[Scanner] Cache restore complete: ${linkRestored} link statuses, ${safetyRestored} safety statuses (${restored} total) for ${allBookmarks.length} bookmarks`);
 
       // Only trigger UI re-render if significant number of statuses were restored
       if (restored > 0 && window.renderBookmarks) {
-        console.log('[Scanner] Triggering UI re-render to show cached statuses');
         window.renderBookmarks();
       }
     } catch (error) {
@@ -132,8 +123,6 @@ class ScannerService {
     if (!this.worker) return;
 
     try {
-      console.log('Initializing worker with data...');
-
       // Get API keys from localStorage (they're stored encrypted)
       const apiKeys = {
         googleSafeBrowsingApiKey: await this.getDecryptedApiKey('googleSafeBrowsingApiKey'),
@@ -148,17 +137,13 @@ class ScannerService {
       });
 
       // Ensure blocklist is loaded
-      console.log('Ensuring blocklist is ready...');
       await blocklistService.ensureBlocklistReady();
-      console.log('Blocklist ready');
 
       // Get blocklist data
       const blocklistArray = Array.from(blocklistService.maliciousUrlsSet);
       const domainSourceMapArray = Array.from(blocklistService.domainSourceMap.entries());
       const domainOnlyMapArray = Array.from(blocklistService.domainOnlyMap.entries());
       const trustedDomains = blocklistService.TRUSTED_DOMAINS;
-
-      console.log(`Blocklist data: ${blocklistArray.length} URLs, ${domainSourceMapArray.length} domain mappings`);
 
       // Send initialization data to worker
       this.worker.postMessage({
@@ -171,8 +156,6 @@ class ScannerService {
           trustedDomains
         }
       });
-
-      console.log('Worker initialization data sent');
     } catch (error) {
       console.error('Failed to initialize worker with data:', error);
     }
@@ -201,12 +184,9 @@ class ScannerService {
   handleWorkerMessage(e) {
     const { action, data } = e.data;
 
-    console.log(`Worker message received: ${action}`);
-
     switch (action) {
       case 'initComplete':
         this.workerInitialized = true;
-        console.log('Worker initialization complete');
         break;
 
       case 'linkResult':

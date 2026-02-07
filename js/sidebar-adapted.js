@@ -60,7 +60,7 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    getManifest: () => ({ version: '1.0.0' }),
+    getManifest: () => ({ version: '1.1.0' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -133,7 +133,7 @@ const browser = {
 // ============================================================================
 // VERSION
 // ============================================================================
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.1.0';
 
 // ============================================================================
 // FIRST-TIME SETUP CARD
@@ -511,7 +511,6 @@ async function loadFolderScanTimestamps() {
     const timestampsStr = safeLocalStorage.getItem('folderScanTimestamps');
     if (timestampsStr) {
       folderScanTimestamps = JSON.parse(timestampsStr);
-      console.log(`[Folder Scan Cache] Loaded timestamps for ${Object.keys(folderScanTimestamps).length} folders`);
     }
   } catch (error) {
     console.error('[Folder Scan Cache] Error loading timestamps:', error);
@@ -596,8 +595,6 @@ function setupBlocklistProgressListener() {
 
 // Initialize
 async function init() {
-  console.log('[init] Starting sidebar initialization...');
-
   // Force update logo title to bypass cache
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
@@ -618,7 +615,6 @@ async function init() {
   // Show private mode indicator if in incognito/private browsing
   showPrivateModeIndicator();
 
-  console.log('[init] Loading settings and preferences...');
   loadTheme();
   loadView();
   loadZoom();
@@ -638,15 +634,12 @@ async function init() {
   console.log('[init] Loading bookmarks...');
   await loadBookmarks();
 
-  console.log('[init] Cleaning up...');
   cleanupSafetyHistory(); // Clean up stale entries on sidebar load
   await expandToStartFolder();
 
-  console.log('[init] Setting up event listeners...');
   setupEventListeners();
   setupBlocklistProgressListener();
 
-  console.log('[init] Rendering bookmarks...');
   renderBookmarks();
 
   // Check if background scan is in progress and sync UI
@@ -654,8 +647,6 @@ async function init() {
 
   // Automatically check bookmark statuses after initial render
   autoCheckBookmarkStatuses();
-
-  console.log('[init] Sidebar initialization complete!');
 }
 
 // Load and apply auto-clear cache setting
@@ -3073,19 +3064,13 @@ function toggleFolder(folderId, folderElement) {
       const lastScan = folderScanTimestamps[folderId];
       const daysAgo = Math.floor((Date.now() - lastScan) / (24 * 60 * 60 * 1000));
       console.log(`[Folder Scan Cache] "${folderTitle}" already scanned ${daysAgo} day(s) ago, loading cached statuses...`);
-      console.log('[Folder Scan Cache] window.scannerService:', window.scannerService);
-      console.log('[Folder Scan Cache] Checking if window.scannerService is truthy:', !!window.scannerService);
 
       // Even though we skip scanning, we still need to load cached statuses from IndexedDB
       // for the bookmarks that are now visible in this expanded folder
       if (window.scannerService) {
-        console.log('[Folder Toggle] About to call loadCachedStatusesForFolder with folderId:', folderId);
-        console.log('[Folder Toggle] loadCachedStatusesForFolder is:', typeof loadCachedStatusesForFolder);
-
         // Don't use setTimeout - we need this to complete before rendering
         try {
           const promise = loadCachedStatusesForFolder(folderId);
-          console.log('[Folder Toggle] Got promise:', promise);
 
           // Add timeout to prevent UI hang if cache loading fails
           const timeoutPromise = new Promise((_, reject) => {
@@ -3126,8 +3111,6 @@ function toggleFolder(folderId, folderElement) {
 
 // Load cached statuses for all bookmarks in a folder
 async function loadCachedStatusesForFolder(folderId) {
-  console.log(`[Cache Load] START - folderId: ${folderId}`);
-
   if (!window.scannerService) {
     console.warn('[Cache Load] No scanner service available');
     return;
@@ -3164,33 +3147,23 @@ async function loadCachedStatusesForFolder(folderId) {
   let safetyLoaded = 0;
 
   for (const bookmark of bookmarks) {
-    console.log(`[Cache Load] Processing bookmark: ${bookmark.title || bookmark.url}`);
-
     // Load cached link status
     if (!bookmark.linkStatus) {
-      console.log(`[Cache Load] Checking link cache for ${bookmark.url}`);
       const cachedLink = await window.scannerService.getCachedResult(bookmark.url, 'link');
       if (cachedLink) {
         bookmark.linkStatus = cachedLink;
         linkLoaded++;
-        console.log(`[Cache Load] ✓ Link "${cachedLink}" for ${bookmark.title || bookmark.url}`);
       }
-    } else {
-      console.log(`[Cache Load] Already has link status: ${bookmark.linkStatus}`);
     }
 
     // Load cached safety status
     if (!bookmark.safetyStatus) {
-      console.log(`[Cache Load] Checking safety cache for ${bookmark.url}`);
       const cachedSafety = await window.scannerService.getCachedResult(bookmark.url, 'safety');
       if (cachedSafety) {
         bookmark.safetyStatus = cachedSafety.status;
         bookmark.safetySources = cachedSafety.sources || [];
         safetyLoaded++;
-        console.log(`[Cache Load] ✓ Safety "${cachedSafety.status}" for ${bookmark.title || bookmark.url}`);
       }
-    } else {
-      console.log(`[Cache Load] Already has safety status: ${bookmark.safetyStatus}`);
     }
   }
 
@@ -3959,28 +3932,53 @@ function updateBookmarkStatusInDOM(bookmarkId, linkStatus, safetyStatus, safetyS
   const bookmarkElement = document.querySelector(`.bookmark-item[data-id="${bookmarkId}"]`);
   if (!bookmarkElement) return;
 
+  // Update status indicators container (for list view)
   const statusIndicators = bookmarkElement.querySelector('.status-indicators');
-  if (!statusIndicators) return;
-
-  // Rebuild the status indicators HTML
-  // Shield (safety) on top, chain (link status) below
-  let statusIndicatorsHtml = '';
-  if (displayOptions.safetyStatus && safetyStatus) {
-    statusIndicatorsHtml += getShieldHtml(safetyStatus, url, safetySources);
+  if (statusIndicators && (displayOptions.safetyStatus || displayOptions.liveStatus)) {
+    let statusIndicatorsHtml = '';
+    if (displayOptions.safetyStatus && safetyStatus) {
+      statusIndicatorsHtml += getShieldHtml(safetyStatus, url, safetySources);
+    }
+    if (displayOptions.liveStatus && linkStatus) {
+      statusIndicatorsHtml += getStatusDotHtml(linkStatus, url);
+    }
+    statusIndicators.innerHTML = statusIndicatorsHtml;
   }
-  if (displayOptions.liveStatus && linkStatus) {
-    statusIndicatorsHtml += getStatusDotHtml(linkStatus, url);
+
+  // Update top row indicators (for grid view)
+  const topRow = bookmarkElement.querySelector('.bookmark-top-row');
+  if (topRow) {
+    // Update shield in top row
+    if (displayOptions.safetyStatus && safetyStatus) {
+      const shieldHtml = getShieldHtml(safetyStatus, url, safetySources);
+      const shieldContainer = topRow.querySelector('.shield-indicator');
+      if (shieldContainer) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = shieldHtml;
+        const newShield = tempDiv.firstChild;
+        if (newShield) {
+          shieldContainer.replaceWith(newShield);
+        }
+      }
+    }
+
+    // Update link status in top row
+    if (displayOptions.liveStatus && linkStatus) {
+      const linkStatusHtml = getStatusDotHtml(linkStatus, url);
+      const linkStatusContainer = topRow.querySelector('.status-icon');
+      if (linkStatusContainer) {
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = linkStatusHtml;
+        const newLinkStatus = tempDiv.firstChild;
+        if (newLinkStatus) {
+          linkStatusContainer.replaceWith(newLinkStatus);
+        }
+      }
+    }
   }
 
-  statusIndicators.innerHTML = statusIndicatorsHtml;
-
-  // FORCE IMMEDIATE DOM REFLOW to ensure visual update and prevent race condition
-  statusIndicators.offsetHeight; // Trigger layout calculation
-
-  // Additional safeguard: force style recalculation on the parent element
-  bookmarkElement.style.display = 'flex';
-  bookmarkElement.offsetHeight; // Force complete reflow
-  bookmarkElement.style.display = '';
+  // FORCE IMMEDIATE DOM REFLOW to ensure visual update
+  bookmarkElement.offsetHeight;
 }
 
 // Whitelist a bookmark (trust it regardless of safety checks)
@@ -5996,10 +5994,8 @@ async function clearCache() {
     }
     resetStatuses(bookmarkTree);
 
-    // Clear IndexedDB cache too (if scanner service available)
-    if (window.scannerService && window.scannerService.clearAllCache) {
-      await window.scannerService.clearAllCache();
-    }
+    // Clear IndexedDB cache too
+    await dbManager.clear('cache');
 
     // Re-render bookmarks to show "unknown" status
     renderBookmarks();
@@ -6196,11 +6192,8 @@ let eventListenersSetUp = false;
 // Setup event listeners
 function setupEventListeners() {
   if (eventListenersSetUp) {
-    console.log('[Setup] Event listeners already set up, skipping...');
     return;
   }
-
-  console.log('[Setup] Setting up event listeners...');
 
   // Re-query critical elements in case they weren't available when script first loaded
   themeBtn = document.getElementById('themeBtn');
@@ -6211,13 +6204,6 @@ function setupEventListeners() {
   settingsMenu = document.getElementById('settingsMenu');
   viewMenu = document.getElementById('viewMenu');
   zoomMenu = document.getElementById('zoomMenu');
-
-  console.log('[Setup] Critical buttons found:', {
-    themeBtn: !!themeBtn,
-    settingsBtn: !!settingsBtn,
-    viewBtn: !!viewBtn,
-    zoomBtn: !!zoomBtn
-  });
 
   try {
     // Search
@@ -6349,9 +6335,7 @@ function setupEventListeners() {
 
   // Theme menu
   if (themeBtn) {
-    console.log('[Setup] Attaching themeBtn click listener');
     themeBtn.addEventListener('click', (e) => {
-      console.log('[Theme] Button clicked!');
       e.stopPropagation();
       const wasOpen = themeMenu.classList.contains('show');
       closeAllMenus();
@@ -6976,7 +6960,6 @@ function setupEventListeners() {
     // Listen for scanner events to update UI
     window.addEventListener('scanStarted', (e) => {
       const { total } = e.detail;
-      console.log(`[Scan Started] ${total} bookmarks`);
 
       // Show stop button, hide rescan button
       if (stopScanBtn) stopScanBtn.style.display = 'flex';
@@ -7594,7 +7577,6 @@ function setupEventListeners() {
   }
 
   eventListenersSetUp = true;
-  console.log('[Setup] Event listeners setup complete');
 }
 
 // Highlight the selected item (folder or bookmark) for keyboard navigation

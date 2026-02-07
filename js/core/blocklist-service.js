@@ -126,12 +126,9 @@ class BlocklistService {
        }
 
        // Load from cache
-       console.log('[Blocklist] Loading from cache...');
        this.maliciousUrlsSet = new Set(cachedData.domains || []);
        this.domainSourceMap = new Map(cachedData.domainSourceMap || []);
        this.domainOnlyMap = new Map(cachedData.domainOnlyMap || []);
-
-       console.log(`[Blocklist] Loaded ${this.maliciousUrlsSet.size} domains from cache`);
        return true;
      } catch (error) {
        console.error('[Blocklist] Failed to load cached blocklist:', error);

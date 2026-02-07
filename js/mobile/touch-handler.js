@@ -21,8 +21,6 @@ class TouchHandler {
    * Initialize touch handlers
    */
   init() {
-    console.log('Touch handler initialized');
-
     // Add touch event listeners to bookmark list
     document.addEventListener('touchstart', (e) => this.handleTouchStart(e), { passive: false });
     document.addEventListener('touchmove', (e) => this.handleTouchMove(e), { passive: false });

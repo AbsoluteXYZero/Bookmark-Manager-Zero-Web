@@ -46,7 +46,6 @@ class App {
       this.setupEventListeners();
       this.setupSyncListeners();
       touchHandler.init();
-      console.log('Touch handler initialized');
 
       // Check authentication IMMEDIATELY - this will show/hide screens appropriately
       await this.checkAuth();
@@ -113,10 +112,6 @@ class App {
     const localModeRecord = await dbManager.get('settings', 'bmz_local_mode');
     const isLocalMode = localModeRecord && localModeRecord.value === true;
 
-    console.log('[Auth] Checking mode on page load:');
-    console.log('[Auth] bmz_mode_chosen (IndexedDB):', hasChosenMode);
-    console.log('[Auth] bmz_local_mode (IndexedDB):', isLocalMode);
-
     // If user hasn't chosen a mode, check for local bookmarks first
     if (!hasChosenMode) {
       console.log('[Auth] User has not chosen a mode yet');
@@ -162,8 +157,6 @@ class App {
     }
 
     // User is in local mode or GitLab mode
-    console.log('[Auth] Mode chosen, isLocalMode:', isLocalMode);
-
     if (isLocalMode) {
       console.log('[Auth] Local mode detected');
       // Check if there are bookmarks in local storage
@@ -2774,8 +2767,6 @@ class App {
    * Show main application after authentication
    */
   async showMainApp() {
-    console.log('[showMainApp] Starting main app initialization...');
-
     // Hide login screen
     const loginScreen = document.getElementById('loginScreen');
     if (loginScreen) {
@@ -2793,24 +2784,19 @@ class App {
 
     // Initialize bookmark manager
     await bookmarkManager.init();
-    console.log('Bookmark manager initialized');
 
     // Initialize sync manager
     await syncManager.init();
-    console.log('Sync manager initialized');
 
     // Skip snippet setup and remote sync if in local mode
     const logoutBtn = document.getElementById('logoutBtn');
     const localModeRecord = await dbManager.get('settings', 'bmz_local_mode');
     const isLocalMode = localModeRecord && localModeRecord.value === true;
-    console.log('[App] Button visibility check - isLocalMode:', isLocalMode, 'logoutBtn exists:', !!logoutBtn);
 
     if (!isLocalMode) {
       // Show logout button and manual sync button in GitLab mode
-      console.log('[App] GitLab mode - showing logout button and manual sync button');
       if (logoutBtn) {
         logoutBtn.style.display = 'flex';
-        console.log('[App] Logout button display set to flex');
       } else {
         console.error('[App] Logout button element not found!');
       }
@@ -2818,7 +2804,6 @@ class App {
       const manualSyncBtn = document.getElementById('manualSyncBtn');
       if (manualSyncBtn) {
         manualSyncBtn.style.display = '';
-        console.log('[App] Manual sync button shown');
       }
 
       // Check if we have a snippet set up
@@ -2883,7 +2868,6 @@ class App {
       }
     }
 
-    console.log('[App] Initializing sidebar...');
     // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
     // Prevent duplicate initialization
     if (window.initSidebar && !this._sidebarInitialized) {
@@ -2892,19 +2876,13 @@ class App {
     }
 
     // Initialize services with delays to prevent overwhelming the system
-    console.log('[App] Initializing blocklist service...');
     await blocklistService.init();
-    console.log('Blocklist service initialized');
 
     // Initialize scanner service immediately
-    console.log('[App] Initializing scanner service...');
     if (!this._scannerInitialized) {
       await scannerService.init();
       this._scannerInitialized = true;
-      console.log('Scanner service initialized');
     }
-
-    console.log('Main app loaded successfully');
   }
 
   /**

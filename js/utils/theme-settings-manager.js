@@ -357,7 +357,6 @@ async function loadStartFolder() {
   try {
     const result = await window.safeStorage.get('startFolderId');
     window.startFolderId = result.startFolderId || null;
-    console.log(`Loaded start folder: ${window.startFolderId || 'Root'}`);
   } catch (error) {
     console.error('Error loading start folder preference:', error);
     window.startFolderId = null;
