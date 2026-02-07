@@ -49,6 +49,25 @@ class ScannerService {
   }
 
   /**
+   * Wait for worker to be initialized (with timeout)
+   * Returns true if ready, false if timeout or failed
+   */
+  async waitForWorkerReady(timeoutMs = 10000) {
+    if (this.workerInitialized) return true;
+    if (!this.worker) return false;
+
+    const startTime = Date.now();
+    while (!this.workerInitialized) {
+      if (Date.now() - startTime > timeoutMs) {
+        console.warn('[Scanner] Worker initialization timeout');
+        return false;
+      }
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return true;
+  }
+
+  /**
    * Restore cached scan results from IndexedDB to all bookmarks (BATCHED)
    */
   async restoreCachedStatuses() {

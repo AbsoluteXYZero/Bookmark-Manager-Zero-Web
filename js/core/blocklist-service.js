@@ -261,6 +261,8 @@ class BlocklistService {
     }
 
     this.blocklistLoading = true;
+    let success = false;
+    let totalCount = 0;
 
     try {
       console.log(`[Blocklist] Starting update from ${this.BLOCKLIST_SOURCES.length} sources...`);
@@ -286,7 +288,7 @@ class BlocklistService {
         results.push(result);
       }
 
-      let totalCount = 0;
+      totalCount = 0;
       for (let i = 0; i < results.length; i++) {
         const result = results[i];
         const sourceName = this.BLOCKLIST_SOURCES[i].name;
@@ -326,16 +328,24 @@ class BlocklistService {
       await this.saveCachedBlocklist();
       await dbManager.put('metadata', { key: 'blocklistLastUpdate', value: this.blocklistLastUpdate });
 
-      window.dispatchEvent(new CustomEvent('blocklist:complete', {
-        detail: { domains: this.maliciousUrlsSet.size, totalEntries: totalCount, sources: this.BLOCKLIST_SOURCES.length }
-      }));
-
-      this.blocklistLoading = false;
+      success = true;
       return true;
     } catch (error) {
       console.error(`[Blocklist] Error updating database:`, error);
-      this.blocklistLoading = false;
       return false;
+    } finally {
+      // ALWAYS dispatch complete event to prevent UI from getting stuck
+      // Even on partial failures, the UI should reset to "Ready"
+      window.dispatchEvent(new CustomEvent('blocklist:complete', {
+        detail: {
+          domains: this.maliciousUrlsSet.size,
+          totalEntries: success ? totalCount : 0,
+          sources: this.BLOCKLIST_SOURCES.length,
+          success: success
+        }
+      }));
+
+      this.blocklistLoading = false;
     }
   }
 

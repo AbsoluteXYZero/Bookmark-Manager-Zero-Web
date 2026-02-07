@@ -3,6 +3,8 @@
 ## V1.1.0
 
 ### Fixed
+- **Auto-Scan Timing Issue**: Fixed folder expansion auto-scan getting stuck at "Scanning 0/X" when folder is expanded before scanner worker is initialized. Now waits for worker initialization before starting scan.
+- **Blocklist Download Status Bar**: Fixed status bar getting stuck on "Downloading blocklists..." if download fails. Now always dispatches completion event via `finally` block.
 - **CORS Proxy Reliability**: URLVoid scraping now uses parallel proxy racing with Promise.any() - first successful response wins
 - **CORS Proxy Timeout**: Increased timeout from 5s to 15s to allow slower proxies to respond
 - **Clear Cache Button**: Fixed settings menu "Clear Cache" button not working - now properly clears IndexedDB cache store

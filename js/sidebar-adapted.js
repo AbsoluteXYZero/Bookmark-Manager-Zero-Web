@@ -1328,6 +1328,21 @@ async function autoCheckBookmarkStatuses() {
 
   // Use scanner service queue system for consistent progress updates (same as manual scans)
   if (window.scannerService && window.scannerService.worker) {
+    // Wait for worker to be initialized before starting scan
+    if (!window.scannerService.workerInitialized) {
+      console.log('[Auto-Check] Waiting for scanner worker to initialize...');
+      if (scanProgress) scanProgress.textContent = 'Initializing scanner...';
+      const ready = await window.scannerService.waitForWorkerReady(10000);
+      if (!ready) {
+        console.warn('[Auto-Check] Scanner worker failed to initialize, using fallback');
+        // Remove from checked set so they can be tried again later
+        bookmarksToCheck.forEach(item => checkedBookmarks.delete(item.id));
+        if (scanProgress) scanProgress.textContent = 'Ready';
+        if (scanStatusBar) scanStatusBar.classList.remove('scanning');
+        return;
+      }
+      console.log('[Auto-Check] Scanner worker initialized, starting scan');
+    }
     // Set up scan state similar to manual scans
     window.scannerService.scanQueue = [...bookmarksToCheck];
     window.scannerService.totalCount = bookmarksToCheck.length;
