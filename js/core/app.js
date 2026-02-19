@@ -974,6 +974,17 @@ class App {
         } else if (userChoice === 'merge') {
           // Merge local bookmarks into the snippet
           await this.mergeLocalBookmarksIntoSnippet(itemId);
+        } else if (userChoice === 'replace-remote') {
+          // Replace remote snippet with local bookmarks
+          console.log('[UseRemoteStorage] User chose to replace remote snippet with local bookmarks');
+          try {
+            await this.replaceRemoteWithLocal(itemId);
+            this.showToast('Remote snippet replaced with local bookmarks.');
+          } catch (error) {
+            console.error('[UseRemoteStorage] Failed to replace remote snippet:', error);
+            this.showToast(`Error: ${error.message}`, 'error');
+            return;
+          }
         } else if (userChoice === 'replace') {
           // Use snippet as-is (replace local) - continue with normal flow
           console.log('[UseRemoteStorage] User chose to replace local with snippet');
@@ -1293,6 +1304,23 @@ class App {
             </div>
           </button>
 
+          <button id="replaceRemote" style="
+            background: var(--md-sys-color-secondary-container, #2a3a2a);
+            color: var(--md-sys-color-on-secondary-container, #b8f0b8);
+            border: none;
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 1em;
+            text-align: left;
+            border-left: 4px solid #4caf50;
+          ">
+            <div style="font-weight: 500;">Replace Remote Snippet with Local</div>
+            <div style="font-size: 0.9em; opacity: 0.8; margin-top: 4px;">
+              Overwrite the ${snippetText} with your local bookmarks
+            </div>
+          </button>
+
           <button id="replaceLocal" style="
             background: var(--md-sys-color-error-container);
             color: var(--md-sys-color-on-error-container);
@@ -1304,7 +1332,7 @@ class App {
             text-align: left;
             border-left: 4px solid var(--md-sys-color-error);
           ">
-            <div style="font-weight: 500;">Replace with Snippet</div>
+            <div style="font-weight: 500;">Replace Local with Remote Snippet</div>
             <div style="font-size: 0.9em; opacity: 0.8; margin-top: 4px;">
               Use the ${snippetText} only (your local bookmarks will be lost)
             </div>
@@ -1324,6 +1352,11 @@ class App {
       dialog.querySelector('#doMerge').addEventListener('click', () => {
         modal.remove();
         resolve('merge');
+      });
+
+      dialog.querySelector('#replaceRemote').addEventListener('click', () => {
+        modal.remove();
+        resolve('replace-remote');
       });
 
       dialog.querySelector('#replaceLocal').addEventListener('click', () => {
@@ -1389,6 +1422,27 @@ class App {
 
     } catch (error) {
       console.error('[mergeLocalBookmarksIntoSnippet] Error:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Replace remote snippet with local bookmarks
+   */
+  async replaceRemoteWithLocal(snippetId) {
+    try {
+      console.log('[replaceRemoteWithLocal] Starting replace process for snippet:', snippetId);
+
+      // Get local bookmarks tree
+      const localBookmarks = await syncManager.getLocalBookmarks();
+      console.log('[replaceRemoteWithLocal] Retrieved local bookmarks');
+
+      // Update snippet with local bookmarks (replace remote content)
+      await snippetAdapter.updateBookmarks(snippetId, localBookmarks);
+      console.log('[replaceRemoteWithLocal] Snippet updated successfully with local bookmarks');
+
+    } catch (error) {
+      console.error('[replaceRemoteWithLocal] Error:', error);
       throw error;
     }
   }

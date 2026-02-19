@@ -1,5 +1,15 @@
 # Changelog
 
+## V1.3.0 - Context Menu Redesign
+
+### New Features
+- **Replace Remote Snippet with Local** - New option in the sync setup dialog when connecting a GitLab snippet. Overwrites the remote snippet with your current local bookmarks, in addition to the existing Keep Local, Merge, and Replace Local with Remote Snippet options.
+
+### Improvements
+- **Context Menu Redesign** - Right-click and hamburger menus now open as a slide-in panel from the right edge of the sidebar instead of a fragile absolute-positioned popup. Eliminates clipping, size inconsistencies, and overlap issues. Click outside or press Escape to dismiss.
+
+---
+
 ## V1.2.0 - Move To, Keyboard Shortcuts & Drag Improvements
 
 ### New Features

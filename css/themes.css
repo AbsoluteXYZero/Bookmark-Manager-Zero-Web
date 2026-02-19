@@ -276,8 +276,7 @@
       box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
     }
 
-    /* Context menu blur - ONLY when .show class is active */
-    .enhanced-gray .bookmark-actions.show,
+    /* Context menu blur - settings menu only (context menu now uses modal) */
     .enhanced-gray .settings-menu {
       backdrop-filter: blur(40px) saturate(180%) !important;
       -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
@@ -286,8 +285,7 @@
       box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1) !important;
     }
 
-    /* Tinted theme context menus - light style like header */
-    .tinted .bookmark-actions.show,
+    /* Tinted theme context menus - settings menu only (context menu now uses modal) */
     .tinted .settings-menu {
       backdrop-filter: blur(40px) saturate(180%) !important;
       -webkit-backdrop-filter: blur(40px) saturate(180%) !important;
@@ -829,16 +827,6 @@
       z-index: 2;
     }
 
-    /* Disable hover transform when menu is open to prevent position shifts */
-    .bookmark-item:has(.bookmark-actions.show) {
-      z-index: 10000;
-      transform: none;
-    }
-
-    .bookmark-item:has(.bookmark-actions.show):hover {
-      transform: none;
-    }
-
     .bookmark-item:active {
       cursor: grabbing;
       transform: scale(1.02);
@@ -1163,32 +1151,6 @@
       color: var(--md-sys-color-on-surface);
     }
 
-    .bookmark-actions {
-      position: absolute;
-      top: 100%;
-      right: 12px;
-      margin-top: 2px;
-      background: var(--md-sys-color-surface);
-      border: 1px solid var(--md-sys-color-outline-variant);
-      border-radius: 12px;
-      padding: 6px 0;
-      box-shadow: var(--md-elevation-3);
-      z-index: 9999;
-      min-width: 180px;
-      opacity: 0;
-      visibility: hidden;
-      transform: translateY(-2px);
-      transition: opacity 0.15s ease, visibility 0.15s ease, transform 0.15s ease;
-      pointer-events: none;
-    }
-
-    .bookmark-actions.show {
-      opacity: 1;
-      visibility: visible;
-      transform: translateY(0);
-      pointer-events: auto;
-    }
-
     .action-btn {
       width: 100%;
       background: none;
@@ -1447,15 +1409,6 @@
 
     .folder-item:hover {
       z-index: 2;
-    }
-
-    /* Boost z-index when folder menu is open */
-    .folder-item:has(.bookmark-actions.show) {
-      z-index: 10000;
-    }
-
-    .folder-item:has(.bookmark-actions.show) .folder-header {
-      transform: none;
     }
 
     .folder-header {
