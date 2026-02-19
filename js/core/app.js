@@ -1880,28 +1880,32 @@ class App {
 
           // Show loading state
           manualSyncBtn.disabled = true;
-          const originalContent = manualSyncBtn.innerHTML;
-          manualSyncBtn.innerHTML = '<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="animation: spin 1s linear infinite;"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>';
+          manualSyncBtn.classList.add('syncing');
 
           try {
             await syncManager.syncToRemote();
-            this.showToast('Force pushed to remote successfully', 'success');
+            // Success: show green arrows for 5 seconds instead of toast
+            manualSyncBtn.classList.remove('syncing');
+            manualSyncBtn.classList.add('sync-success');
+            setTimeout(() => {
+              manualSyncBtn.classList.remove('sync-success');
+            }, 5000);
           } catch (error) {
             console.error('[ManualSync] Failed:', error);
+            manualSyncBtn.classList.remove('syncing');
             this.showToast(`Sync failed: ${error.message}`, 'error');
           } finally {
             manualSyncBtn.disabled = false;
-            manualSyncBtn.innerHTML = originalContent;
           }
           return;
         }
 
         // Normal click - show diff dialog
+        manualSyncBtn.classList.add('syncing');
         try {
-          this.showToast('Checking for changes...', 'info');
-
           const remoteId = syncManager.getRemoteId();
           if (!remoteId) {
+            manualSyncBtn.classList.remove('syncing');
             this.showToast('No remote storage configured', 'error');
             return;
           }
@@ -1913,14 +1917,20 @@ class App {
           const diff = syncManager.calculateBookmarkDiff(localData, remoteData);
           const hasChanges = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length > 0;
 
+          manualSyncBtn.classList.remove('syncing');
           if (!hasChanges) {
-            this.showToast('No changes detected. Bookmarks are in sync.', 'success');
+            // No changes — show green arrows for 5 seconds
+            manualSyncBtn.classList.add('sync-success');
+            setTimeout(() => {
+              manualSyncBtn.classList.remove('sync-success');
+            }, 5000);
             return;
           }
 
           await this.showSyncDiffDialog(diff, remoteData);
         } catch (error) {
           console.error('[ManualSync] Failed:', error);
+          manualSyncBtn.classList.remove('syncing');
           this.showToast(`Sync failed: ${error.message}`, 'error');
         }
       });

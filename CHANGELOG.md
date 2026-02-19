@@ -1,5 +1,26 @@
 # Changelog
 
+## V1.2.0 - Move To, Keyboard Shortcuts & Drag Improvements
+
+### New Features
+- **Move to... Context Menu** - Right-click any bookmark or folder and select "Move to..." to relocate it via a modal folder picker
+  - Folder dropdown with optional alphabetical sorting
+  - Prevents moving folders into themselves or their descendants
+  - Protects built-in root folders
+  - Full changelog integration with undo/restore support
+- **Keyboard Shortcut: Ctrl+Click** - Open bookmarks in a new tab
+- **Keyboard Shortcut: Shift+Click** - Open bookmarks in a new window
+- **Multi-Select Click Anywhere** - In multi-select mode, clicking anywhere on a bookmark or folder toggles its selection (no longer requires clicking the small checkbox)
+
+### Improvements
+- **Drag-and-Drop Auto-Scroll** - Dragging a bookmark near the top or bottom edge of the list now auto-scrolls at a speed proportional to cursor proximity
+- **Sync Success Visual Feedback** - Manual sync button now shows spinning arrows during sync and green arrows for 5 seconds on success, replacing success toasts. Error toasts are preserved.
+
+### Bug Fixes
+- **Fixed "allBookmarks is not defined"** - Resolved error in bulk recheck and bulk move functions by properly fetching the bookmark tree before use
+
+---
+
 ## V1.1.0
 
 ### Fixed
