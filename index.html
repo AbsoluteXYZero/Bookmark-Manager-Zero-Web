@@ -967,18 +967,9 @@
       border-radius: 8px;
     }
 
-    /* Inter-item drop zones - fill the gap between items to make entire space droppable */
+    /* Inter-item drop zones hidden - items handle their own before/after zones */
     .inter-item-drop-zone {
-      height: 4px;
-      margin-bottom: 0;
-      position: relative;
-      cursor: pointer;
-      z-index: 1;
-    }
-
-    /* Reduce spacing between folders */
-    .folder-item + .inter-item-drop-zone {
-      height: 2px;
+      display: none;
     }
 
     .inter-item-drop-zone.drop-zone-active::before {
@@ -3757,6 +3748,15 @@
   <input type="file" id="importFileInput" accept=".html,.json" style="display: none;" />
 
   <script src="js/lib/qrcode-lib.js"></script>
+
+  <!-- Unregister any stale service workers from previous deployments -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistrations().then(registrations => {
+        registrations.forEach(reg => reg.unregister());
+      });
+    }
+  </script>
 
   <!-- Edge Detection Script -->
   <script>
