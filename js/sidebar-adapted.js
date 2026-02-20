@@ -60,7 +60,7 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    getManifest: () => ({ version: '1.3.0' }),
+    getManifest: () => ({ version: '1.3.1' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts

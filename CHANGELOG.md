@@ -1,5 +1,12 @@
 ## Changelog
 
+### V1.3.1 - Bug Fixes
+
+**Bug Fixes:**
+- **Android WebView Edge False Positive** - Fixed the "Browser Not Supported" Edge incompatibility warning incorrectly appearing inside the Android app. Devices with Microsoft Edge set as their system WebView provider caused the user agent to contain `EdgA`, triggering the block. The detection now correctly exempts Android WebViews.
+
+---
+
 ### V1.3.0 - Context Menu Redesign
 
 **New Features:**

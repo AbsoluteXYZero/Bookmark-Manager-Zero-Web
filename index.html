@@ -3761,10 +3761,11 @@
   <!-- Edge Detection Script -->
   <script>
     (function() {
-      // Detect if browser is Edge
+      // Detect if browser is Edge (but not Android WebView, which may use Edge as WebView provider)
       const isEdge = /Edg/i.test(navigator.userAgent);
+      const isAndroidWebView = /wv/.test(navigator.userAgent);
 
-      if (isEdge) {
+      if (isEdge && !isAndroidWebView) {
         // Show the warning overlay
         const overlay = document.getElementById('edgeWarningOverlay');
         if (overlay) {
