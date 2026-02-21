@@ -167,7 +167,7 @@ I suggest using GitLab Pages
 Or deploy to any static hosting provider (Netlify, Vercel, Cloudflare Pages, etc.):
 
 ```bash
-git clone https://gitlab.com/AbsoluteXYZero/BMZ.git
+git clone https://gitlab.com/AbsoluteXYZero/BMZ-Web.git
 cd BMZ
 # Deploy the entire directory to your static host
 ```
