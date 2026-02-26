@@ -60,7 +60,7 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    getManifest: () => ({ version: '1.3.1' }),
+    getManifest: () => ({ version: '1.4.0' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -6175,6 +6175,90 @@ async function bulkDeleteItems() {
   }
 }
 
+// Bulk open selected items in new tabs
+function bulkOpenItems() {
+  if (selectedItems.size === 0) {
+    alert('No items selected. Please select bookmarks to open.');
+    return;
+  }
+  const tree = bookmarkManager.getTree();
+  const allBookmarks = tree && tree.roots ? Object.values(tree.roots) : [];
+  const itemsToOpen = [];
+  for (const itemId of selectedItems) {
+    const item = findBookmarkById(allBookmarks, itemId);
+    if (!item) continue;
+    if (item.type === 'bookmark' && /^https?:\/\//i.test(item.url)) {
+      itemsToOpen.push({ title: item.title || item.url, url: item.url });
+    } else if (item.type === 'folder') {
+      getAllBookmarksInFolder(item).forEach(b => {
+        if (/^https?:\/\//i.test(b.url)) itemsToOpen.push({ title: b.title || b.url, url: b.url });
+      });
+    }
+  }
+  if (itemsToOpen.length === 0) {
+    alert('No openable bookmarks found in the selection (only http/https URLs can be opened).');
+    return;
+  }
+  showBulkOpenModal(itemsToOpen);
+}
+
+function showBulkOpenModal(items) {
+  const existing = document.getElementById('bulkOpenModal');
+  if (existing) existing.remove();
+
+  const modal = document.createElement('div');
+  modal.id = 'bulkOpenModal';
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:10000;display:flex;align-items:center;justify-content:center;`;
+
+  const card = document.createElement('div');
+  card.style.cssText = `background:var(--md-sys-color-surface);border-radius:12px;padding:20px;max-width:480px;width:90%;max-height:70vh;overflow-y:auto;display:flex;flex-direction:column;gap:10px;box-shadow:0 8px 24px rgba(0,0,0,0.3);`;
+
+  const header = document.createElement('div');
+  header.style.cssText = `font-weight:600;font-size:15px;color:var(--md-sys-color-on-surface);`;
+  header.textContent = `Open ${items.length} bookmark${items.length !== 1 ? 's' : ''} in new tabs`;
+
+  const note = document.createElement('div');
+  note.style.cssText = `font-size:12px;color:var(--md-sys-color-on-surface-variant);line-height:1.4;`;
+  note.textContent = 'Browsers restrict automatic multi-tab opening on web pages. Click each bookmark below to open it, or use the Chrome or Firefox extension to open all at once. Sucks... I know';
+
+  const list = document.createElement('div');
+  list.style.cssText = `display:flex;flex-direction:column;gap:4px;`;
+
+  items.forEach(({ title, url }) => {
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.title = url;
+    link.style.cssText = `color:var(--md-sys-color-primary);text-decoration:none;font-size:13px;padding:6px 8px;border-radius:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:block;transition:background 0.15s;`;
+    link.textContent = title;
+    link.addEventListener('mouseover', () => link.style.background = 'var(--md-sys-color-primary-container)');
+    link.addEventListener('mouseout', () => link.style.background = '');
+    list.appendChild(link);
+  });
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'btn';
+  closeBtn.textContent = 'Close';
+  closeBtn.style.cssText = `align-self:flex-end;margin-top:4px;`;
+  closeBtn.addEventListener('click', () => modal.remove());
+
+  card.appendChild(header);
+  card.appendChild(note);
+  card.appendChild(list);
+  card.appendChild(closeBtn);
+  modal.appendChild(card);
+  modal.addEventListener('click', e => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
+}
+
+// Bulk open selected items each in a new window
+async function bulkOpenInWindows() {
+  if (app && app.showToast) {
+    app.showToast('Opening bookmarks in separate windows is only available in the Chrome and Firefox desktop extensions.', 'info');
+  }
+}
+
 // Get all bookmarks in a folder recursively
 function getAllBookmarksInFolder(folder) {
   const bookmarks = [];
@@ -7403,6 +7487,68 @@ function setupEventListeners() {
     renderBookmarks();
   });
 
+  // Long-press to enter multi-select mode
+  let longPressTimer = null;
+  let longPressStartX = 0;
+  let longPressStartY = 0;
+  const LONG_PRESS_MS = 750;
+  const LONG_PRESS_DRIFT_PX = 8;
+
+  function enterMultiSelectFromLongPress(itemEl) {
+    if (!multiSelectMode) {
+      multiSelectMode = true;
+      multiSelectToggle.style.background = 'var(--md-sys-color-primary)';
+      multiSelectToggle.style.color = 'var(--md-sys-color-on-primary)';
+      multiSelectToggle.setAttribute('aria-pressed', 'true');
+      document.getElementById('bulkActionsBar').classList.remove('hidden');
+      renderBookmarks();
+    }
+    const container = itemEl.closest('.bookmark-item, .folder-item');
+    if (container && container.dataset.id) {
+      selectedItems.add(container.dataset.id);
+      const checkbox = container.querySelector('.item-checkbox');
+      if (checkbox) checkbox.checked = true;
+      updateSelectedCount();
+    }
+  }
+
+  bookmarkList.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    if (e.target.closest('.bookmark-menu-btn, .item-checkbox, input, button, a')) return;
+    const item = e.target.closest('.bookmark-item, .folder-header');
+    if (!item) return;
+    longPressStartX = e.clientX;
+    longPressStartY = e.clientY;
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      enterMultiSelectFromLongPress(item);
+    }, LONG_PRESS_MS);
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!longPressTimer) return;
+    const dx = e.clientX - longPressStartX;
+    const dy = e.clientY - longPressStartY;
+    if (Math.sqrt(dx * dx + dy * dy) > LONG_PRESS_DRIFT_PX) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  });
+
+  document.addEventListener('mouseup', () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  });
+
+  bookmarkList.addEventListener('dragstart', () => {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }, true);
+
   // Bulk actions event delegation
   bookmarkList.addEventListener('change', (e) => {
     if (e.target.classList.contains('item-checkbox')) {
@@ -7435,6 +7581,14 @@ function setupEventListeners() {
     });
     selectedItems.clear();
     updateSelectedCount();
+  });
+
+  document.getElementById('bulkOpenTabs').addEventListener('click', () => {
+    bulkOpenItems();
+  });
+
+  document.getElementById('bulkOpenWindows').addEventListener('click', () => {
+    bulkOpenInWindows();
   });
 
   document.getElementById('bulkRecheck').addEventListener('click', async () => {

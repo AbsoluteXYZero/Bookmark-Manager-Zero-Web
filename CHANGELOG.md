@@ -1,5 +1,14 @@
 ## Changelog
 
+### V1.4.0 (Current) - Multi-Select Bulk Open
+
+**New Features:**
+- **Long-Press to Multi-Select** - Click and hold any bookmark or folder for 750ms to enter multi-select mode. The held item is automatically added to the selection. Drag-and-drop is fully preserved — moving the mouse during the hold cancels the timer and initiates a drag as normal.
+- **Open in New Tabs** - New bulk action button. Due to browser popup restrictions on web pages, shows a modal listing all selected bookmarks as individually clickable links. Use the Chrome or Firefox extension to open all at once automatically.
+- **Open in New Windows** - New bulk action button. Shows an informational toast directing users to the Chrome or Firefox extension, where this feature is fully supported.
+
+---
+
 ### V1.3.1 - Bug Fixes
 
 **Bug Fixes:**
