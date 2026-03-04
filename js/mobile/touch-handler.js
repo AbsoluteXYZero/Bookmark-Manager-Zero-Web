@@ -15,6 +15,11 @@ class TouchHandler {
     this.touchMoveThreshold = 10; // pixels
     this.pressHoldDuration = 500; // milliseconds
     this.currentDropTarget = null;
+
+    // Pull-to-refresh state
+    this.pullArmed = false;
+    this.pullIndicator = null;
+    this.pullThreshold = 80; // pixels to pull before refresh triggers
   }
 
   /**
@@ -37,6 +42,18 @@ class TouchHandler {
 
     // Get the touched element
     const touch = e.touches[0];
+
+    // Arm pull-to-refresh if touch starts above the search box
+    const searchContainer = document.querySelector('.search-container');
+    if (searchContainer) {
+      const searchTop = searchContainer.getBoundingClientRect().top;
+      if (touch.clientY < searchTop) {
+        this.pullArmed = true;
+        this.touchStartPos = { x: touch.clientX, y: touch.clientY };
+        return;
+      }
+    }
+
     let target = document.elementFromPoint(touch.clientX, touch.clientY);
 
     // Find the bookmark or folder element
@@ -64,6 +81,16 @@ class TouchHandler {
    */
   handleTouchMove(e) {
     const touch = e.touches[0];
+
+    // Handle pull-to-refresh
+    if (this.pullArmed) {
+      const pullDistance = touch.clientY - this.touchStartPos.y;
+      if (pullDistance > 0) {
+        e.preventDefault();
+        this.updatePullIndicator(pullDistance);
+      }
+      return;
+    }
 
     // If we have a press timer, check if user moved too much
     if (this.pressTimer && !this.isMoving) {
@@ -99,6 +126,18 @@ class TouchHandler {
    * Handle touch end
    */
   handleTouchEnd(e) {
+    // Handle pull-to-refresh release
+    if (this.pullArmed) {
+      const touch = e.changedTouches[0];
+      const pullDistance = touch.clientY - this.touchStartPos.y;
+      this.clearPullIndicator();
+      this.pullArmed = false;
+      if (pullDistance >= this.pullThreshold) {
+        location.reload();
+      }
+      return;
+    }
+
     // Cancel press timer if active
     this.cancelPressTimer();
 
@@ -116,7 +155,12 @@ class TouchHandler {
   /**
    * Handle touch cancel
    */
-  handleTouchCancel(e) {
+  handleTouchCancel() {
+    if (this.pullArmed) {
+      this.clearPullIndicator();
+      this.pullArmed = false;
+      return;
+    }
     this.cancelPressTimer();
     if (this.isMoving) {
       this.exitMoveMode();
@@ -171,6 +215,44 @@ class TouchHandler {
     this.hideToast();
 
     console.log('Exited move mode');
+  }
+
+  /**
+   * Update pull-to-refresh indicator
+   */
+  updatePullIndicator(pullDistance) {
+    if (!this.pullIndicator) {
+      this.pullIndicator = document.createElement('div');
+      this.pullIndicator.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 8px 16px;
+        background: var(--md-sys-color-primary);
+        color: var(--md-sys-color-on-primary);
+        border-radius: 0 0 12px 12px;
+        font-size: 13px;
+        font-weight: 500;
+        pointer-events: none;
+        z-index: 10000;
+        transition: opacity 0.1s;
+      `;
+      document.body.appendChild(this.pullIndicator);
+    }
+    const ready = pullDistance >= this.pullThreshold;
+    this.pullIndicator.textContent = ready ? '↓ Release to refresh' : '↓ Pull to refresh';
+    this.pullIndicator.style.opacity = Math.min(pullDistance / this.pullThreshold, 1).toFixed(2);
+  }
+
+  /**
+   * Remove pull-to-refresh indicator
+   */
+  clearPullIndicator() {
+    if (this.pullIndicator) {
+      this.pullIndicator.remove();
+      this.pullIndicator = null;
+    }
   }
 
   /**
