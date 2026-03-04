@@ -3301,7 +3301,7 @@
 
       <!-- Mode Selection -->
       <div style="display: flex; gap: 12px; margin-bottom: 24px;">
-        <button id="localModeBtn" style="flex: 1; padding: 16px; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border: 2px solid var(--md-sys-color-outline); border-radius: 12px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
+        <button id="localModeBtn" style="flex: 1; padding: 16px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: 2px solid var(--md-sys-color-primary); border-radius: 12px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
           <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
             <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
               <path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/>
@@ -3310,7 +3310,7 @@
           <div style="font-weight: 600; margin-bottom: 4px;">Local Mode</div>
           <div style="font-size: 12px; opacity: 0.8;">Import bookmarks file</div>
         </button>
-        <button id="gitlabModeBtn" style="flex: 1; padding: 16px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: 2px solid var(--md-sys-color-primary); border-radius: 12px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
+        <button id="gitlabModeBtn" style="flex: 1; padding: 16px; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border: 2px solid var(--md-sys-color-outline); border-radius: 12px; font-size: 14px; font-weight: 500; cursor: pointer; transition: all 0.2s;">
           <div style="display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 8px;">
             <svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24">
               <path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
@@ -3322,7 +3322,7 @@
       </div>
 
       <!-- Local Mode Instructions -->
-      <div id="localInstructions" style="display: none;">
+      <div id="localInstructions" style="display: block;">
         <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px; margin-bottom: 16px;">
           <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Import Your Bookmarks</h3>
           <p style="font-size: 14px; line-height: 1.5; color: var(--md-sys-color-on-surface-variant); margin-bottom: 16px;">
@@ -3354,7 +3354,7 @@
       </div>
 
       <!-- GitLab Instructions -->
-      <div id="gitlabInstructions" style="display: block;">
+      <div id="gitlabInstructions" style="display: none;">
         <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px; margin-bottom: 24px;">
           <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Step 1: Create GitLab Token</h3>
           <p style="font-size: 14px; line-height: 1.5; color: var(--md-sys-color-on-surface-variant); margin-bottom: 16px;">
