@@ -315,6 +315,7 @@ class App {
           if (localModeError) localModeError.style.display = 'none';
           selectFileBtn.disabled = true;
           selectFileBtn.textContent = 'Importing...';
+          localModeFileInput.disabled = true;
 
           // const text = await file.text();
           let bookmarks;
@@ -348,6 +349,8 @@ class App {
           }
           selectFileBtn.disabled = false;
           selectFileBtn.textContent = 'Select Bookmarks File';
+          localModeFileInput.disabled = false;
+          localModeFileInput.value = '';
         }
       };
     }
@@ -408,12 +411,29 @@ class App {
     const startFreshBtn = document.getElementById('startFreshBtn');
     if (startFreshBtn) {
       startFreshBtn.onclick = async () => {
-        // Confirm with user before clearing everything
-        const confirmed = confirm(
-          'Start Fresh will delete all existing bookmarks and create an empty bookmark list.\n\n' +
-          'This action cannot be undone. Any bookmarks you have will be permanently deleted.\n\n' +
-          'Are you sure you want to continue?'
-        );
+        // Confirm with user before clearing everything (custom modal avoids Android WebView confirm() issues)
+        const confirmed = await new Promise((resolve) => {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+          const dialog = document.createElement('div');
+          dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e293b);padding:24px;border-radius:12px;max-width:420px;width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.3);';
+          dialog.innerHTML = `
+            <h3 style="margin:0 0 12px 0;color:var(--md-sys-color-on-surface,#f1f5f9);font-size:18px;">⚠️ Start Fresh</h3>
+            <p style="margin:0 0 20px 0;color:var(--md-sys-color-on-surface-variant,#cbd5e1);line-height:1.6;font-size:14px;">
+              This will delete all existing bookmarks and create an empty bookmark list.<br><br>
+              <strong style="color:var(--md-sys-color-error,#f87171);">This action cannot be undone.</strong>
+            </p>
+            <div style="display:flex;gap:12px;justify-content:flex-end;">
+              <button id="_sfCancel" style="padding:10px 20px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#334155);color:var(--md-sys-color-on-surface-variant,#cbd5e1);cursor:pointer;font-size:14px;font-weight:500;">Cancel</button>
+              <button id="_sfConfirm" style="padding:10px 20px;border-radius:8px;border:none;background:var(--md-sys-color-error,#ef4444);color:#fff;cursor:pointer;font-size:14px;font-weight:500;">Delete All &amp; Start Fresh</button>
+            </div>
+          `;
+          document.body.appendChild(overlay);
+          overlay.appendChild(dialog);
+          dialog.querySelector('#_sfConfirm').addEventListener('click', () => { overlay.remove(); resolve(true); });
+          dialog.querySelector('#_sfCancel').addEventListener('click', () => { overlay.remove(); resolve(false); });
+          overlay.addEventListener('click', (e) => { if (e.target === overlay) { overlay.remove(); resolve(false); } });
+        });
 
         if (!confirmed) {
           return;
