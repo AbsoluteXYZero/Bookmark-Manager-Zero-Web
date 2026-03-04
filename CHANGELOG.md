@@ -1,6 +1,17 @@
 ## Changelog
 
-### V1.4.0 (Current) - Multi-Select Bulk Open
+### V1.4.1 (Current) - Mobile UX Improvements
+
+**New Features:**
+- **Pull-to-Refresh** - On mobile, drag down from above the search bar to reload the page. A pull indicator fades in showing progress and prompts to release when the threshold is reached.
+- **Local Mode Default** - The first-time setup screen now defaults to Local Mode instead of GitLab Sync.
+
+**Bug Fixes:**
+- **Cache Busting** - Added `_headers` config for Cloudflare Pages to prevent browsers from serving stale JS files after updates.
+
+---
+
+### V1.4.0 - Multi-Select Bulk Open
 
 **New Features:**
 - **Long-Press to Multi-Select** - Click and hold any bookmark or folder for 750ms to enter multi-select mode. The held item is automatically added to the selection. Drag-and-drop is fully preserved — moving the mouse during the hold cancels the timer and initiates a drag as normal.
