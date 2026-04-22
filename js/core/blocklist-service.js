@@ -18,7 +18,12 @@ class BlocklistService {
     this.BLOCKLIST_SOURCES = [
       {
         name: 'URLhaus (Active)',
-        url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+        // Race multiple CORS proxies - first one to succeed wins
+        proxies: [
+          'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+          'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+          'https://corsproxy.io/?' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/')
+        ],
         format: 'urlhaus_text'
       },
       {
@@ -209,6 +214,57 @@ class BlocklistService {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 60000);
 
+      // If source has proxies array, race them
+      if (source.proxies) {
+        console.log(`[Blocklist] Racing ${source.proxies.length} proxies for ${source.name}...`);
+        const fetchPromises = source.proxies.slice(0, 3).map(async (url) => {
+          const innerController = new AbortController();
+          const timeout = setTimeout(() => innerController.abort(), 15000);
+          try {
+            const res = await fetch(url, {
+              method: 'GET',
+              signal: innerController.signal,
+              mode: 'cors',
+              cache: 'no-store'
+            });
+            clearTimeout(timeout);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.text();
+          } catch (e) {
+            clearTimeout(timeout);
+            throw e;
+          }
+        });
+        
+        const text = await Promise.race(fetchPromises);
+        clearTimeout(timeoutId);
+        if (!text || text.length === 0) {
+          console.error(`[Blocklist] ${source.name} returned empty`);
+          return { domains: [], count: 0 };
+        }
+        console.log(`[Blocklist] ${source.name}: ${text.length} bytes (proxy race)`);
+        
+        // Check if response is JSON-wrapped
+        if (source.proxies) {
+          try {
+            const jsonData = JSON.parse(text);
+            if (jsonData.contents) text = jsonData.contents;
+            else if (jsonData.contents) text = jsonData.contents;
+          } catch {}
+        }
+        
+        // Apply the same parsing logic as regular fetch
+        const lines = text.split('\n');
+        const domains = [];
+        for (const line of lines) {
+          const normalized = this.parseBlocklistLine(line, source.format);
+          if (normalized) domains.push(normalized);
+        }
+        console.log(`[Blocklist] ${source.name}: ${domains.length} domains loaded (via proxy)`);
+        return { domains, count: domains.length };
+      }
+      
+      // Original single URL logic
       const response = await fetch(source.url, {
         method: 'GET',
         signal: controller.signal,
