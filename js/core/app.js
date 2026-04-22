@@ -2517,75 +2517,12 @@ class App {
       }
     };
 
-    // Manual sync button
+    // Manual sync button - opens GitLab Sync Settings dialog
     const manualSyncBtn = document.getElementById('manualSyncBtn');
     if (manualSyncBtn) {
       manualSyncBtn.addEventListener('click', async (e) => {
-        console.log('[ManualSync] Button clicked');
-
-        // Check if Shift key is held for force push
-        const forcePush = e.shiftKey;
-        if (forcePush) {
-          console.log('[ManualSync] Shift-click detected - forcing push to remote');
-          if (!confirm('Force push local bookmarks to remote? This will overwrite the remote with your local data.')) {
-            return;
-          }
-
-          // Show loading state
-          manualSyncBtn.disabled = true;
-          manualSyncBtn.classList.add('syncing');
-
-          try {
-            await syncManager.syncToRemote();
-            // Success: show green arrows for 5 seconds instead of toast
-            manualSyncBtn.classList.remove('syncing');
-            manualSyncBtn.classList.add('sync-success');
-            setTimeout(() => {
-              manualSyncBtn.classList.remove('sync-success');
-            }, 5000);
-          } catch (error) {
-            console.error('[ManualSync] Failed:', error);
-            manualSyncBtn.classList.remove('syncing');
-            this.showToast(`Sync failed: ${error.message}`, 'error');
-          } finally {
-            manualSyncBtn.disabled = false;
-          }
-          return;
-        }
-
-        // Normal click - show diff dialog
-        manualSyncBtn.classList.add('syncing');
-        try {
-          const remoteId = syncManager.getRemoteId();
-          if (!remoteId) {
-            manualSyncBtn.classList.remove('syncing');
-            this.showToast('No remote storage configured', 'error');
-            return;
-          }
-
-          const adapter = syncManager.getAdapter();
-          const remoteData = await adapter.readBookmarks(remoteId);
-          const localData = await syncManager.getLocalBookmarks();
-
-          const diff = syncManager.calculateBookmarkDiff(localData, remoteData);
-          const hasChanges = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length > 0;
-
-          manualSyncBtn.classList.remove('syncing');
-          if (!hasChanges) {
-            // No changes — show green arrows for 5 seconds
-            manualSyncBtn.classList.add('sync-success');
-            setTimeout(() => {
-              manualSyncBtn.classList.remove('sync-success');
-            }, 5000);
-            return;
-          }
-
-          await this.showSyncDiffDialog(diff, remoteData);
-        } catch (error) {
-          console.error('[ManualSync] Failed:', error);
-          manualSyncBtn.classList.remove('syncing');
-          this.showToast(`Sync failed: ${error.message}`, 'error');
-        }
+        console.log('[GitLabSync] Settings button clicked');
+        await this.showGitLabSyncSettingsDialog();
       });
     }
 
