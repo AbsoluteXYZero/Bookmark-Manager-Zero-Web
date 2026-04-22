@@ -1756,61 +1756,195 @@ class App {
     const currentMode = await supabaseManager.getTokenMode();
     const modeLabel = currentMode === 'supabase' ? '☁️ Supabase' : '💻 Local';
     const switchLabel = currentMode === 'supabase' ? 'Switch to Local' : 'Enable Supabase';
+    const snippetId = snippetAdapter.snippetId || syncManager.snippetId;
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
     const dialog = document.createElement('div');
-    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:440px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);';
-    dialog.innerHTML = `
-      <h2 style="margin:0 0 20px 0;font-size:20px;">GitLab Sync Settings</h2>
-      <div style="display:flex;flex-direction:column;gap:12px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
-          <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
-          <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
+    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:480px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);max-height:90vh;overflow-y:auto;';
+
+    if (snippetId) {
+      dialog.innerHTML = `
+        <h2 style="margin:0 0 12px 0;font-size:20px;">GitLab Sync Settings</h2>
+        <p style="margin:0 0 16px 0;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">
+          Connected to Snippet: <code style="font-size:11px;">${snippetId}</code>
+        </p>
+        <div style="display:flex;flex-direction:column;gap:10px;">
+          <button id="syncFromSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-8 2V5h2v6h1.17L12 13.17 9.83 11H11zm-6 8v2h14v-2H5z"/></svg>
+            Sync from Cloud to Browser
+          </button>
+          <button id="syncToSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
+            Sync from Browser to Cloud
+          </button>
+          <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
+            <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
+            <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
+          </div>
+          <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
+          <button id="createNewSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Create New Snippet</button>
+          <button id="selectExistingSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Select Existing Snippet</button>
+          <button id="disconnectSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Disconnect & Remove Token</button>
+          <button id="closeSyncSettings" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Close</button>
         </div>
-        <button id="closeSyncSettings" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Close</button>
-      </div>
-    `;
+      `;
+    } else {
+      dialog.innerHTML = `
+        <h2 style="margin:0 0 16px 0;font-size:20px;text-align:center;">GitLab Sync Setup</h2>
+        <div style="margin-bottom:16px;padding:12px;border:1px solid var(--md-sys-color-outline,#444);border-radius:8px;">
+          <p style="margin:0 0 10px 0;font-size:13px;font-weight:500;color:var(--md-sys-color-on-surface,#e0e0e0);">Token Storage</p>
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:10px;font-size:13px;">
+            <input type="radio" name="tokenMode" value="local" ${currentMode !== 'supabase' ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;">
+            <span><strong>Local</strong> <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(this device only)</span></span>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;">
+            <input type="radio" name="tokenMode" value="supabase" ${currentMode === 'supabase' ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;">
+            <span><strong>Supabase</strong> <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(auto-sync across devices)</span></span>
+          </label>
+          <div id="supabaseQuickLoad" style="display:none;margin-top:12px;padding:10px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);">
+            ☁️ Already set up on another device? <button id="loadFromSupabaseBtn" style="background:none;border:none;color:var(--md-sys-color-primary,#818cf8);cursor:pointer;font-size:12px;text-decoration:underline;padding:0;">Sign in to load automatically →</button>
+          </div>
+        </div>
+        <div id="patSection">
+          <p style="margin:0 0 12px 0;color:var(--md-sys-color-on-surface-variant,#aaa);font-size:13px;">
+            Click below to create a GitLab Personal Access Token with the "api" scope.
+          </p>
+          <a href="https://gitlab.com/-/user_settings/personal_access_tokens?name=Bookmark+Manager+Zero&scopes=api" target="_blank" style="display:inline-block;margin-bottom:12px;padding:8px 16px;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);text-decoration:none;border-radius:8px;font-size:13px;">
+            Create Token on GitLab →
+          </a>
+          <div style="margin-bottom:16px;">
+            <label style="display:block;margin-bottom:8px;font-size:14px;">Personal Access Token:</label>
+            <input type="password" id="gitlabTokenInput" placeholder="glpat-xxxxxxxxxxxx" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:14px;box-sizing:border-box;">
+          </div>
+        </div>
+        <div style="display:flex;gap:12px;">
+          <button id="saveTokenBtn" style="flex:1;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);cursor:pointer;font-size:14px;font-weight:500;">Save & Continue</button>
+          <button id="closeSyncSettings" style="flex:1;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Cancel</button>
+        </div>
+      `;
+    }
+
     modal.appendChild(dialog);
     document.body.appendChild(modal);
 
-    dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
-
-    dialog.querySelector('#switchTokenMode').addEventListener('click', async () => {
-      modal.remove();
-      if (currentMode === 'supabase') {
-        await supabaseManager.deleteGitLabToken();
-        await supabaseManager.setTokenMode('local');
-        await supabaseManager.clearSession();
-        this.showToast('Switched to local token storage');
-      } else {
-        // Switch to Supabase — ensure signed in
+    if (snippetId) {
+      dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
+      dialog.querySelector('#syncFromSnippet').addEventListener('click', async () => {
+        modal.remove();
+        await syncManager.syncFromRemote();
+      });
+      dialog.querySelector('#syncToSnippet').addEventListener('click', async () => {
+        modal.remove();
+        await syncManager.syncToRemote();
+      });
+      dialog.querySelector('#createNewSnippet').addEventListener('click', async () => {
+        modal.remove();
+        await this.showSnippetSetup();
+      });
+      dialog.querySelector('#selectExistingSnippet').addEventListener('click', async () => {
+        modal.remove();
+        await this.showSnippetSetup();
+      });
+      dialog.querySelector('#disconnectSnippet').addEventListener('click', async () => {
+        if (confirm('Are you sure you want to disconnect? This will remove your GitLab token.')) {
+          modal.remove();
+          await authManager.clearToken('gitlab');
+          await supabaseManager.clearSession();
+          snippetAdapter.snippetId = null;
+          syncManager.snippetId = null;
+          await dbManager.delete('metadata', 'snippetId');
+          await dbManager.delete('settings', 'bmz_mode_chosen');
+          this.showToast('Disconnected successfully');
+        }
+      });
+      dialog.querySelector('#switchTokenMode').addEventListener('click', async () => {
+        modal.remove();
+        if (currentMode === 'supabase') {
+          await supabaseManager.deleteGitLabToken();
+          await supabaseManager.setTokenMode('local');
+          this.showToast('Switched to local token storage');
+        } else {
+          if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
+          if (!supabaseManager.isSignedIn) {
+            this.showToast('Sign in with GitLab first', 'error');
+            this.showLoginScreen();
+            return;
+          }
+          let expiresAt = null;
+          try {
+            const token = await authManager.getToken('gitlab');
+            const r = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', { headers: { 'Authorization': `Bearer ${token}` } });
+            if (r.ok) { const info = await r.json(); expiresAt = info.expires_at; }
+          } catch (e) {}
+          try {
+            const token = await authManager.getToken('gitlab');
+            await supabaseManager.saveGitLabToken(token, expiresAt);
+            await supabaseManager.setTokenMode('supabase');
+            this.showToast('Switched to Supabase token storage');
+          } catch (e) {
+            this.showToast('Failed: ' + e.message, 'error');
+          }
+        }
+      });
+    } else {
+      dialog.querySelectorAll('input[name="tokenMode"]').forEach(radio => {
+        radio.addEventListener('change', () => {
+          const isSupabase = dialog.querySelector('input[name="tokenMode"]:checked')?.value === 'supabase';
+          dialog.querySelector('#supabaseQuickLoad').style.display = isSupabase ? '' : 'none';
+        });
+      });
+      if (currentMode === 'supabase') dialog.querySelector('#supabaseQuickLoad').style.display = '';
+      dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
+      dialog.querySelector('#loadFromSupabaseBtn')?.addEventListener('click', async () => {
         if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
         if (!supabaseManager.isSignedIn) {
-          this.showToast('Sign in with GitLab first to enable Supabase storage.', 'error');
-          this.showLoginScreen();
+          this.showToast('Signing in with GitLab...', 'info');
+          supabaseManager.signInWithGitLab();
           return;
         }
-        // Fetch expiry from GitLab
-        let expiresAt = null;
         try {
-          const token = await authManager.getToken('gitlab');
-          const r = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
-            headers: { 'Authorization': `Bearer ${token}` }
-          });
-          if (r.ok) { const info = await r.json(); expiresAt = info.expires_at; }
-        } catch (e) { /* ignore */ }
-        try {
-          const token = await authManager.getToken('gitlab');
-          await supabaseManager.saveGitLabToken(token, expiresAt);
-          await supabaseManager.setTokenMode('supabase');
-          this.showToast('Switched to Supabase token storage');
+          const patData = await supabaseManager.loadGitLabToken();
+          if (!patData) {
+            this.showToast('Signed in! No token stored yet. Enter your PAT below.', 'info');
+            return;
+          }
+          await this._authenticateWithPAT(patData.token);
+          modal.remove();
+          await this.showSnippetSetup();
         } catch (e) {
-          this.showToast('Failed to save to Supabase: ' + e.message, 'error');
+          this.showToast('Failed: ' + e.message, 'error');
         }
-      }
-    });
+      });
+      dialog.querySelector('#saveTokenBtn').addEventListener('click', async () => {
+        const selectedMode = dialog.querySelector('input[name="tokenMode"]:checked')?.value || 'local';
+        const token = dialog.querySelector('#gitlabTokenInput').value.trim();
+        if (!token) {
+          this.showToast('Please enter your GitLab token', 'error');
+          return;
+        }
+        modal.remove();
+        await this._authenticateWithPAT(token);
+        if (selectedMode === 'supabase') {
+          if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
+          if (supabaseManager.isSignedIn) {
+            try {
+              await supabaseManager.saveGitLabToken(token, null);
+              await supabaseManager.setTokenMode('supabase');
+            } catch (e) {
+              this.showToast('Saved locally (Supabase save failed: ' + e.message + ')', 'warning');
+              await supabaseManager.setTokenMode('local');
+            }
+          } else {
+            await supabaseManager.setTokenMode('local');
+          }
+        }
+        await this.showSnippetSetup();
+      });
+    }
+
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   }
 
   async showRevealTokenModal() {
