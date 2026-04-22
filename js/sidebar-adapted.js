@@ -1720,7 +1720,21 @@ function renderBookmarks() {
     setTimeout(() => {
       document.getElementById('announcementSetupBtn')?.addEventListener('click', async () => {
         await dismissSupabaseAnnouncement();
-        window.app?.showLoginScreen();
+        if (window.app?.isAuthenticated) {
+          // Already connected with GitLab — go straight to sync settings to enable Supabase
+          window.app.showGitLabSyncSettingsDialog();
+        } else {
+          // Not connected — show login screen, clearing bookmarks from the list first
+          const bl = document.getElementById('bookmarkList');
+          if (bl) {
+            Array.from(bl.children).forEach(child => {
+              if (child.id !== 'loginScreen') child.remove();
+            });
+          }
+          window.scrollTo(0, 0);
+          window.app?.showLoginScreen();
+          setTimeout(() => document.getElementById('gitlabModeBtn')?.click(), 50);
+        }
       });
       document.getElementById('announcementDismissBtn')?.addEventListener('click', dismissSupabaseAnnouncement);
     }, 0);

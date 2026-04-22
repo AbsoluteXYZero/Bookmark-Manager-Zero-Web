@@ -3825,48 +3825,64 @@
 
   <!-- Connect GitLab Modal (for local mode users) -->
   <div id="connectGitlabModal" class="modal hidden" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
-    <div style="background: var(--md-sys-color-surface); border-radius: 16px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto; padding: 32px; box-shadow: 0 8px 32px rgba(0,0,0,0.3);">
-      <h2 style="font-size: 24px; margin-bottom: 16px; color: var(--md-sys-color-on-surface);">Connect GitLab for Cloud Sync</h2>
-      <p style="font-size: 14px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 24px;">
-        Upgrade to GitLab sync to backup and sync your bookmarks across devices. Your local bookmarks will be preserved and synced to GitLab.
-      </p>
+    <div style="background: var(--md-sys-color-surface, #1e1e1e); border-radius: 12px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; padding: 24px; color: var(--md-sys-color-on-surface, #e0e0e0);">
+      <h2 style="margin: 0 0 16px 0; font-size: 20px; text-align: center;">GitLab Snippet<br>Sync Setup</h2>
 
-      <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px; margin-bottom: 24px;">
-        <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Step 1: Create GitLab Token</h3>
-        <p style="font-size: 14px; line-height: 1.5; color: var(--md-sys-color-on-surface-variant); margin-bottom: 16px;">
-          Click below to create a GitLab Personal Access Token with the "api" scope.<br>⚠️ Important: This token is only shown once — save it securely (e.g., in a notes app or password manager) immediately.<br><br>You can create or rotate tokens anytime, but saving now avoids repeated creation. Multiple tokens work as long as they have the "api" scope.
-        </p>
-        <a href="https://gitlab.com/-/user_settings/personal_access_tokens"
-           target="_blank"
-           style="display: inline-block; padding: 10px 20px; background: var(--md-sys-color-secondary); color: var(--md-sys-color-on-secondary); border-radius: 8px; text-decoration: none; font-size: 14px; font-weight: 500;">
-          Create GitLab Token →
-        </a>
-      </div>
-
-      <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px; margin-bottom: 16px;">
-        <h3 style="font-size: 16px; margin-bottom: 8px; color: var(--md-sys-color-on-surface-variant);">Step 2: Paste Your Personal Access Token</h3>
-        <p style="font-size: 12px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 12px; opacity: 0.8;">(This is NOT your password - it's an API token from GitLab.com)</p>
-        <input type="password"
-               id="connectGitlabTokenInput"
-               placeholder="glpat-xxxxxxxxxxxxxxxxxxxx"
-               style="width: 100%; padding: 12px; border: 2px solid var(--md-sys-color-outline); border-radius: 8px; font-size: 14px; font-family: 'Courier New', monospace; margin-bottom: 16px; background: var(--md-sys-color-surface); color: var(--md-sys-color-on-surface);">
-        <div id="connectGitlabError" style="display: none; margin-bottom: 16px; padding: 12px; background: #fee; border-radius: 8px; color: #c00; font-size: 14px;"></div>
-        <div style="display: flex; gap: 12px;">
-          <button id="connectGitlabCancelBtn"
-                  style="flex: 1; padding: 12px 24px; background: var(--md-sys-color-surface-variant); color: var(--md-sys-color-on-surface-variant); border: 1px solid var(--md-sys-color-outline); border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer;">
-            Cancel
-          </button>
-          <button id="connectGitlabConfirmBtn"
-                  style="flex: 1; padding: 12px 24px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer;">
-            Connect GitLab
-          </button>
+      <div style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--md-sys-color-outline, #444); border-radius: 8px;">
+        <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 500; color: var(--md-sys-color-on-surface, #e0e0e0);">Token Storage</p>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:10px;font-size:13px;">
+          <input type="radio" name="connectTokenMode" value="local" checked style="margin-top:2px;flex-shrink:0;">
+          <span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+              <strong>Local</strong>
+              <span class="bmz-tooltip-wrap" style="position:relative;display:inline-flex;align-items:center;">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--md-sys-color-on-surface-variant,#aaa);color:var(--md-sys-color-surface,#1e1e1e);font-size:10px;font-weight:700;cursor:help;flex-shrink:0;line-height:1;">i</span>
+                <span class="bmz-tooltip" style="display:none;position:fixed;background:var(--md-sys-color-inverse-surface,#e0e0e0);color:var(--md-sys-color-inverse-on-surface,#1a1a1a);padding:8px 10px;border-radius:6px;font-size:12px;width:220px;z-index:10010;line-height:1.4;pointer-events:none;white-space:normal;">Token stored on this device only. When it auto-renews, you'll be shown the new token and asked to update your other BMZ clients manually.</span>
+              </span>
+            </span><br>
+            <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(this device only)</span>
+          </span>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;">
+          <input type="radio" name="connectTokenMode" value="supabase" style="margin-top:2px;flex-shrink:0;">
+          <span>
+            <span style="display:inline-flex;align-items:center;gap:5px;">
+              <strong>Supabase</strong>
+              <span class="bmz-tooltip-wrap" style="position:relative;display:inline-flex;align-items:center;">
+                <span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--md-sys-color-on-surface-variant,#aaa);color:var(--md-sys-color-surface,#1e1e1e);font-size:10px;font-weight:700;cursor:help;flex-shrink:0;line-height:1;">i</span>
+                <span class="bmz-tooltip" style="display:none;position:fixed;background:var(--md-sys-color-inverse-surface,#e0e0e0);color:var(--md-sys-color-inverse-on-surface,#1a1a1a);padding:8px 10px;border-radius:6px;font-size:12px;width:220px;z-index:10010;line-height:1.4;pointer-events:none;white-space:normal;">Your token is encrypted and stored in Supabase. When it renews, all your BMZ clients update silently — no manual steps. Only your encrypted token is stored; it can only access your GitLab bookmark snippet.</span>
+              </span>
+            </span><br>
+            <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(auto-sync across devices)</span>
+          </span>
+        </label>
+        <div id="connectSupabaseQuickLoad" style="display:none;margin-top:12px;padding:10px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);">
+          ☁️ Already set up Supabase on another device? <button id="connectLoadFromSupabaseBtn" style="background:none;border:none;color:var(--md-sys-color-primary,#818cf8);cursor:pointer;font-size:12px;text-decoration:underline;padding:0;">Sign in to load your token automatically →</button>
         </div>
       </div>
 
-      <div style="background: var(--md-sys-color-primary-container); padding: 16px; border-radius: 12px;">
-        <p style="font-size: 12px; line-height: 1.5; color: var(--md-sys-color-on-primary-container);">
-          <strong>Note:</strong> Your existing local bookmarks will be automatically synced to GitLab. Nothing will be lost during this upgrade.
+      <div id="connectPatSection">
+        <p style="margin: 0 0 12px 0; color: var(--md-sys-color-on-surface-variant, #aaa); font-size: 13px;">
+          Click below to create a GitLab Personal Access Token with the "api" scope. ⚠️ Save it immediately — it's only shown once.
         </p>
+        <a href="https://gitlab.com/-/user_settings/personal_access_tokens?name=Bookmark+Manager+Zero&scopes=api" target="_blank" style="display: inline-block; margin-bottom: 12px; padding: 8px 16px; background: var(--md-sys-color-secondary-container, #2a2a2a); color: var(--md-sys-color-on-secondary-container, #d0bcff); text-decoration: none; border-radius: 8px; font-size: 13px;">
+          Create Token on GitLab →
+        </a>
+        <div style="margin-bottom: 16px;">
+          <label style="display: block; margin-bottom: 8px; font-size: 14px; color: var(--md-sys-color-on-surface, #e0e0e0);">Personal Access Token:</label>
+          <input type="password" id="connectGitlabTokenInput" placeholder="glpat-xxxxxxxxxxxx" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid var(--md-sys-color-outline, #444); background: var(--md-sys-color-surface-variant, #2a2a2a); color: var(--md-sys-color-on-surface, #e0e0e0); font-size: 14px; box-sizing: border-box;">
+        </div>
+      </div>
+
+      <div id="connectGitlabError" style="display: none; margin-bottom: 12px; padding: 10px; background: rgba(239,68,68,0.15); border-radius: 8px; color: #f87171; font-size: 13px;"></div>
+
+      <div style="display: flex; gap: 12px;">
+        <button id="connectGitlabConfirmBtn" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-primary, #818cf8); color: var(--md-sys-color-on-primary, #fff); cursor: pointer; font-size: 14px;">
+          Save & Continue
+        </button>
+        <button id="connectGitlabCancelBtn" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: var(--md-sys-color-surface-variant, #2a2a2a); color: var(--md-sys-color-on-surface-variant, #aaa); cursor: pointer; font-size: 14px;">
+          Cancel
+        </button>
       </div>
     </div>
   </div>

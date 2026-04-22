@@ -1958,23 +1958,99 @@ class App {
 
     if (!modal || !cancelBtn || !confirmBtn || !tokenInput) return;
 
-    // Cancel button - close modal
-    cancelBtn.onclick = () => {
+    const closeModal = () => {
       modal.classList.add('hidden');
       modal.style.display = 'none';
     };
 
-    // Handle Enter key in token input
-    tokenInput.addEventListener('keypress', (e) => {
-      if (e.key === 'Enter') {
-        confirmBtn.click();
-      }
+    // Tooltip hover — fixed positioning so they stay within viewport
+    modal.querySelectorAll('.bmz-tooltip-wrap').forEach(wrap => {
+      const tip = wrap.querySelector('.bmz-tooltip');
+      if (!tip) return;
+      wrap.addEventListener('mouseenter', () => {
+        const rect = wrap.getBoundingClientRect();
+        const tipWidth = 220;
+        let left = rect.left;
+        if (left + tipWidth > window.innerWidth - 8) left = window.innerWidth - tipWidth - 8;
+        tip.style.left = left + 'px';
+        tip.style.top = (rect.bottom + 6) + 'px';
+        tip.style.display = 'block';
+      });
+      wrap.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
     });
 
-    // Confirm button - authenticate and migrate
-    confirmBtn.onclick = async () => {
-      const token = tokenInput.value.trim();
+    // Show/hide Supabase quick-load hint when token mode radio changes
+    modal.querySelectorAll('input[name="connectTokenMode"]').forEach(radio => {
+      radio.addEventListener('change', () => {
+        const isSupabase = modal.querySelector('input[name="connectTokenMode"]:checked')?.value === 'supabase';
+        const quickLoad = document.getElementById('connectSupabaseQuickLoad');
+        if (quickLoad) quickLoad.style.display = isSupabase ? '' : 'none';
+      });
+    });
 
+    // "Load from Supabase" quick-load — sign in and pull token, skip PAT entry
+    const loadFromSupabaseBtn = document.getElementById('connectLoadFromSupabaseBtn');
+    if (loadFromSupabaseBtn) {
+      loadFromSupabaseBtn.addEventListener('click', async () => {
+        if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
+        if (!supabaseManager.isSignedIn) {
+          this.showToast('Signing in with GitLab to load your Supabase token...', 'info');
+          supabaseManager.signInWithGitLab();
+          return;
+        }
+        try {
+          const patData = await supabaseManager.loadGitLabToken();
+          if (!patData) {
+            this.showToast('Signed in! No GitLab token stored yet — enter your PAT below to complete setup.', 'info');
+            return;
+          }
+          closeModal();
+          const ok = await this._authenticateWithPAT(patData.token);
+          if (!ok) this.showToast('Failed to authenticate with stored token.', 'error');
+        } catch (e) {
+          this.showToast('Failed to load from Supabase: ' + e.message, 'error');
+        }
+      });
+    }
+
+    // Cancel button
+    cancelBtn.onclick = closeModal;
+
+    // Enter key in token input
+    tokenInput.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') confirmBtn.click();
+    });
+
+    // Confirm button — authenticate and optionally save to Supabase
+    confirmBtn.onclick = async () => {
+      const selectedMode = modal.querySelector('input[name="connectTokenMode"]:checked')?.value || 'local';
+
+      if (selectedMode === 'supabase') {
+        // Ensure signed in to Supabase
+        if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
+        if (!supabaseManager.isSignedIn) {
+          this.showToast('Signing in with GitLab to enable Supabase sync...', 'info');
+          supabaseManager.signInWithGitLab();
+          return;
+        }
+        // Check if token already exists in Supabase — no PAT needed if so
+        try {
+          const patData = await supabaseManager.loadGitLabToken();
+          if (patData) {
+            closeModal();
+            const ok = await this._authenticateWithPAT(patData.token);
+            if (!ok) this.showToast('Failed to authenticate with stored token.', 'error');
+            return;
+          }
+        } catch (e) { console.warn('[ConnectModal] Supabase existing token check failed:', e); }
+        // No existing token — fall through to PAT entry
+        if (!tokenInput.value.trim()) {
+          this.showToast('Signed in! This is your first time using Supabase sync — enter your GitLab PAT below to get started.', 'info');
+          return;
+        }
+      }
+
+      const token = tokenInput.value.trim();
       if (!token) {
         if (errorDiv) {
           errorDiv.textContent = 'Please enter your Personal Access Token';
@@ -1984,84 +2060,80 @@ class App {
       }
 
       try {
-        // Show loading state
         confirmBtn.disabled = true;
         confirmBtn.textContent = 'Connecting...';
         if (errorDiv) errorDiv.style.display = 'none';
 
-        // Authenticate with token
         const authResult = await oauthPAT.authenticate(token, async () => {
-          // Retry callback - clear error and re-trigger connection
           if (errorDiv) errorDiv.style.display = 'none';
           confirmBtn.click();
         });
 
         if (authResult === null) {
-          // Popup was shown, authentication failed but user can retry
-          // Reset button state
           confirmBtn.disabled = false;
-          confirmBtn.textContent = 'Connect GitLab';
+          confirmBtn.textContent = 'Save & Continue';
           return;
         }
 
         console.log(`Authenticated with GitLab:`, authResult.user.username);
 
-        // Store token securely
-        await authManager.storeToken(authResult.access_token, null, 'gitlab');
+        // Fetch token expiry from GitLab
+        let expiresAt = null;
+        try {
+          const infoRes = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
+            headers: { 'Authorization': `Bearer ${authResult.access_token}` }
+          });
+          if (infoRes.ok) { const info = await infoRes.json(); expiresAt = info.expires_at; }
+        } catch (e) { console.warn('[ConnectModal] Could not fetch token expiry:', e); }
 
-        // Store provider preference
+        // Store token locally
+        await authManager.storeToken(authResult.access_token, null, 'gitlab');
         await authManager.storePreference('syncProvider', 'gitlab');
 
-        // Set the provider in oauthPAT
+        // Save to Supabase if supabase mode selected
+        if (selectedMode === 'supabase') {
+          try {
+            await supabaseManager.saveGitLabToken(authResult.access_token, expiresAt);
+            await supabaseManager.setTokenMode('supabase');
+          } catch (e) {
+            console.warn('[ConnectModal] Supabase save failed — using local:', e);
+            await supabaseManager.setTokenMode('local');
+            this.showToast('Failed to save to Supabase — saved locally instead.', 'error');
+          }
+        } else {
+          await supabaseManager.setTokenMode('local');
+        }
+
         oauthPAT.provider = 'gitlab';
         oauthPAT.token = authResult.access_token;
         oauthPAT.user = authResult.user;
-
         this.currentUser = authResult.user;
         this.isAuthenticated = true;
 
-        // Clear local mode flag - user is now in GitLab mode
         safeLocalStorage.removeItem('bmz_local_mode');
         await dbManager.put('settings', { key: 'bmz_local_mode', value: false });
 
-        // Update button visibility to show logout and manual sync buttons
         const logoutBtn = document.getElementById('logoutBtn');
         const manualSyncBtn = document.getElementById('manualSyncBtn');
         const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
-
         if (logoutBtn) logoutBtn.style.display = 'flex';
         if (manualSyncBtn) manualSyncBtn.style.display = '';
         if (headerConnectGitlabBtn) headerConnectGitlabBtn.style.display = 'none';
 
-        // Close modal
-        modal.classList.add('hidden');
-        modal.style.display = 'none';
-
-        // Show success message
+        closeModal();
         this.showToast('GitLab connected successfully! Your bookmarks will now sync to the cloud.', 'success');
 
-        // Initialize sync manager and create/use snippet
         await syncManager.init();
-
-        // Check for existing snippet or create new one
         const hasSnippet = await this.checkSnippetSetup();
-
         if (!hasSnippet) {
-          // Show snippet setup to let user create or select snippet
           await this.showSnippetSetup();
         } else {
-          // Sync local bookmarks to GitLab
-          console.log('[App] Syncing local bookmarks to GitLab...');
           await syncManager.syncToRemote();
           this.showToast('Local bookmarks synced to GitLab successfully!', 'success');
         }
 
-        // Hide Connect GitLab button now that we're in GitLab mode
         const connectGitlabBtn = document.getElementById('connectGitlabBtn');
-        if (connectGitlabBtn) {
-          connectGitlabBtn.style.display = 'none';
-        }
-
+        if (connectGitlabBtn) connectGitlabBtn.style.display = 'none';
 
       } catch (error) {
         console.error('GitLab connection failed:', error);
@@ -2069,10 +2141,8 @@ class App {
           errorDiv.textContent = error.message || 'Authentication failed. Please check your token and try again.';
           errorDiv.style.display = 'block';
         }
-
-        // Reset button
         confirmBtn.disabled = false;
-        confirmBtn.textContent = 'Connect GitLab';
+        confirmBtn.textContent = 'Save & Continue';
       }
     };
   }
