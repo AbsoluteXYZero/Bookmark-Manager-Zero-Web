@@ -18,13 +18,29 @@ class ScannerService {
     this.totalCount = 0;
     this.cacheExpiryDays = 7;
     this.workerInitialized = false;
+    this._lazyInitialized = false;
     this.urlsBeingScanned = new Set(); // Track URLs currently being scanned to prevent duplicates
   }
 
   /**
-   * Initialize scanner service
-   */
+   * Initialize scanner service (lazy - initializes on first scan)
+*/
   async init() {
+    this._lazyInitialized = true;
+    await this._doInit();
+  }
+
+  /**
+   * Lazy initialization - called on first scan
+   */
+  async ensureReady() {
+    if (!this._lazyInitialized) {
+      this._lazyInitialized = true;
+      await this._doInit();
+    }
+  }
+
+  async _doInit() {
     try {
       // Initialize Web Worker with cache busting
       this.worker = new Worker(`workers/scanner-worker.js?v=${Date.now()}`);
@@ -433,6 +449,9 @@ class ScannerService {
    * Scan a single bookmark
    */
   async scanBookmark(bookmark, bypassCache = false) {
+    // Lazy init on first scan
+    await this.ensureReady();
+
     if (!this.worker || !this.workerInitialized || !bookmark.url) return;
 
     // Skip if this URL is already being scanned
@@ -505,6 +524,9 @@ class ScannerService {
     * Scan all bookmarks
     */
    async scanAllBookmarks(bypassCache = false) {
+     // Lazy init on first scan
+     await this.ensureReady();
+
      if (this.isScanning) {
        console.log('Scan already in progress');
        return;
@@ -617,6 +639,9 @@ class ScannerService {
     * Scan bookmarks in a folder
     */
    async scanFolder(folder, bypassCache = false) {
+     // Lazy init on first scan
+     await this.ensureReady();
+
      if (!this.worker || !this.workerInitialized || !folder.children) return;
  
      // Reset rate limiting for new scan

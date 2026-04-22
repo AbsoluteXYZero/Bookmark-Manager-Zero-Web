@@ -2006,6 +2006,17 @@ class App {
       if (tokenInput) {
         tokenInput.value = '';
       }
+
+      // Auto-select Supabase if already signed in to Supabase
+      if (supabaseManager.isSignedIn) {
+        const supabaseRadio = modal.querySelector('input[name="connectTokenMode"][value="supabase"]');
+        const localRadio = modal.querySelector('input[name="connectTokenMode"][value="local"]');
+        if (supabaseRadio && localRadio) {
+          supabaseRadio.checked = true;
+          const quickLoad = document.getElementById('connectSupabaseQuickLoad');
+          if (quickLoad) quickLoad.style.display = '';
+        }
+      }
     }
   }
 
@@ -3513,14 +3524,8 @@ class App {
       this._sidebarInitialized = true;
     }
 
-    // Initialize services with delays to prevent overwhelming the system
-    await blocklistService.init();
-
-    // Initialize scanner service immediately
-    if (!this._scannerInitialized) {
-      await scannerService.init();
-      this._scannerInitialized = true;
-    }
+    // NOTE: blocklistService and scannerService are lazy-loaded on first use
+    // This prevents blocking the UI at startup
   }
 
   async showPreRotationPrompt(daysLeft, token) {
