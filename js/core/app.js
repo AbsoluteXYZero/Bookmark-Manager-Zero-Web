@@ -3517,14 +3517,23 @@ class App {
       this.checkAndRotateIfNeeded();
     }
 
-    // Initialize sidebar - loads bookmarks, settings, and prepares UI
-    // Prevent duplicate initialization
-    if (window.initSidebar && !this._sidebarInitialized) {
+    // Try to call initSidebar if it's a function
+    if (typeof window.initSidebar === 'function') {
       await window.initSidebar();
+    } else {
+      // Sidebar not loaded yet - wait for it
+      console.log('[App] initSidebar not ready, waiting...');
+      const checkAndRender = setInterval(() => {
+        if (typeof window.initSidebar === 'function') {
+          clearInterval(checkAndRender);
+          console.log('[App] initSidebar now available, calling...');
+          window.initSidebar();
+        }
+      }, 100);
+      // Timeout after 5 seconds
+      setTimeout(() => clearInterval(checkAndRender), 5000);
     }
     this._sidebarInitialized = true;
-
-    // NOTE: blocklistService and scannerService are lazy-loaded on first use
   }
 
   async showPreRotationPrompt(daysLeft, token) {

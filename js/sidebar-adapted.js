@@ -619,7 +619,7 @@ function setupBlocklistProgressListener() {
 
 // Initialize
 async function init() {
-  console.log('[sidebar init] Starting, bookmarkManagers:', { window: typeof window.bookmarkManager, local: typeof bookmarkManager });
+  console.log('[Sidebar init] Running');
   
   // Force update logo title to bypass cache
   const logoTitle = document.querySelector('.logo-title');
