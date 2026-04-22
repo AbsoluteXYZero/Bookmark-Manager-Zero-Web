@@ -123,171 +123,100 @@ class App {
   }
 
   async checkAuth() {
-    // Handle Supabase OAuth redirect callback before anything else
-    try {
-      const wasCallback = await supabaseManager.handleOAuthCallback();
-      if (wasCallback) {
-        // Fresh OAuth session — check for stored PAT in Supabase
-        const patData = await supabaseManager.loadGitLabToken();
-        if (patData) {
-          // Auto-authenticate with the stored PAT
-          const authenticated = await this._authenticateWithPAT(patData.token);
-          if (authenticated) return;
-        }
-        // No stored PAT — flag so login screen can show a post-OAuth banner
-        this._supabaseJustSignedIn = true;
-      }
-    } catch (e) {
-      console.error('[Auth] OAuth callback error:', e.message);
-      this._oauthError = e.message;
-    }
-
-    // Load existing Supabase session (for users already signed in)
-    if (!supabaseManager.isSignedIn) {
-      await supabaseManager.loadSession();
-    }
-
-    // If signed in to Supabase in supabase token mode, try to auto-load PAT if no local token
-    if (supabaseManager.isSignedIn) {
-      const tokenMode = await supabaseManager.getTokenMode();
-      if (tokenMode === 'supabase') {
-        const localToken = await authManager.getToken('gitlab');
-        if (!localToken) {
-          try {
-            const patData = await supabaseManager.loadGitLabToken();
-            if (patData) {
-              const authenticated = await this._authenticateWithPAT(patData.token);
-              if (authenticated) return;
-            }
-          } catch (e) {
-            console.warn('[Auth] Failed to auto-load PAT from Supabase:', e);
+    // Special case: Supabase OAuth redirect — URL contains access_token fragment
+    if (window.location.hash.includes('access_token')) {
+      try {
+        const wasCallback = await supabaseManager.handleOAuthCallback();
+        if (wasCallback) {
+          const patData = await supabaseManager.loadGitLabToken();
+          if (patData) {
+            const authenticated = await this._authenticateWithPAT(patData.token);
+            if (authenticated) return;
           }
+          this._supabaseJustSignedIn = true;
         }
+      } catch (e) {
+        console.error('[Auth] OAuth callback error:', e.message);
+        this._oauthError = e.message;
       }
     }
 
-    // Hide both login and main content during auth check
-    const loginScreen = document.getElementById('loginScreen');
-    const mainContent = document.getElementById('mainContent');
-
-    if (loginScreen) {
-      loginScreen.classList.add('hidden');
-    }
-    if (mainContent) {
-      mainContent.classList.add('hidden');
-    }
-
-    // Check if user has explicitly chosen a mode (use IndexedDB as source of truth)
+    // Read local state first — IndexedDB only, no network
     const modeChosenRecord = await dbManager.get('settings', 'bmz_mode_chosen');
     const hasChosenMode = modeChosenRecord && modeChosenRecord.value === true;
-
     const localModeRecord = await dbManager.get('settings', 'bmz_local_mode');
     const isLocalMode = localModeRecord && localModeRecord.value === true;
 
-    // If user hasn't chosen a mode, check for local bookmarks first
+    // No mode chosen yet
     if (!hasChosenMode) {
-      console.log('[Auth] User has not chosen a mode yet');
-
-      // Check if there are existing local bookmarks
       const bookmarkTree = await dbManager.get('metadata', 'bookmarkTree');
       const hasLocalBookmarks = bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots;
-
       if (hasLocalBookmarks) {
-        // Found local bookmarks - prompt user before loading
-        console.log('[Auth] Found local bookmarks, prompting user...');
-
         const shouldContinue = await this.showContinueWithLocalBookmarksDialog();
-
         if (shouldContinue) {
-          // User chose to continue with local bookmarks
-          console.log('[Auth] User chose to continue with local bookmarks');
-
-          // Set local mode flags
           await dbManager.put('settings', { key: 'bmz_local_mode', value: true });
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           safeLocalStorage.setItem('bmz_local_mode', 'true');
           safeLocalStorage.setItem('bmz_mode_chosen', 'true');
-
           this.isAuthenticated = true;
           await this.showMainApp();
-
-          // Show friendly toast notification
           this.showToast('Continuing with local bookmarks. You can connect GitLab anytime for cloud sync.', 'success');
-          return;
         } else {
-          // User chose to see login options
-          console.log('[Auth] User chose to see login options');
           this.showLoginScreen();
-          return;
         }
       } else {
-        // No bookmarks found, show login screen for first-time setup
-        console.log('[Auth] No existing bookmarks found, showing login screen');
         this.showLoginScreen();
-        return;
       }
+      return;
     }
 
-    // User is in local mode or GitLab mode
+    // Local mode — show immediately, no network needed
     if (isLocalMode) {
-      console.log('[Auth] Local mode detected');
-      // Check if there are bookmarks in local storage
       const bookmarkTree = await dbManager.get('metadata', 'bookmarkTree');
-      const hasBookmarks = bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots;
-      if (hasBookmarks) {
-        console.log('[Auth] Found local bookmarks, loading app...');
+      if (bookmarkTree && bookmarkTree.value && bookmarkTree.value.roots) {
         this.isAuthenticated = true;
         await this.showMainApp();
-        return;
       } else {
-        // No bookmarks found, show login to import
-        console.log('[Auth] No local bookmarks found');
         this.showLoginScreen();
-        return;
       }
+      return;
     }
 
-    // Check for GitLab token
-    const provider = 'gitlab';
-    const token = await authManager.getToken(provider);
-
+    // GitLab mode — check for locally stored token first (fast, no network)
+    const token = await authManager.getToken('gitlab');
     if (token) {
-      console.log('[Auth] Found saved token, verifying...');
-      // Verify token is valid by fetching user info
-      try {
-        const response = await fetch('https://gitlab.com/api/v4/user', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
+      // Trust the stored token and show the app immediately
+      oauthPAT.provider = 'gitlab';
+      oauthPAT.token = token;
+      this.isAuthenticated = true;
+      await this.showMainApp();
 
-        if (response.ok) {
-          this.currentUser = await response.json();
-          this.isAuthenticated = true;
-
-          console.log('[Auth] Token valid, user:', this.currentUser.username);
-
-          // Set the provider in oauthPAT so it's available
-          oauthPAT.provider = provider;
-          oauthPAT.token = token;
+      // Verify token in background — if invalid, redirect to login
+      fetch('https://gitlab.com/api/v4/user', {
+        headers: { 'Authorization': 'Bearer ' + token },
+        signal: AbortSignal.timeout(15000)
+      }).then(async r => {
+        if (r.ok) {
+          this.currentUser = await r.json();
           oauthPAT.user = this.currentUser;
-
-          await this.showMainApp();
         } else {
-          // Token invalid, clear it
-          console.log('[Auth] Token invalid, clearing...');
-          await authManager.clearToken(provider);
+          await authManager.clearToken('gitlab');
           this.showLoginScreen();
         }
-      } catch (error) {
-        console.error('[Auth] Auth check failed:', error);
-        this.showLoginScreen();
-      }
-    } else {
-      // No token found, show login
-      console.log('[Auth] No saved token found');
-      this.showLoginScreen();
+      }).catch(() => { /* network unavailable — stay on cached app */ });
+      return;
     }
+
+    // GitLab mode but no local token — show login immediately,
+    // then try Supabase in background in case token is stored there
+    this.showLoginScreen();
+    supabaseManager.loadSession().then(async () => {
+      if (!supabaseManager.isSignedIn) return;
+      const tokenMode = await supabaseManager.getTokenMode();
+      if (tokenMode !== 'supabase') return;
+      const patData = await supabaseManager.loadGitLabToken();
+      if (patData) await this._authenticateWithPAT(patData.token);
+    }).catch(() => {});
   }
 
   /**
