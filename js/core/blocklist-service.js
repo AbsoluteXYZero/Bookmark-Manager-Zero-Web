@@ -90,21 +90,6 @@ class BlocklistService {
   }
 
   async init() {
-    this._lazyInitialized = true;
-    await this._initInternal();
-  }
-
-  /**
-   * Lazy initialization - called on first use
-   */
-  async ensureReady() {
-    if (!this._lazyInitialized) {
-      this._lazyInitialized = true;
-      await this._initInternal();
-    }
-  }
-
-  async _initInternal() {
     try {
       // Load last update time from storage
       const metadata = await dbManager.get('metadata', 'blocklistLastUpdate');

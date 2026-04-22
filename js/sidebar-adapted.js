@@ -1,10 +1,6 @@
 // Bookmark Manager Zero - Web Adapted Script
 // Adapted from sidebar.js to work with GitLab Snippet storage
 
-// BAIL EARLY - test if script loads at all
-console.log('[SIDEBAR] Script starting to load!');
-window.sidebarLoadedTest = 'yes';
-
 // Import our web modules
 import dbManager from './storage/indexeddb.js';
 import authManager from './auth/auth-manager.js';
@@ -623,8 +619,6 @@ function setupBlocklistProgressListener() {
 
 // Initialize
 async function init() {
-  console.log('[Sidebar init] Running');
-  
   // Force update logo title to bypass cache
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
@@ -1194,11 +1188,6 @@ async function rescanAllBookmarks() {
     return;
   }
 
-  // Initialize scanner if not ready (lazy init)
-  if (window.scannerService) {
-    await window.scannerService.ensureReady();
-  }
-
   const bookmarksToCheck = [];
 
   // Traverse tree to find ALL bookmarks regardless of folder state or check status
@@ -1363,12 +1352,7 @@ async function autoCheckBookmarkStatuses() {
   bookmarksToCheck.forEach(item => checkedBookmarks.add(item.id));
 
   // Use scanner service queue system for consistent progress updates (same as manual scans)
-  if (window.scannerService) {
-    // Initialize scanner if not ready (lazy init)
-    await window.scannerService.ensureReady();
-    
-    // Now check if worker is available
-    if (window.scannerService.worker) {
+  if (window.scannerService && window.scannerService.worker) {
     // Wait for worker to be initialized before starting scan
     if (!window.scannerService.workerInitialized) {
       console.log('[Auto-Check] Waiting for scanner worker to initialize...');
@@ -1443,12 +1427,7 @@ async function autoCheckBookmarkStatuses() {
     const checkPromises = batch.map(async (item) => {
       try {
         // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
-if (window.scannerService) {
-    // Initialize scanner if not ready (lazy init)
-    await window.scannerService.ensureReady();
-    
-    // Now check if worker is available
-    if (!window.scannerService.worker) {
+        if (window.scannerService && window.scannerService.worker) {
           await window.scannerService.scanBookmark(item, false); // Don't bypass cache for auto-scan
   
           // Update progress immediately after each bookmark completes
@@ -7938,9 +7917,6 @@ if (document.readyState === 'loading') {
 } else {
   initUI();
 }
-
-// After initUI finishes, load bookmarks and render (always run - app.js creates bookmarkManager first)
-init();
 
 // Export full init function for app.js to call after authentication
 window.initSidebar = init;

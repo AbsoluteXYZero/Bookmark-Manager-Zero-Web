@@ -2006,17 +2006,6 @@ class App {
       if (tokenInput) {
         tokenInput.value = '';
       }
-
-      // Auto-select Supabase if already signed in to Supabase
-      if (supabaseManager.isSignedIn) {
-        const supabaseRadio = modal.querySelector('input[name="connectTokenMode"][value="supabase"]');
-        const localRadio = modal.querySelector('input[name="connectTokenMode"][value="local"]');
-        if (supabaseRadio && localRadio) {
-          supabaseRadio.checked = true;
-          const quickLoad = document.getElementById('connectSupabaseQuickLoad');
-          if (quickLoad) quickLoad.style.display = '';
-        }
-      }
     }
   }
 
@@ -3512,28 +3501,26 @@ class App {
       }
     }
 
-// Check token rotation after sync (non-blocking — don't delay app startup)
+    // Check token rotation after sync (non-blocking — don't delay app startup)
     if (!isLocalMode) {
       this.checkAndRotateIfNeeded();
     }
 
-    // Try to call initSidebar if it's a function
-    if (typeof window.initSidebar === 'function') {
+    // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
+    // Prevent duplicate initialization
+    if (window.initSidebar && !this._sidebarInitialized) {
       await window.initSidebar();
-    } else {
-      // Sidebar not loaded yet - wait for it
-      console.log('[App] initSidebar not ready, waiting...');
-      const checkAndRender = setInterval(() => {
-        if (typeof window.initSidebar === 'function') {
-          clearInterval(checkAndRender);
-          console.log('[App] initSidebar now available, calling...');
-          window.initSidebar();
-        }
-      }, 100);
-      // Timeout after 5 seconds
-      setTimeout(() => clearInterval(checkAndRender), 5000);
+      this._sidebarInitialized = true;
     }
-    this._sidebarInitialized = true;
+
+    // Initialize services with delays to prevent overwhelming the system
+    await blocklistService.init();
+
+    // Initialize scanner service immediately
+    if (!this._scannerInitialized) {
+      await scannerService.init();
+      this._scannerInitialized = true;
+    }
   }
 
   async showPreRotationPrompt(daysLeft, token) {
