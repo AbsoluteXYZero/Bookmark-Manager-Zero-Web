@@ -1,5 +1,7 @@
 ## Changelog
 
+new version coming
+
 ### V1.4.1 (Current) - Mobile UX Improvements
 
 **New Features:**
