@@ -1112,7 +1112,6 @@ async function restoreCachedBookmarkStatuses() {
 
 // Load bookmarks from Firefox API
 async function loadBookmarks() {
-  console.log('[loadBookmarks] Starting, window.bookmarkManager:', typeof window.bookmarkManager, 'local bookmarkManager:', typeof bookmarkManager);
   try {
     // Save current status data before reloading
     const statusMap = new Map();

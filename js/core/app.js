@@ -3512,32 +3512,19 @@ class App {
       }
     }
 
-    // Check token rotation after sync (non-blocking — don't delay app startup)
+// Check token rotation after sync (non-blocking — don't delay app startup)
     if (!isLocalMode) {
       this.checkAndRotateIfNeeded();
     }
 
-    // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
+    // Initialize sidebar - loads bookmarks, settings, and prepares UI
     // Prevent duplicate initialization
-    console.log('[App] showMainApp - checking sidebar status:', { 
-      hasInitSidebar: typeof window.initSidebar,
-      hasRenderBookmarks: typeof window.renderBookmarks 
-    });
-    
     if (window.initSidebar && !this._sidebarInitialized) {
-      console.log('[App] Calling initSidebar...');
       await window.initSidebar();
-      console.log('[App] initSidebar complete');
-    } else {
-      // Sidebar handles its own renderBookmarks() call when init() completes
-      console.log('[App] initSidebar not available yet (will be called later), setting flag');
     }
-    
-    // Mark as initialized so we don't call initSidebar twice
     this._sidebarInitialized = true;
 
     // NOTE: blocklistService and scannerService are lazy-loaded on first use
-    // This prevents blocking the UI at startup
   }
 
   async showPreRotationPrompt(daysLeft, token) {

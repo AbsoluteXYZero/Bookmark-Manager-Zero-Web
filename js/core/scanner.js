@@ -30,16 +30,6 @@ class ScannerService {
     await this._doInit();
   }
 
-  /**
-   * Lazy initialization - called on first scan
-   */
-  async ensureReady() {
-    if (!this._lazyInitialized) {
-      this._lazyInitialized = true;
-      await this._doInit();
-    }
-  }
-
 /**
    * Lazy initialization - called on first scan
    */
