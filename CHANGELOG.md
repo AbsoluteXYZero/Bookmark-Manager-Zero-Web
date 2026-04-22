@@ -1,6 +1,17 @@
 ## Changelog
 
-### V1.4.1 (Current) - Mobile UX Improvements
+### V1.5 (Current) - Performance & URLhaus Fix
+
+**Performance:**
+- **Lazy-loaded Services** - Blocklist and Scanner services now initialize on first use, not at startup
+- **Faster Startup** - Removed blocking init calls from showMainApp()
+
+**Bug Fixes:**
+- **URLhaus Fix** - Added CORS proxy race for URLhaus Active list (tries allorigins, codetabs, corsproxy - fastest wins)
+
+---
+
+### V1.4.1 - Mobile UX Improvements
 
 **New Features:**
 - **Pull-to-Refresh** - On mobile, drag down from above the search bar to reload the page. A pull indicator fades in showing progress and prompts to release when the threshold is reached.
