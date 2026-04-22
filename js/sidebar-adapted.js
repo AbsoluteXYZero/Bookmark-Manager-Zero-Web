@@ -1,6 +1,10 @@
 // Bookmark Manager Zero - Web Adapted Script
 // Adapted from sidebar.js to work with GitLab Snippet storage
 
+// BAIL EARLY - test if script loads at all
+console.log('[SIDEBAR] Script starting to load!');
+window.sidebarLoadedTest = 'yes';
+
 // Import our web modules
 import dbManager from './storage/indexeddb.js';
 import authManager from './auth/auth-manager.js';
