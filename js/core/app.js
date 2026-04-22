@@ -3530,7 +3530,12 @@ class App {
       this._sidebarInitialized = true;
       console.log('[App] initSidebar complete');
     } else {
-      console.log('[App] Skipping initSidebar, window.initSidebar:', typeof window.initSidebar, ' _sidebarInitialized:', this._sidebarInitialized);
+      // window.initSidebar not available yet - just render bookmarks directly
+      // (sidebar UI was already set up via initUI())
+      console.log('[App] initSidebar not ready, calling renderBookmarks directly');
+      if (window.renderBookmarks) {
+        window.renderBookmarks();
+      }
     }
 
     // NOTE: blocklistService and scannerService are lazy-loaded on first use
