@@ -3532,9 +3532,15 @@ class App {
     } else {
       // window.initSidebar not available yet - just render bookmarks directly
       // (sidebar UI was already set up via initUI())
-      console.log('[App] initSidebar not ready, calling renderBookmarks directly');
+      console.log('[App] initSidebar not ready, calling renderBookmarks directly', {
+        renderBookmarks: typeof window.renderBookmarks,
+        bookmarkTree: typeof window.bookmarkTree,
+        hasBookmarkManager: typeof window.bookmarkManager
+      });
       if (window.renderBookmarks) {
         window.renderBookmarks();
+      } else {
+        console.log('[App] window.renderBookmarks not available');
       }
     }
 
