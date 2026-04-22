@@ -1188,6 +1188,11 @@ async function rescanAllBookmarks() {
     return;
   }
 
+  // Initialize scanner if not ready (lazy init)
+  if (window.scannerService) {
+    await window.scannerService.ensureReady();
+  }
+
   const bookmarksToCheck = [];
 
   // Traverse tree to find ALL bookmarks regardless of folder state or check status
@@ -1352,7 +1357,12 @@ async function autoCheckBookmarkStatuses() {
   bookmarksToCheck.forEach(item => checkedBookmarks.add(item.id));
 
   // Use scanner service queue system for consistent progress updates (same as manual scans)
-  if (window.scannerService && window.scannerService.worker) {
+  if (window.scannerService) {
+    // Initialize scanner if not ready (lazy init)
+    await window.scannerService.ensureReady();
+    
+    // Now check if worker is available
+    if (window.scannerService.worker) {
     // Wait for worker to be initialized before starting scan
     if (!window.scannerService.workerInitialized) {
       console.log('[Auto-Check] Waiting for scanner worker to initialize...');
@@ -1427,7 +1437,12 @@ async function autoCheckBookmarkStatuses() {
     const checkPromises = batch.map(async (item) => {
       try {
         // Use scanner service to scan via Web Worker (avoids CORS issues and offloads work)
-        if (window.scannerService && window.scannerService.worker) {
+if (window.scannerService) {
+    // Initialize scanner if not ready (lazy init)
+    await window.scannerService.ensureReady();
+    
+    // Now check if worker is available
+    if (!window.scannerService.worker) {
           await window.scannerService.scanBookmark(item, false); // Don't bypass cache for auto-scan
   
           // Update progress immediately after each bookmark completes
