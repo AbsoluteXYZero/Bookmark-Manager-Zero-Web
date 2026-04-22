@@ -2624,6 +2624,11 @@ class App {
       const { diff, remoteData, message } = e.detail;
       await this.showSyncConflictDialog(diff, remoteData, message);
     });
+
+    window.addEventListener('tokenExpiring', async (e) => {
+      const { daysLeft, token } = e.detail;
+      await this.showPreRotationPrompt(daysLeft, token);
+    });
   }
 
   /**
@@ -3445,6 +3450,96 @@ class App {
       await scannerService.init();
       this._scannerInitialized = true;
     }
+  }
+
+  async showPreRotationPrompt(daysLeft, token) {
+    const isSupabase = await supabaseManager.getTokenMode() === 'supabase';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:420px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
+        <h2 style="margin:0 0 12px 0;font-size:18px;">GitLab Token Expiring Soon</h2>
+        <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 16px 0;">Your GitLab Personal Access Token expires in <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${Math.floor(daysLeft)} day${Math.floor(daysLeft) !== 1 ? 's' : ''}</strong>. BMZ can renew it automatically right now.</p>
+        <div style="padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
+          ${isSupabase 
+            ? 'Renewing creates a new token stored in Supabase. All your devices will pick it up automatically on their next sync.'
+            : 'Renewing creates a new token. If you use BMZ on other devices, you will need to enter the new token on each one to maintain sync.'}
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <button id="rotateNowBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">Renew Token Now</button>
+          <button id="snoozeDayBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);font-size:14px;cursor:pointer;">Remind me tomorrow</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    const cleanup = () => {
+      modal.remove();
+      supabaseManager._rotationPromptActive = false;
+    };
+
+    modal.querySelector('#rotateNowBtn').addEventListener('click', async () => {
+      try {
+        const rotated = await supabaseManager.rotateToken(token);
+        cleanup();
+        if (isSupabase) {
+          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
+        }
+        await authManager.storeToken(rotated.token, null, 'gitlab');
+        this.showPostRotationModal(rotated.token, isSupabase ? 'supabase' : 'local');
+      } catch (e) {
+        this.showToast(e.message, 'error');
+      }
+    });
+
+    modal.querySelector('#snoozeDayBtn').addEventListener('click', async () => {
+      await supabaseManager.snoozeRotation();
+      cleanup();
+    });
+
+    modal.addEventListener('click', async (e) => {
+      if (e.target === modal) {
+        await supabaseManager.snoozeRotation();
+        cleanup();
+      }
+    });
+  }
+
+  showPostRotationModal(newToken, mode = 'local') {
+    const isSupabase = mode === 'supabase';
+    const actionBox = isSupabase
+      ? `<div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:12px;margin-bottom:12px;">
+           Your other BMZ devices will pick up the new token automatically on their next sync.
+         </div>`
+      : `<div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;margin-bottom:12px;">
+           Your old token is now invalid. If you use BMZ on other devices, update the token on each one.
+         </div>`;
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:480px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
+        <h2 style="margin:0 0 12px 0;font-size:18px;">Token Renewed Successfully</h2>
+        <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 8px 0;">Your new GitLab token is shown below. <strong style="color:var(--md-sys-color-error,#ef4444);">Copy it now</strong> if needed — GitLab will never show this token again.</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+          <input type="text" readonly id="rotatedTokenDisplay" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
+          <button id="copyRotatedToken" style="padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;white-space:nowrap;">Copy</button>
+        </div>
+        ${actionBox}
+        <button id="closeRotationModal" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">Done</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('#rotatedTokenDisplay').value = newToken;
+    modal.querySelector('#copyRotatedToken').addEventListener('click', () => {
+      navigator.clipboard.writeText(newToken).then(() => {
+        const btn = modal.querySelector('#copyRotatedToken');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+    modal.querySelector('#rotatedTokenDisplay').addEventListener('click', (e) => e.target.select());
+    modal.querySelector('#closeRotationModal').addEventListener('click', () => modal.remove());
   }
 
   /**

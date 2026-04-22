@@ -228,6 +228,78 @@ class SupabaseManager {
   async setTokenMode(mode) {
     await dbManager.put('settings', { key: 'bmz_token_mode', value: mode });
   }
+
+  async checkAndRotateIfNeeded(currentToken) {
+    if (this._rotationPromptActive) return { needsRotation: false, currentToken };
+
+    try {
+      const cached = await dbManager.get('settings', 'bmz_token_expires');
+      if (cached?.value) {
+        const cachedDaysLeft = (new Date(cached.value) - Date.now()) / (1000 * 60 * 60 * 24);
+        if (cachedDaysLeft > 30) return { needsRotation: false, currentToken };
+      }
+
+      const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
+        headers: { 'Authorization': `Bearer ${currentToken}` }
+      });
+      if (res.status === 401) return { needsRotation: false, currentToken };
+      if (!res.ok) return { needsRotation: false, currentToken };
+
+      const info = await res.json();
+      if (!info.expires_at) return { needsRotation: false, currentToken };
+
+      await dbManager.put('settings', { key: 'bmz_token_expires', value: info.expires_at });
+
+      const daysLeft = (new Date(info.expires_at) - Date.now()) / (1000 * 60 * 60 * 24);
+      if (daysLeft > 30) return { needsRotation: false, currentToken };
+
+      const snooze = await dbManager.get('settings', 'bmz_rotation_snooze');
+      if (snooze?.value) {
+        const snoozeAge = Date.now() - snooze.value;
+        if (snoozeAge < 24 * 60 * 60 * 1000) return { needsRotation: false, currentToken };
+      }
+
+      this._rotationPromptActive = true;
+      return { needsRotation: true, daysLeft, currentToken };
+    } catch (e) {
+      console.error('[TokenRotation] Failed:', e);
+      return { needsRotation: false, currentToken };
+    }
+  }
+
+  async rotateToken(currentToken) {
+    try {
+      const newExpiry = new Date();
+      newExpiry.setDate(newExpiry.getDate() + 350);
+      const newExpiryStr = newExpiry.toISOString().split('T')[0];
+
+      const rotateRes = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self/rotate', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${currentToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expires_at: newExpiryStr })
+      });
+
+      if (!rotateRes.ok) {
+        if (rotateRes.status === 403) throw new Error('Token renewal failed: insufficient scopes. Your token needs the "api" scope.');
+        if (rotateRes.status === 429) throw new Error('Token renewal failed: GitLab rate limit hit. It will be retried later.');
+        throw new Error(`Token renewal failed (${rotateRes.status}). Please try again later.`);
+      }
+
+      const rotated = await rotateRes.json();
+      await dbManager.put('settings', { key: 'bmz_token_expires', value: rotated.expires_at });
+      await dbManager.delete('settings', 'bmz_rotation_snooze');
+      this._rotationPromptActive = false;
+      return rotated;
+    } catch (e) {
+      this._rotationPromptActive = false;
+      throw e;
+    }
+  }
+
+  async snoozeRotation() {
+    await dbManager.put('settings', { key: 'bmz_rotation_snooze', value: Date.now() });
+    this._rotationPromptActive = false;
+  }
 }
 
 const supabaseManager = new SupabaseManager();

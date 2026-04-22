@@ -7,6 +7,7 @@
 import dbManager from './indexeddb.js';
 import snippetAdapter from './snippet-adapter.js';
 import authManager from '../auth/auth-manager.js';
+import supabaseManager from '../auth/supabase-manager.js';
 import { safeLocalStorage } from '../utils/storage-utils.js';
 
 class SyncManager {
@@ -953,6 +954,15 @@ class SyncManager {
         }
 
         try {
+          // Check and rotate token if needed
+          const token = await authManager.getToken('gitlab');
+          if (token) {
+            const result = await supabaseManager.checkAndRotateIfNeeded(token);
+            if (result.needsRotation) {
+              this.emitEvent('tokenExpiring', { daysLeft: result.daysLeft, token: result.currentToken });
+            }
+          }
+
           // First, push any local changes if needed
           console.log(`[AutoSync] Scheduled - hasUnsyncedChanges: ${this.hasUnsyncedChanges}`);
           if (this.hasUnsyncedChanges) {
