@@ -3520,8 +3520,12 @@ class App {
     // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
     // Prevent duplicate initialization
     if (window.initSidebar && !this._sidebarInitialized) {
+      console.log('[App] Calling initSidebar...');
       await window.initSidebar();
       this._sidebarInitialized = true;
+      console.log('[App] initSidebar complete');
+    } else {
+      console.log('[App] Skipping initSidebar, _sidebarInitialized:', this._sidebarInitialized);
     }
 
     // NOTE: blocklistService and scannerService are lazy-loaded on first use

@@ -98,7 +98,7 @@ class BlocklistService {
    * Lazy initialization - called on first use
    */
   async ensureReady() {
-    if (!this._lazyInitialized && this.maliciousUrlsSet.size === 0) {
+    if (!this._lazyInitialized) {
       this._lazyInitialized = true;
       await this._initInternal();
     }

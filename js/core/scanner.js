@@ -22,9 +22,9 @@ class ScannerService {
     this.urlsBeingScanned = new Set(); // Track URLs currently being scanned to prevent duplicates
   }
 
-  /**
+/**
    * Initialize scanner service (lazy - initializes on first scan)
-*/
+   */
   async init() {
     this._lazyInitialized = true;
     await this._doInit();
@@ -34,6 +34,19 @@ class ScannerService {
    * Lazy initialization - called on first scan
    */
   async ensureReady() {
+    if (!this._lazyInitialized) {
+      this._lazyInitialized = true;
+      await this._doInit();
+    }
+  }
+
+/**
+   * Lazy initialization - called on first scan
+   */
+  async ensureReady() {
+    // Already initialized
+    if (this.workerInitialized) return;
+    
     if (!this._lazyInitialized) {
       this._lazyInitialized = true;
       await this._doInit();
