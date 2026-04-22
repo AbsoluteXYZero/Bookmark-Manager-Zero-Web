@@ -3519,30 +3519,22 @@ class App {
 
     // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI
     // Prevent duplicate initialization
-    console.log('[App] showMainApp check:', { 
-      hasInitSidebar: typeof window.initSidebar, 
-      _sidebarInitialized: this._sidebarInitialized 
+    console.log('[App] showMainApp - checking sidebar status:', { 
+      hasInitSidebar: typeof window.initSidebar,
+      hasRenderBookmarks: typeof window.renderBookmarks 
     });
     
     if (window.initSidebar && !this._sidebarInitialized) {
       console.log('[App] Calling initSidebar...');
       await window.initSidebar();
-      this._sidebarInitialized = true;
       console.log('[App] initSidebar complete');
     } else {
-      // window.initSidebar not available yet - just render bookmarks directly
-      // (sidebar UI was already set up via initUI())
-      console.log('[App] initSidebar not ready, calling renderBookmarks directly', {
-        renderBookmarks: typeof window.renderBookmarks,
-        bookmarkTree: typeof window.bookmarkTree,
-        hasBookmarkManager: typeof window.bookmarkManager
-      });
-      if (window.renderBookmarks) {
-        window.renderBookmarks();
-      } else {
-        console.log('[App] window.renderBookmarks not available');
-      }
+      // Sidebar handles its own renderBookmarks() call when init() completes
+      console.log('[App] initSidebar not available yet (will be called later), setting flag');
     }
+    
+    // Mark as initialized so we don't call initSidebar twice
+    this._sidebarInitialized = true;
 
     // NOTE: blocklistService and scannerService are lazy-loaded on first use
     // This prevents blocking the UI at startup

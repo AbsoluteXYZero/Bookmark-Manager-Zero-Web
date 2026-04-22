@@ -7933,5 +7933,10 @@ if (document.readyState === 'loading') {
   initUI();
 }
 
+// After initUI, load bookmarks and render (if app already initialized)
+if (window.app && window.app.isAuthenticated) {
+  init();
+}
+
 // Export full init function for app.js to call after authentication
 window.initSidebar = init;
