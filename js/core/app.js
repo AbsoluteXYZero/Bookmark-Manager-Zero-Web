@@ -18,6 +18,7 @@ import { importFromHTML } from '../import-export/html-parser.js';
 import { importFromJSON } from '../import-export/json-parser.js';
 import touchHandler from '../mobile/touch-handler.js';
 import { safeLocalStorage, addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
+import supabaseManager from '../auth/supabase-manager.js';
 
 class App {
   constructor() {
@@ -25,7 +26,7 @@ class App {
     this.isAuthenticated = false;
     this.isInitialized = false;
     this.currentUser = null;
-
+    this._rotationPromptActive = false;
   }
 
   /**
@@ -93,7 +94,78 @@ class App {
   /**
    * Check if user is authenticated
    */
+  // Shared helper: validate a GitLab PAT and transition to the main app
+  async _authenticateWithPAT(token) {
+    try {
+      const response = await fetch('https://gitlab.com/api/v4/user', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!response.ok) return false;
+      const user = await response.json();
+
+      await authManager.storeToken(token, null, 'gitlab');
+      await authManager.storePreference('syncProvider', 'gitlab');
+      await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
+      safeLocalStorage.setItem('bmz_mode_chosen', 'true');
+      safeLocalStorage.removeItem('bmz_local_mode');
+
+      oauthPAT.token = token;
+      oauthPAT.user = user;
+      this.currentUser = user;
+      this.isAuthenticated = true;
+
+      await this.showMainApp();
+      return true;
+    } catch (e) {
+      console.error('[Auth] _authenticateWithPAT failed:', e);
+      return false;
+    }
+  }
+
   async checkAuth() {
+    // Handle Supabase OAuth redirect callback before anything else
+    try {
+      const wasCallback = await supabaseManager.handleOAuthCallback();
+      if (wasCallback) {
+        // Fresh OAuth session — check for stored PAT in Supabase
+        const patData = await supabaseManager.loadGitLabToken();
+        if (patData) {
+          // Auto-authenticate with the stored PAT
+          const authenticated = await this._authenticateWithPAT(patData.token);
+          if (authenticated) return;
+        }
+        // No stored PAT — flag so login screen can show a post-OAuth banner
+        this._supabaseJustSignedIn = true;
+      }
+    } catch (e) {
+      console.error('[Auth] OAuth callback error:', e.message);
+      this._oauthError = e.message;
+    }
+
+    // Load existing Supabase session (for users already signed in)
+    if (!supabaseManager.isSignedIn) {
+      await supabaseManager.loadSession();
+    }
+
+    // If signed in to Supabase in supabase token mode, try to auto-load PAT if no local token
+    if (supabaseManager.isSignedIn) {
+      const tokenMode = await supabaseManager.getTokenMode();
+      if (tokenMode === 'supabase') {
+        const localToken = await authManager.getToken('gitlab');
+        if (!localToken) {
+          try {
+            const patData = await supabaseManager.loadGitLabToken();
+            if (patData) {
+              const authenticated = await this._authenticateWithPAT(patData.token);
+              if (authenticated) return;
+            }
+          } catch (e) {
+            console.warn('[Auth] Failed to auto-load PAT from Supabase:', e);
+          }
+        }
+      }
+    }
+
     // Hide both login and main content during auth check
     const loginScreen = document.getElementById('loginScreen');
     const mainContent = document.getElementById('mainContent');
@@ -477,6 +549,34 @@ class App {
       };
     }
 
+    // Wire up "Sign in with GitLab" OAuth button
+    const oauthSignInBtn = document.getElementById('oauthSignInBtn');
+    if (oauthSignInBtn) {
+      oauthSignInBtn.onclick = () => supabaseManager.signInWithGitLab();
+    }
+
+    // If the user just returned from OAuth, show a confirmation banner and pre-select GitLab tab
+    if (this._supabaseJustSignedIn) {
+      if (gitlabModeBtn) gitlabModeBtn.click();
+      const oauthBanner = document.getElementById('oauthSuccessBanner');
+      if (oauthBanner) oauthBanner.style.display = 'block';
+    }
+
+    // Auto-check saveToSupabaseCheck if already signed in with Supabase
+    if (supabaseManager.isSignedIn) {
+      const saveToSupabase = document.getElementById('saveToSupabaseCheck');
+      if (saveToSupabase) saveToSupabase.checked = true;
+    }
+
+    // If there was an OAuth error, show it
+    if (this._oauthError) {
+      if (gitlabModeBtn) gitlabModeBtn.click();
+      if (loginErrorGitlab) {
+        loginErrorGitlab.textContent = this._oauthError;
+        loginErrorGitlab.style.display = 'block';
+      }
+    }
+
     // Set up GitLab login button handler
     const loginBtnGitlab = document.getElementById('loginBtnGitlab');
     const tokenInputGitlab = document.getElementById('tokenInputGitlab');
@@ -516,24 +616,38 @@ class App {
 
           if (authResult === null) {
             // Popup was shown, authentication failed but user can retry
-            // Reset button state
             loginBtnGitlab.disabled = false;
-            loginBtnGitlab.textContent = 'Login with GitLab';
+            loginBtnGitlab.textContent = 'Connect to GitLab';
             return;
           }
 
           console.log(`Authenticated with GitLab:`, authResult.user.username);
 
-          // Store token securely
+          // Store token securely in local IndexedDB
           await authManager.storeToken(authResult.access_token, null, 'gitlab');
+
+          // If signed in with Supabase and token mode is supabase, also save PAT to Supabase
+          if (supabaseManager.isSignedIn) {
+            const tokenMode = await supabaseManager.getTokenMode();
+            const saveToSupabase = document.getElementById('saveToSupabaseCheck');
+            const shouldSaveToSupabase = saveToSupabase ? saveToSupabase.checked : (tokenMode === 'supabase');
+            if (shouldSaveToSupabase) {
+              try {
+                await supabaseManager.saveGitLabToken(authResult.access_token, null);
+                await supabaseManager.setTokenMode('supabase');
+              } catch (e) {
+                console.warn('Failed to save PAT to Supabase:', e.message);
+              }
+            }
+          }
 
           // Store provider preference
           await authManager.storePreference('syncProvider', 'gitlab');
 
-          // Mark that user has chosen GitLab mode (don't set local mode flag)
+          // Mark that user has chosen GitLab mode
           await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
           safeLocalStorage.setItem('bmz_mode_chosen', 'true');
-          safeLocalStorage.removeItem('bmz_local_mode'); // Clear local mode flag
+          safeLocalStorage.removeItem('bmz_local_mode');
 
           // Show success and load main app
           await this.showMainApp();
@@ -574,6 +688,7 @@ class App {
 
       // Clear authentication
       await authManager.clearToken('gitlab');
+      await supabaseManager.clearSession();
       oauthPAT.clear();
 
       // Clear app authentication state
@@ -659,6 +774,7 @@ class App {
 
       // Clear all authentication
       await authManager.clearToken('gitlab');
+      await supabaseManager.clearSession();
       oauthPAT.clear();
 
       // Clear all mode flags from both IndexedDB and localStorage
@@ -985,6 +1101,31 @@ class App {
       console.log(`[UseRemoteStorage] Has local bookmarks: ${hasLocalBookmarks}`);
 
       if (hasLocalBookmarks) {
+        // Compare checksums — skip the dialog if local and remote are already identical
+        let alreadyInSync = false;
+        try {
+          const remoteData = await snippetAdapter.readBookmarks(itemId);
+          const localTree = bookmarkManager.getTree();
+          if (localTree) {
+            const localChecksum = await snippetAdapter.calculateChecksum(localTree);
+            const remoteChecksum = remoteData.checksum || await snippetAdapter.calculateChecksum(remoteData);
+            alreadyInSync = localChecksum === remoteChecksum;
+          }
+        } catch (e) {
+          // Comparison failed — fall through to show dialog as normal
+        }
+
+        if (alreadyInSync) {
+          snippetAdapter.setSnippetId(itemId);
+          await syncManager.setSnippetId(itemId);
+          const modal = document.getElementById('snippetSetupModal');
+          if (modal) { modal.style.display = 'none'; modal.classList.add('hidden'); }
+          await syncManager.init();
+          if (window.initSidebar) await window.initSidebar();
+          this.showToast('Snippet connected — bookmarks are already in sync.');
+          return;
+        }
+
         // Show merge confirmation dialog
         const userChoice = await this.showMergeConfirmationDialog(itemId, 'existing');
         if (userChoice === 'keep-local') {
@@ -1478,6 +1619,310 @@ class App {
     }
   }
 
+  async checkAndRotateIfNeeded() {
+    if (this._rotationPromptActive) return;
+    try {
+      const token = await authManager.getToken('gitlab');
+      if (!token) return;
+
+      // Fast-path: skip API call if cached expiry shows > 30 days remaining
+      const cachedExpiry = safeLocalStorage.getItem('gitlab_token_expires');
+      if (cachedExpiry) {
+        const cachedDaysLeft = (new Date(cachedExpiry) - Date.now()) / (1000 * 60 * 60 * 24);
+        if (cachedDaysLeft > 30) return;
+      }
+
+      const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.status === 401) {
+        this.showToast('GitLab token is invalid or expired. Please re-enter it in sync settings.', 'error');
+        return;
+      }
+      if (!res.ok) return;
+
+      const info = await res.json();
+      if (!info.expires_at) return;
+
+      safeLocalStorage.setItem('gitlab_token_expires', info.expires_at);
+
+      const daysLeft = (new Date(info.expires_at) - Date.now()) / (1000 * 60 * 60 * 24);
+      if (daysLeft > 30) return;
+
+      // Check 24-hour snooze
+      const snoozeTime = safeLocalStorage.getItem('bmz_rotation_snooze');
+      if (snoozeTime) {
+        const snoozeAge = Date.now() - parseInt(snoozeTime, 10);
+        if (snoozeAge < 24 * 60 * 60 * 1000) return;
+      }
+
+      this._rotationPromptActive = true;
+      const choice = await this.showPreRotationPrompt(daysLeft);
+      if (choice === 'snooze') {
+        safeLocalStorage.setItem('bmz_rotation_snooze', Date.now());
+        return;
+      }
+
+      const newExpiry = new Date();
+      newExpiry.setDate(newExpiry.getDate() + 350);
+      const newExpiryStr = newExpiry.toISOString().split('T')[0];
+
+      const rotateRes = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self/rotate', {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expires_at: newExpiryStr })
+      });
+      if (!rotateRes.ok) {
+        if (rotateRes.status === 403) {
+          this.showToast('Token renewal failed: insufficient scopes. Your token needs the "api" scope. Please create a new token manually.', 'error');
+        } else if (rotateRes.status === 429) {
+          this.showToast('Token renewal failed: GitLab rate limit hit. It will be retried on the next sync.', 'error');
+        } else {
+          this.showToast(`Token renewal failed (${rotateRes.status}). Please try again later.`, 'error');
+        }
+        return;
+      }
+
+      const rotated = await rotateRes.json();
+      const mode = await supabaseManager.getTokenMode();
+
+      if (mode === 'supabase' && supabaseManager.isSignedIn) {
+        try {
+          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
+        } catch (e) {
+          console.warn('[TokenRotation] Supabase save failed:', e);
+        }
+      }
+
+      await authManager.storeToken(rotated.token, null, 'gitlab');
+      oauthPAT.token = rotated.token;
+      safeLocalStorage.removeItem('bmz_rotation_snooze');
+      safeLocalStorage.setItem('gitlab_token_expires', rotated.expires_at);
+
+      this.showPostRotationModal(rotated.token, mode);
+    } catch (err) {
+      this._rotationPromptActive = false;
+      console.error('[TokenRotation] Failed:', err);
+    }
+  }
+
+  showPreRotationPrompt(daysLeft) {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+      modal.innerHTML = `
+        <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:420px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
+          <h2 style="margin:0 0 12px 0;font-size:18px;">🔑 GitLab Token Expiring Soon</h2>
+          <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 16px 0;">Your GitLab Personal Access Token expires in <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${Math.floor(daysLeft)} day${Math.floor(daysLeft) !== 1 ? 's' : ''}</strong>. BMZ can renew it automatically right now.</p>
+          <div style="padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
+            ⚠️ Renewing creates a <strong>new token</strong> and immediately invalidates the old one. If you use BMZ on other browsers, the extension, or Android, you will need to enter the new token on each of those clients to maintain sync.
+          </div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <button id="rotateNowBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">Renew Token Now</button>
+            <button id="snoozeDayBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);font-size:14px;cursor:pointer;">Remind me tomorrow</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const dismiss = (result) => {
+        modal.remove();
+        this._rotationPromptActive = false;
+        resolve(result);
+      };
+      modal.querySelector('#rotateNowBtn').addEventListener('click', () => dismiss('rotate'));
+      modal.querySelector('#snoozeDayBtn').addEventListener('click', () => dismiss('snooze'));
+      modal.addEventListener('click', (e) => { if (e.target === modal) dismiss('snooze'); });
+      const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); dismiss('snooze'); } };
+      document.addEventListener('keydown', onKey);
+    });
+  }
+
+  showPostRotationModal(newToken, mode = 'local') {
+    const isSupabase = mode === 'supabase';
+    const actionBox = isSupabase
+      ? `<div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:12px;margin-bottom:12px;">
+           ✅ <strong>Your other BMZ clients will pick up the new token automatically</strong> on their next sync — no action needed on other devices.
+         </div>`
+      : `<div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;margin-bottom:12px;">
+           🚨 <strong>Your old token is now invalid.</strong> If you use BMZ on other browsers, the extension, or Android, open each one, go to the GitLab sync settings, and paste this new token. Until you do, sync will be broken on those clients.
+         </div>`;
+    const hintBox = isSupabase
+      ? `<div style="padding:10px 12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
+           💡 You can always retrieve your current token from <strong>Settings → Reveal GitLab Token</strong> in BMZ if you ever need it.
+         </div>`
+      : `<div style="padding:10px 12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
+           💡 You can always retrieve your current token from <strong>Settings → Reveal GitLab Token</strong> in BMZ. Want renewals to sync automatically across all devices? Switch to <strong>Supabase storage</strong> in GitLab Sync Settings.
+         </div>`;
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:480px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
+        <h2 style="margin:0 0 12px 0;font-size:18px;">✅ Token Renewed Successfully</h2>
+        <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 8px 0;">Your new GitLab Personal Access Token is shown below. <strong style="color:var(--md-sys-color-error,#ef4444);">Copy it now</strong> — GitLab will never show this token again once you leave this screen.</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
+          <input type="text" readonly id="rotatedTokenDisplay" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
+          <button id="copyRotatedToken" style="padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;white-space:nowrap;">Copy</button>
+        </div>
+        ${actionBox}
+        ${hintBox}
+        <button id="closeRotationModal" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">I've copied my token</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    modal.querySelector('#rotatedTokenDisplay').value = newToken;
+    modal.querySelector('#rotatedTokenDisplay').addEventListener('click', (e) => e.target.select());
+    modal.querySelector('#copyRotatedToken').addEventListener('click', () => {
+      navigator.clipboard.writeText(newToken).then(() => {
+        const btn = modal.querySelector('#copyRotatedToken');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+    modal.querySelector('#closeRotationModal').addEventListener('click', () => modal.remove());
+  }
+
+  async showGitLabDisconnectDialog() {
+    const isSupabase = (await supabaseManager.getTokenMode()) === 'supabase';
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:400px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);';
+    dialog.innerHTML = `
+      <h2 style="margin:0 0 16px 0;font-size:18px;display:flex;align-items:center;gap:8px;">
+        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/></svg>
+        GitLab Account
+      </h2>
+      <p style="margin:0 0 20px 0;font-size:14px;color:var(--md-sys-color-on-surface-variant,#aaa);">
+        ${isSupabase
+          ? 'Disconnect this device only, or remove your token from all devices?'
+          : 'Disconnect and remove your GitLab token from this device?'}
+      </p>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        ${isSupabase ? `
+        <button id="disconnectLocal" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">This device only</button>
+        <button id="disconnectAll" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error,#f44336);color:var(--md-sys-color-on-error,#fff);cursor:pointer;font-size:14px;">All devices</button>
+        ` : `
+        <button id="disconnectLocal" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error,#f44336);color:var(--md-sys-color-on-error,#fff);cursor:pointer;font-size:14px;">Disconnect</button>
+        `}
+        <button id="cancelGitLabDisconnect" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Cancel</button>
+      </div>
+    `;
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    const doDisconnect = async (removeFromSupabase) => {
+      modal.remove();
+      if (removeFromSupabase) await supabaseManager.deleteGitLabToken();
+      await this.logout();
+      this.showToast(removeFromSupabase ? 'Disconnected from all devices' : 'Disconnected this device');
+    };
+
+    dialog.querySelector('#cancelGitLabDisconnect').addEventListener('click', () => modal.remove());
+    dialog.querySelector('#disconnectLocal').addEventListener('click', () => doDisconnect(false));
+    if (isSupabase) dialog.querySelector('#disconnectAll').addEventListener('click', () => doDisconnect(true));
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  }
+
+  async showGitLabSyncSettingsDialog() {
+    const currentMode = await supabaseManager.getTokenMode();
+    const modeLabel = currentMode === 'supabase' ? '☁️ Supabase' : '💻 Local';
+    const switchLabel = currentMode === 'supabase' ? 'Switch to Local' : 'Enable Supabase';
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:440px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);';
+    dialog.innerHTML = `
+      <h2 style="margin:0 0 20px 0;font-size:20px;">GitLab Sync Settings</h2>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
+          <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
+          <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
+        </div>
+        <button id="closeSyncSettings" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Close</button>
+      </div>
+    `;
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+
+    dialog.querySelector('#switchTokenMode').addEventListener('click', async () => {
+      modal.remove();
+      if (currentMode === 'supabase') {
+        await supabaseManager.deleteGitLabToken();
+        await supabaseManager.setTokenMode('local');
+        await supabaseManager.clearSession();
+        this.showToast('Switched to local token storage');
+      } else {
+        // Switch to Supabase — ensure signed in
+        if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
+        if (!supabaseManager.isSignedIn) {
+          this.showToast('Sign in with GitLab first to enable Supabase storage.', 'error');
+          this.showLoginScreen();
+          return;
+        }
+        // Fetch expiry from GitLab
+        let expiresAt = null;
+        try {
+          const token = await authManager.getToken('gitlab');
+          const r = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (r.ok) { const info = await r.json(); expiresAt = info.expires_at; }
+        } catch (e) { /* ignore */ }
+        try {
+          const token = await authManager.getToken('gitlab');
+          await supabaseManager.saveGitLabToken(token, expiresAt);
+          await supabaseManager.setTokenMode('supabase');
+          this.showToast('Switched to Supabase token storage');
+        } catch (e) {
+          this.showToast('Failed to save to Supabase: ' + e.message, 'error');
+        }
+      }
+    });
+  }
+
+  async showRevealTokenModal() {
+    const token = await authManager.getToken('gitlab');
+    if (!token) {
+      this.showToast('No GitLab token saved on this device.', 'error');
+      return;
+    }
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
+    modal.innerHTML = `
+      <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:440px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
+        <h2 style="margin:0 0 12px 0;font-size:18px;">🔑 Your GitLab Token</h2>
+        <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 12px 0;">This is the Personal Access Token currently saved in BMZ on this device. Keep it private — it grants access to your GitLab bookmark snippet.</p>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;">
+          <input type="password" readonly id="revealTokenInput" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
+          <button id="toggleReveal" style="padding:10px 12px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;cursor:pointer;">Show</button>
+          <button id="copyRevealToken" style="padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;">Copy</button>
+        </div>
+        <button id="closeRevealModal" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);font-size:14px;cursor:pointer;">Close</button>
+      </div>
+    `;
+    document.body.appendChild(modal);
+    const input = modal.querySelector('#revealTokenInput');
+    input.value = token;
+    modal.querySelector('#toggleReveal').addEventListener('click', (e) => {
+      const isHidden = input.type === 'password';
+      input.type = isHidden ? 'text' : 'password';
+      e.target.textContent = isHidden ? 'Hide' : 'Show';
+    });
+    modal.querySelector('#copyRevealToken').addEventListener('click', () => {
+      navigator.clipboard.writeText(token).then(() => {
+        const btn = modal.querySelector('#copyRevealToken');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    });
+    modal.querySelector('#closeRevealModal').addEventListener('click', () => modal.remove());
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  }
+
   /**
    * Show Connect GitLab modal for local mode users
    */
@@ -1616,6 +2061,7 @@ class App {
         if (connectGitlabBtn) {
           connectGitlabBtn.style.display = 'none';
         }
+
 
       } catch (error) {
         console.error('GitLab connection failed:', error);
@@ -2010,11 +2456,22 @@ class App {
       });
     }
 
-    // Logout button
+    // Logout button — shows disconnect dialog (Supabase-aware)
     const logoutBtn = document.getElementById('logoutBtn');
     if (logoutBtn) {
       logoutBtn.addEventListener('click', async () => {
-        await this.logout();
+        await this.showGitLabDisconnectDialog();
+      });
+    }
+
+    // GitLab Sync Settings button
+    const gitlabSyncSettingsBtn = document.getElementById('gitlabSyncSettingsBtn');
+    if (gitlabSyncSettingsBtn) {
+      gitlabSyncSettingsBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const settingsMenu = document.getElementById('settingsMenu');
+        if (settingsMenu) settingsMenu.classList.remove('show');
+        this.showGitLabSyncSettingsDialog();
       });
     }
 
@@ -2031,6 +2488,17 @@ class App {
     if (connectGitlabBtn) {
       connectGitlabBtn.addEventListener('click', () => {
         this.showConnectGitlabModal();
+      });
+    }
+
+    // View GitLab Token button
+    const revealGitlabTokenBtn = document.getElementById('revealGitlabTokenBtn');
+    if (revealGitlabTokenBtn) {
+      revealGitlabTokenBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const settingsMenu = document.getElementById('settingsMenu');
+        if (settingsMenu) settingsMenu.classList.remove('show');
+        await this.showRevealTokenModal();
       });
     }
 
@@ -2890,6 +3358,9 @@ class App {
         manualSyncBtn.style.display = '';
       }
 
+      const gitlabSyncSettingsBtn = document.getElementById('gitlabSyncSettingsBtn');
+      if (gitlabSyncSettingsBtn) gitlabSyncSettingsBtn.style.display = '';
+
       // Check if we have a snippet set up
       const hasSnippet = await this.checkSnippetSetup();
 
@@ -2938,6 +3409,9 @@ class App {
         console.log('[App] Manual sync button hidden for local mode');
       }
 
+      const gitlabSyncSettingsBtnLocal = document.getElementById('gitlabSyncSettingsBtn');
+      if (gitlabSyncSettingsBtnLocal) gitlabSyncSettingsBtnLocal.style.display = 'none';
+
       // Show Connect GitLab button in header for local mode users
       const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
       console.log('[App] headerConnectGitlabBtn exists:', !!headerConnectGitlabBtn);
@@ -2950,6 +3424,11 @@ class App {
       } else {
         console.error('[App] headerConnectGitlabBtn element not found!');
       }
+    }
+
+    // Check token rotation after sync (non-blocking — don't delay app startup)
+    if (!isLocalMode) {
+      this.checkAndRotateIfNeeded();
     }
 
     // Initialize sidebar FIRST - loads bookmarks, settings, and prepares UI

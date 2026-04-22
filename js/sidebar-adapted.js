@@ -163,6 +163,30 @@ async function dismissSetupCard() {
 }
 
 // ============================================================================
+// SUPABASE SYNC ANNOUNCEMENT CARD
+// ============================================================================
+let hasSeenSupabaseAnnouncement = true;
+
+async function loadSupabaseAnnouncementFlag() {
+  try {
+    const result = await safeStorage.get('bmz_supabase_announced');
+    hasSeenSupabaseAnnouncement = result.bmz_supabase_announced || false;
+  } catch (error) {
+    hasSeenSupabaseAnnouncement = false;
+  }
+}
+
+async function dismissSupabaseAnnouncement() {
+  hasSeenSupabaseAnnouncement = true;
+  try {
+    await safeStorage.set({ bmz_supabase_announced: true });
+    renderBookmarks();
+  } catch (error) {
+    console.error('Error saving supabase announcement flag:', error);
+  }
+}
+
+// ============================================================================
 // GLOBAL ERROR BOUNDARY
 // ============================================================================
 
@@ -625,6 +649,7 @@ async function init() {
   // loadCustomTextColor(); // Moved to after event listener setup (line ~5388)
   loadCheckingSettings();
   await loadSetupCardFlag();
+  await loadSupabaseAnnouncementFlag();
   await loadWhitelist();
   await loadSafetyHistory();
   await loadFolderScanTimestamps();
@@ -1668,6 +1693,36 @@ function renderBookmarks() {
       if (dismissBtn) {
         dismissBtn.addEventListener('click', dismissSetupCard);
       }
+    }, 0);
+  }
+
+  // Show Supabase sync announcement card if user hasn't seen it
+  if (!hasSeenSupabaseAnnouncement) {
+    const announcementCard = document.createElement('div');
+    announcementCard.className = 'announcement-card';
+    announcementCard.innerHTML = `
+      <div class="announcement-card-badge">✦ New Feature</div>
+      <div class="announcement-card-title">Cross-Device Sync</div>
+      <div class="announcement-card-body">
+        GitLab requires all Personal Access Tokens to expire — maximum one year. If you use
+        GitLab snippet sync, that meant manually replacing your token in BMZ each time it
+        expires.<br><br>
+        With Cross-Device Sync, you can sign in with GitLab and BMZ will securely store your
+        token in the cloud — so it's available on all your devices, browsers, or apps you use
+        BMZ on. No more re-entering your token.
+      </div>
+      <div class="announcement-card-actions">
+        <button class="announcement-setup-btn" id="announcementSetupBtn">Set Up Sync</button>
+        <button class="announcement-dismiss-btn" id="announcementDismissBtn">Maybe Later</button>
+      </div>
+    `;
+    bookmarkList.appendChild(announcementCard);
+    setTimeout(() => {
+      document.getElementById('announcementSetupBtn')?.addEventListener('click', async () => {
+        await dismissSupabaseAnnouncement();
+        window.app?.showLoginScreen();
+      });
+      document.getElementById('announcementDismissBtn')?.addEventListener('click', dismissSupabaseAnnouncement);
     }, 0);
   }
 
