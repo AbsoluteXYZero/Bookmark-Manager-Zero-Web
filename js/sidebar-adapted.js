@@ -670,8 +670,8 @@ async function init() {
   // Check if background scan is in progress and sync UI
   await syncBackgroundScanStatus();
 
-  // Automatically check bookmark statuses after initial render
-  autoCheckBookmarkStatuses();
+  // NOTE: autoCheckBookmarkStatuses() removed from here
+  // Scanner and blocklist now load on-demand when user triggers a scan
 }
 
 // Load and apply auto-clear cache setting
@@ -1188,6 +1188,9 @@ async function rescanAllBookmarks() {
     return;
   }
 
+  // Initialize scanner on first scan
+  if (window.scannerService) await window.scannerService.init();
+
   const bookmarksToCheck = [];
 
   // Traverse tree to find ALL bookmarks regardless of folder state or check status
@@ -1316,6 +1319,9 @@ async function autoCheckBookmarkStatuses() {
     console.log('Link and safety checking are both disabled, skipping...');
     return;
   }
+
+  // Initialize scanner on first scan
+  if (window.scannerService) await window.scannerService.init();
 
   const bookmarksToCheck = [];
 

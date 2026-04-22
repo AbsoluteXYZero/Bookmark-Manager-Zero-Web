@@ -3513,14 +3513,7 @@ class App {
       this._sidebarInitialized = true;
     }
 
-    // Initialize services with delays to prevent overwhelming the system
-    await blocklistService.init();
-
-    // Initialize scanner service immediately
-    if (!this._scannerInitialized) {
-      await scannerService.init();
-      this._scannerInitialized = true;
-    }
+    // blocklistService and scannerService are initialized on first use (lazy loading)
   }
 
   async showPreRotationPrompt(daysLeft, token) {

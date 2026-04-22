@@ -90,6 +90,10 @@ class BlocklistService {
   }
 
   async init() {
+    // Skip if already initialized
+    if (this._lazyInitialized) return;
+    this._lazyInitialized = true;
+    
     try {
       // Load last update time from storage
       const metadata = await dbManager.get('metadata', 'blocklistLastUpdate');
