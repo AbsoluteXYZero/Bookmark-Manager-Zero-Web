@@ -619,6 +619,8 @@ function setupBlocklistProgressListener() {
 
 // Initialize
 async function init() {
+  console.log('[sidebar init] Starting, bookmarkManagers:', { window: typeof window.bookmarkManager, local: typeof bookmarkManager });
+  
   // Force update logo title to bypass cache
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
@@ -1110,6 +1112,7 @@ async function restoreCachedBookmarkStatuses() {
 
 // Load bookmarks from Firefox API
 async function loadBookmarks() {
+  console.log('[loadBookmarks] Starting, window.bookmarkManager:', typeof window.bookmarkManager, 'local bookmarkManager:', typeof bookmarkManager);
   try {
     // Save current status data before reloading
     const statusMap = new Map();
@@ -7933,10 +7936,8 @@ if (document.readyState === 'loading') {
   initUI();
 }
 
-// After initUI, load bookmarks and render (if app already initialized)
-if (window.app && window.app.isAuthenticated) {
-  init();
-}
+// After initUI finishes, load bookmarks and render (always run - app.js creates bookmarkManager first)
+init();
 
 // Export full init function for app.js to call after authentication
 window.initSidebar = init;
