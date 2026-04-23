@@ -218,43 +218,39 @@ class BlocklistService {
       if (source.proxies) {
         console.log(`[Blocklist] Racing ${source.proxies.length} proxies for ${source.name}...`);
         
-        // Track which proxy wins
-        let winnerUrl = '';
+        clearTimeout(timeoutId);
         
         const fetchPromises = source.proxies.slice(0, 3).map(async (url) => {
-          const innerController = new AbortController();
-          const timeout = setTimeout(() => innerController.abort(), 15000);
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 15000);
           try {
-            const res = await fetch(url, {
-              method: 'GET',
-              signal: innerController.signal,
-              mode: 'cors',
-              cache: 'no-store'
-            });
+            const res = await fetch(url, { signal: controller.signal, mode: 'cors', cache: 'no-store' });
             clearTimeout(timeout);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            winnerUrl = url; // Track winner
-            return await res.text();
+            return { url, text: await res.text() };
           } catch (e) {
             clearTimeout(timeout);
-            throw e;
+            return { url, text: null, error: e };
           }
         });
         
-        // Wait for first proxy to succeed
         let text;
+        let winnerUrl = '';
+        
         try {
-          text = await Promise.race(fetchPromises);
-          clearTimeout(timeoutId);
-          if (!text || text.length === 0) {
-            console.error(`[Blocklist] ${source.name} returned empty`);
-            return { domains: [], count: 0 };
+          const result = await Promise.any(fetchPromises);
+          if (result.text) {
+            winnerUrl = result.url;
+            text = result.text;
+          } else {
+            throw new Error('No text');
           }
-          console.log(`[Blocklist] ${source.name}: ${text.length} bytes (winner: ${winnerUrl})`);
-        } catch (proxyError) {
-          console.error(`[Blocklist] All 3 proxies failed for ${source.name}!`);
+        } catch (e) {
+          console.error(`[Blocklist] All proxies failed for ${source.name}!`);
           return { domains: [], count: 0 };
         }
+        
+        console.log(`[Blocklist] ${source.name}: ${text.length} bytes (winner: ${winnerUrl})`);
         
         // Check if response is JSON-wrapped
         if (source.proxies) {
