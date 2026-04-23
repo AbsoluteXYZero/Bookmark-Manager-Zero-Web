@@ -217,6 +217,10 @@ class BlocklistService {
       // If source has proxies array, race them
       if (source.proxies) {
         console.log(`[Blocklist] Racing ${source.proxies.length} proxies for ${source.name}...`);
+        
+        // Track which proxy wins
+        let winnerUrl = '';
+        
         const fetchPromises = source.proxies.slice(0, 3).map(async (url) => {
           const innerController = new AbortController();
           const timeout = setTimeout(() => innerController.abort(), 15000);
@@ -229,6 +233,7 @@ class BlocklistService {
             });
             clearTimeout(timeout);
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            winnerUrl = url; // Track winner
             return await res.text();
           } catch (e) {
             clearTimeout(timeout);
@@ -236,13 +241,20 @@ class BlocklistService {
           }
         });
         
-        const text = await Promise.race(fetchPromises);
-        clearTimeout(timeoutId);
-        if (!text || text.length === 0) {
-          console.error(`[Blocklist] ${source.name} returned empty`);
+        // Wait for first proxy to succeed
+        let text;
+        try {
+          text = await Promise.race(fetchPromises);
+          clearTimeout(timeoutId);
+          if (!text || text.length === 0) {
+            console.error(`[Blocklist] ${source.name} returned empty`);
+            return { domains: [], count: 0 };
+          }
+          console.log(`[Blocklist] ${source.name}: ${text.length} bytes (winner: ${winnerUrl})`);
+        } catch (proxyError) {
+          console.error(`[Blocklist] All 3 proxies failed for ${source.name}!`);
           return { domains: [], count: 0 };
         }
-        console.log(`[Blocklist] ${source.name}: ${text.length} bytes (proxy race)`);
         
         // Check if response is JSON-wrapped
         if (source.proxies) {
