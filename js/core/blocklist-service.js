@@ -19,11 +19,16 @@ class BlocklistService {
       {
         name: 'URLhaus (Active)',
         // Race multiple CORS proxies - first one to succeed wins
+        // Fallback to GitHub mirror if all proxies fail
         proxies: [
           'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
           'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
-          'https://corsproxy.io/?' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/')
+          'https://corsproxy.io/?' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+          'https://r.jina.ai/http://urlhaus.abuse.ch/downloads/text/',
+          'https://ddg-api.herokuapp.com/cors?url=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
+          'https://raw.githubusercontent.com/curbengh/malware-filter/main/urlhaus-filter.txt'
         ],
+        fallbackUrl: 'https://curbengh.github.io/malware-filter/urlhaus-filter.txt',
         format: 'urlhaus_text'
       },
       {
@@ -220,7 +225,7 @@ class BlocklistService {
         
         clearTimeout(timeoutId);
         
-        const fetchPromises = source.proxies.slice(0, 3).map(async (url) => {
+        const fetchPromises = source.proxies.slice(0, 6).map(async (url) => {
           const controller = new AbortController();
           const timeout = setTimeout(() => controller.abort(), 15000);
           try {
@@ -246,8 +251,24 @@ class BlocklistService {
             throw new Error('No text');
           }
         } catch (e) {
-          console.error(`[Blocklist] All proxies failed for ${source.name}!`);
-          return { domains: [], count: 0 };
+          // All proxies failed - try fallback URL
+          if (source.fallbackUrl) {
+            console.log(`[Blocklist] All proxies failed, trying fallback...`);
+            try {
+              const controller = new AbortController();
+              const timeout = setTimeout(() => controller.abort(), 30000);
+              const res = await fetch(source.fallbackUrl, { signal: controller.signal, cache: 'no-store' });
+              clearTimeout(timeout);
+              if (res.ok) {
+                winnerUrl = source.fallbackUrl;
+                text = await res.text();
+              }
+            } catch {}
+          }
+          if (!text) {
+            console.error(`[Blocklist] All proxies failed for ${source.name}!`);
+            return { domains: [], count: 0 };
+          }
         }
         
         console.log(`[Blocklist] ${source.name}: ${text.length} bytes (winner: ${winnerUrl})`);
