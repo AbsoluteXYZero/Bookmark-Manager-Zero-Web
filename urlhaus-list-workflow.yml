@@ -1,0 +1,27 @@
+name: Daily URLhaus Import
+
+on:
+  schedule:
+    - cron: '0 0 * * *'  # Daily at midnight UTC
+  workflow_dispatch:
+
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          
+      - name: Fetch URLhaus
+        run: |
+          curl -sL https://urlhaus.abuse.ch/downloads/text/ -o urlhaus-active.txt
+          echo "urlhaus-active.txt updated"
+          
+      - name: Commit and push
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add urlhaus-active.txt
+          git commit -m "Update URLhaus Active list" || echo "No changes to commit"
+          git push

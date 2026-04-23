@@ -18,17 +18,7 @@ class BlocklistService {
     this.BLOCKLIST_SOURCES = [
       {
         name: 'URLhaus (Active)',
-        // Race multiple CORS proxies - first one to succeed wins
-        // Fallback to GitHub mirror if all proxies fail
-        proxies: [
-          'https://api.allorigins.win/raw?url=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
-          'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
-          'https://corsproxy.io/?' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
-          'https://r.jina.ai/http://urlhaus.abuse.ch/downloads/text/',
-          'https://ddg-api.herokuapp.com/cors?url=' + encodeURIComponent('https://urlhaus.abuse.ch/downloads/text/'),
-          'https://raw.githubusercontent.com/curbengh/malware-filter/main/urlhaus-filter.txt'
-        ],
-        fallbackUrl: 'https://curbengh.github.io/malware-filter/urlhaus-filter.txt',
+        url: 'https://raw.githubusercontent.com/AbsoluteXYZero/urlhaus-list/main/urlhaus-active.txt',
         format: 'urlhaus_text'
       },
       {
@@ -282,7 +272,10 @@ class BlocklistService {
           } catch {}
         }
         
-        // Apply the same parsing logic as regular fetch
+        // Determine format - use fallbackFormat if using fallback URL
+        const parseFormat = (winnerUrl === source.fallbackUrl && source.fallbackFormat) 
+          ? source.fallbackFormat 
+          : source.format;
         const lines = text.split('\n');
         const domains = [];
         for (const line of lines) {
