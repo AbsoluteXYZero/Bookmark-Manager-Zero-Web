@@ -6,8 +6,8 @@
 - **Lazy-loaded Services** - Blocklist and Scanner services now initialize on first use, not at startup
 - **Faster Startup** - Removed blocking init calls from showMainApp()
 
-**Bug Fixes:**
-- **URLhaus Fix** - Added CORS proxy race for URLhaus Active list (tries allorigins, codetabs, corsproxy - fastest wins)
+**URLhaus Fix:**
+- **Direct GitHub Import** - URLhaus Active list now fetched from dedicated GitHub repo (AbsoluteXYZero/urlhaus-list) instead of CORS-proxied URLhaus API
 
 ---
 
