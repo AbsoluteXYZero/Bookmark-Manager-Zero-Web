@@ -1833,11 +1833,13 @@ class App {
       dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
       dialog.querySelector('#syncFromSnippet').addEventListener('click', async () => {
         modal.remove();
-        await syncManager.syncFromRemote();
+        /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force manual cloud->browser pull */
+        await syncManager.syncFromRemote(true);
       });
       dialog.querySelector('#syncToSnippet').addEventListener('click', async () => {
         modal.remove();
-        await syncManager.syncToRemote();
+        /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force manual browser->cloud push */
+        await syncManager.syncToRemote(true);
       });
       dialog.querySelector('#createNewSnippet').addEventListener('click', async () => {
         modal.remove();

@@ -189,8 +189,10 @@ class SyncManager {
 
   /**
    * Sync local changes to remote (push)
+   * @param {boolean} force - Explicit user-triggered push: bypass rate-limit wait and version conflict (browser wins)
    */
-  async syncToRemote() {
+  /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force param for manual push */
+  async syncToRemote(force = false) {
     console.log('[SyncToRemote] Called, checking conditions...');
 
     if (this.isSyncing) {
@@ -209,9 +211,10 @@ class SyncManager {
       return;
     }
 
-    // Rate limiting: prevent syncing more frequently than minSyncInterval
+    // Rate limiting: prevent syncing more frequently than minSyncInterval (skipped on explicit force)
+    /* [ZeroLabs] 2026-06-09 11:03 AM - edited: skip rate-limit wait on force */
     const timeSinceLastSync = Date.now() - (this.lastSyncTime || 0);
-    if (this.lastSyncTime && timeSinceLastSync < this.minSyncInterval) {
+    if (!force && this.lastSyncTime && timeSinceLastSync < this.minSyncInterval) {
       const waitTime = Math.ceil((this.minSyncInterval - timeSinceLastSync) / 1000);
       console.log(`[SyncToRemote] Rate limit: Last sync was ${Math.ceil(timeSinceLastSync / 1000)}s ago. Please wait ${waitTime}s before syncing again.`);
       this.emitEvent('syncError', `Please wait ${waitTime} seconds before syncing again to avoid rate limits`);
@@ -250,8 +253,9 @@ class SyncManager {
 
       console.log(`[SyncToRemote] Version check - Local: ${localVersion}, Remote: ${remoteData.version}`);
 
-      // Check for conflicts
-      if (remoteData.version > localVersion) {
+      // Check for conflicts (explicit force push overrides: browser wins)
+      /* [ZeroLabs] 2026-06-09 11:03 AM - edited: allow force to override conflict */
+      if (remoteData.version > localVersion && !force) {
         console.warn('[SyncToRemote] Remote has newer changes! Conflict detected.');
         throw new Error('Sync conflict: Remote has newer changes. Please reload and try again.');
       }
@@ -270,6 +274,12 @@ class SyncManager {
       await dbManager.put('metadata', { key: 'lastSync', value: this.lastSyncTime });
 
       console.log(`[SyncToRemote] Sync complete! Version ${newVersion} with ${bookmarkCount} bookmarks pushed to remote`);
+
+      // Explicit force push has no outer wrapper to report success - emit here
+      /* [ZeroLabs] 2026-06-09 11:03 AM - added: success feedback on force push */
+      if (force) {
+        this.emitEvent('syncSuccess', `Pushed ${bookmarkCount} bookmarks to cloud`);
+      }
     } catch (error) {
       console.error('Sync to remote failed:', error);
 
@@ -434,8 +444,10 @@ class SyncManager {
 
   /**
    * Sync remote changes to local (pull)
+   * @param {boolean} force - Force pull even if versions match (explicit user-triggered pull, cloud wins)
    */
-  async syncFromRemote() {
+  /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force param for manual pull */
+  async syncFromRemote(force = false) {
     if (this.isSyncing) {
       console.log('[SyncFromRemote] Already syncing, skipping...');
       return;
@@ -479,9 +491,10 @@ class SyncManager {
       const localVersion = await this.getLocalVersion();
       console.log('[SyncFromRemote] Local version:', localVersion, 'Local bookmarks:', localBookmarkCount);
 
-      // Sync if remote is newer OR if local is empty (version 0)
-      if (remoteData.version > localVersion || localVersion === 0) {
-        console.log(`[SyncFromRemote] Remote version (${remoteData.version}) >= Local version (${localVersion}), pulling changes...`);
+      // Sync if remote is newer, local is empty (version 0), OR a manual force pull was requested
+      /* [ZeroLabs] 2026-06-09 11:03 AM - edited: honor force on equal-version pull */
+      if (remoteData.version > localVersion || localVersion === 0 || force) {
+        console.log(`[SyncFromRemote] Pulling changes (remote: ${remoteData.version}, local: ${localVersion}, force: ${force})...`);
 
         // Get current local data for diff
         const localData = await this.getLocalBookmarks();
@@ -538,6 +551,10 @@ class SyncManager {
             requiresConfirmation: false,
             message: `Remote has ${diff.added.length} addition(s), ${diff.moved.length} move(s), ${diff.modified.length} modification(s).`
           });
+        } else if (force) {
+          // Forced pull with identical data - still give the user explicit feedback
+          /* [ZeroLabs] 2026-06-09 11:03 AM - added: feedback on no-change force pull */
+          this.emitEvent('syncSuccess', 'Already in sync with cloud');
         }
 
         console.log('[SyncFromRemote] Sync complete, version:', remoteData.version);
