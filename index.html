@@ -412,6 +412,12 @@
       scrollbar-color: var(--md-sys-color-outline) var(--md-sys-color-surface-container);
     }
 
+    /* [ZeroLabs] 2026-06-20 3:39 PM - added: stop Android WebView font boosting from overriding font-size */
+    html {
+      -webkit-text-size-adjust: 100%;
+      text-size-adjust: 100%;
+    }
+
     body {
       font-family: 'Google Sans', 'Segoe UI', Roboto, -apple-system, sans-serif;
       background: var(--md-sys-color-surface);
