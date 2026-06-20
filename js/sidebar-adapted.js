@@ -142,11 +142,15 @@ function fitHeaderText() {
     const el = document.querySelector(sel);
     if (!el) return;
     el.style.fontSize = '';                 // reset to CSS base (max) before measuring
-    const avail = el.clientWidth;           // flex-allocated width (space left beside the buttons)
-    const content = el.scrollWidth;         // intrinsic single-line text width
-    if (avail > 0 && content > avail) {
+    const avail = el.clientWidth;           // flex-allocated box width (space left beside the buttons)
+    if (avail <= 0) return;
+    // Measure the TRUE single-line text width (scrollWidth is unreliable for overflow:visible)
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const natural = range.getBoundingClientRect().width;
+    if (natural > avail) {
       const base = parseFloat(getComputedStyle(el).fontSize) || 11;
-      el.style.fontSize = Math.max(5, base * (avail / content)) + 'px';
+      el.style.fontSize = Math.max(5, base * (avail / natural)) + 'px';
     }
   });
 }
