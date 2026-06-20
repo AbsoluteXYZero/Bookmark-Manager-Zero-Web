@@ -150,7 +150,19 @@ function fitHeaderText() {
     }
   });
 }
-window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
+let _headerFitInit = false;
+function initHeaderFit() {
+  requestAnimationFrame(fitHeaderText);
+  if (_headerFitInit) return;
+  const target = document.querySelector('.header-top');
+  if (!target) return;            // retry on the next call once the DOM exists
+  _headerFitInit = true;
+  // Fires when the header first gets a real width and on every later size change
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => requestAnimationFrame(fitHeaderText)).observe(target);
+  }
+  window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
+}
 
 // ============================================================================
 // FIRST-TIME SETUP CARD
@@ -642,7 +654,7 @@ async function init() {
   /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
-  requestAnimationFrame(fitHeaderText);
+  initHeaderFit();
 
   // Force update filter button icon
   const filterToggle = document.getElementById('filterToggle');
@@ -8000,7 +8012,7 @@ async function initUI() {
   /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
-  requestAnimationFrame(fitHeaderText);
+  initHeaderFit();
 
   // Setup all UI elements and event listeners
   loadTheme();
