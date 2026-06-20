@@ -1,6 +1,30 @@
 ## Changelog
 
-### V1.5 (Current) - Performance & URLhaus Fix
+<!-- [ZeroLabs] 2026-06-20 11:01 AM - added: v1.6.0 changelog entry -->
+### V1.6.0 (Current) - Sync Fixes & Cleanup
+
+**New Features:**
+- **Scan Intensity Slider** - New slider in Settings controls how many bookmarks are link/safety-checked at once (1-20, default 5). Each check is a live request that triggers a DNS lookup, so scanning a large library all at once could briefly overwhelm a local DNS resolver (AdGuard Home, Pi-hole) and knock out your internet. Lowering this keeps scans gentle on your network. Persists across sessions and applies live to an in-progress scan.
+- **Request Jitter Slider** - New slider in Settings adds a small random delay (0-500ms) before each scan request, spreading DNS lookups across time instead of firing them as one burst. Raise it, alongside lowering Scan Intensity, if scans still disrupt your connection.
+
+**Performance:**
+- **DNS-Friendly Scanning** - Lowered the default cap on simultaneous scan requests so scanning a large library no longer risks overwhelming a local DNS resolver (AdGuard Home, Pi-hole) and dropping your connection.
+
+**Bug Fixes:**
+- **Stop Scan Reliability** - Hardened scan cancellation: the stop button reliably halts the scan, the worker-less fallback scan path now honors Stop, and overlapping scans triggered by expanding several folders no longer stomp each other's progress or flicker the stop button off.
+- **Scan Status Returns to "Ready"** - After stopping a scan, the status bar settles back to "Ready" instead of sticking on "Scan stopped" (including the fallback scan path).
+- **Settings Slider Handle** - Added proper slider-handle styling for Chromium browsers and the Android WebView so the handle renders centered on the track instead of missing or sitting too low.
+- **Manual sync now works when versions match** - "Sync from Cloud to Browser" and "Sync from Browser to Cloud" previously did nothing when the local and remote version numbers were equal but the bookmarks actually differed — the sync silently reported "up to date." Both buttons now force the operation: cloud-to-browser pulls and reconciles, browser-to-cloud pushes, regardless of version.
+
+**Improvements:**
+- **Divergence detection on auto-sync** - When versions match but the cloud and local bookmarks differ, auto-sync now surfaces a one-time notice ("Cloud differs from this device — open GitLab sync to reconcile") instead of falsely reporting everything is in sync.
+
+**Changes:**
+- **Removed per-sync "Merge" option** - The sync conflict dialog no longer offers a "Merge" button, and the unused bidirectional-merge code was removed. A union merge can't honor deletions — deleted bookmarks get re-added from the other side — so sync decisions are now explicit: Keep Local or Use Snippet. The one-time merge when first connecting a snippet is unchanged.
+
+---
+
+### V1.5 - Performance & URLhaus Fix
 
 **Performance:**
 - **Lazy-loaded Services** - Blocklist and Scanner services now initialize on first use, not at startup
