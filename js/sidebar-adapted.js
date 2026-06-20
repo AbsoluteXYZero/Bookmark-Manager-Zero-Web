@@ -137,41 +137,23 @@ const browser = {
 const APP_VERSION = browser.runtime.getManifest().version;
 
 /* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
+/* [ZeroLabs] 2026-06-20 - scale rendered pixels (transform) to fit text beside the buttons;
+   transform bypasses the Android WebView minimum-font-size clamp that ignores small font-sizes. */
 function fitHeaderText() {
-  /* [ZeroLabs] 2026-06-20 - scale rendered pixels (transform) to bypass WebView min-font-size clamp */
   const MARGIN = 8;                                   // px of clearance to keep from the buttons
-  const hs = document.querySelector('.header-settings');
-  const hsLeft = hs ? hs.getBoundingClientRect().left : Infinity;
-  let dbg = 'win=' + window.innerWidth + ' hsL=' + (hs ? Math.round(hsLeft) : 'NA');
-
   ['.logo-title', '.logo-subtitle'].forEach(sel => {
     const el = document.querySelector(sel);
-    if (!el) { dbg += ` | ${sel}=MISSING`; return; }
+    if (!el) return;
     el.style.transformOrigin = 'left center';
     el.style.transform = '';                          // reset before measuring natural width
     const box = el.clientWidth - MARGIN;              // target width (leave clearance from buttons)
-    let r = document.createRange();
-    r.selectNodeContents(el);
-    const w = r.getBoundingClientRect().width;        // rendered text width (font-clamp baked in)
-    let scale = 1;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    const w = range.getBoundingClientRect().width;    // rendered text width (font-clamp baked in)
     if (w > box && box > 0) {
-      scale = Math.max(0.3, box / w);                 // shrink pixels, not font-size
-      el.style.transform = 'scale(' + scale + ')';
+      el.style.transform = 'scale(' + Math.max(0.3, box / w) + ')';
     }
-    r = document.createRange();
-    r.selectNodeContents(el);
-    const textRight = r.getBoundingClientRect().right;
-    dbg += ` | ${sel.replace('.logo-', '')}: w=${Math.round(w)} sc=${scale.toFixed(2)} txtR=${Math.round(textRight)} ${textRight > hsLeft ? 'OVERLAP' : 'ok'}`;
   });
-
-  let bar = document.getElementById('__fitdbg');
-  if (!bar) {
-    bar = document.createElement('div');
-    bar.id = '__fitdbg';
-    bar.style.cssText = 'position:fixed;left:0;bottom:0;z-index:2147483647;background:#000;color:#0f0;font:10px/1.3 monospace;padding:4px 6px;max-width:100vw;white-space:normal;word-break:break-all;pointer-events:none;';
-    if (document.body) document.body.appendChild(bar);
-  }
-  if (bar) bar.textContent = dbg;
 }
 window.fitHeaderText = fitHeaderText;
 

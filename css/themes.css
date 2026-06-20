@@ -471,17 +471,15 @@
       filter: drop-shadow(0 1px 4px rgba(34, 197, 94, 0.3));
     }
 
-    /* [ZeroLabs] 2026-06-20 4:39 PM - edited: container-query scaling so text fits the width beside the buttons */
+    /* [ZeroLabs] 2026-06-20 7:11 PM - edited: removed CSS font-scaling; JS transform:scale handles fitting */
     .logo-text {
       flex: 1;
       min-width: 0;
       white-space: nowrap;
-      container-type: inline-size;
     }
 
     .logo-title {
-      font-size: clamp(5px, 3vw, 11px);   /* fallback if container queries unsupported */
-      font-size: clamp(5px, 6cqi, 11px);
+      font-size: 11px;
       white-space: nowrap;
       font-weight: 500;
       color: var(--md-sys-color-on-surface);
@@ -490,8 +488,7 @@
     }
 
     .logo-subtitle {
-      font-size: clamp(4px, 2.3vw, 8px);   /* fallback if container queries unsupported */
-      font-size: clamp(4px, 4cqi, 8px);
+      font-size: 8px;
       white-space: nowrap;
       color: var(--md-sys-color-on-surface-variant);
       margin-top: 1px;
