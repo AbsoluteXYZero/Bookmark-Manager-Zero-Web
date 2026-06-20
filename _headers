@@ -3,3 +3,6 @@
 
 /*.html
   Cache-Control: no-store
+
+/*.css
+  Cache-Control: no-store
