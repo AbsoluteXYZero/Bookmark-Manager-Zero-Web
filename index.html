@@ -3986,9 +3986,14 @@
     (function() {
       // Detect if browser is Edge (but not Android WebView, which may use Edge as WebView provider)
       const isEdge = /Edg/i.test(navigator.userAgent);
-      const isAndroidWebView = /wv/.test(navigator.userAgent);
+      /* [ZeroLabs] 2026-06-20 2:15 PM - edited: also match the BMZ app's spoofed UA */
+      // System WebView has "wv"; the BMZ APK overrides the UA to a spoofed Chrome
+      // string with no "wv" and no device model, so also match "Android <ver>)"
+      // (close-paren right after the version; real Chrome has "; <model>)").
+      const ua = navigator.userAgent;
+      const isAndroidWebView = /wv/.test(ua) || /Android [\d.]+\)/.test(ua);
 
-      /* [ZeroLabs] 2026-06-20 1:09 PM - added: tag Android WebView for CSS targeting */
+      // Tag Android WebView for CSS targeting
       if (isAndroidWebView) document.documentElement.classList.add('android-webview');
 
       if (isEdge && !isAndroidWebView) {
