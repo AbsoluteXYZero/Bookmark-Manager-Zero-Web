@@ -10,6 +10,8 @@ class ConcurrencyLimiter {
     this.maxConcurrent = maxConcurrent;
     this.running = 0;
     this.queue = [];
+    /* [ZeroLabs] 2026-06-20 10:50 AM - added: jitter to spread DNS lookups over time */
+    this.jitterMs = 0; // Random 0..jitterMs delay before each request
   }
 
   async run(fn) {
@@ -18,6 +20,10 @@ class ConcurrencyLimiter {
     }
     this.running++;
     try {
+      // Stagger request starts so a batch of DNS lookups isn't fired as one wall
+      if (this.jitterMs > 0) {
+        await new Promise(resolve => setTimeout(resolve, Math.random() * this.jitterMs));
+      }
       return await fn();
     } finally {
       this.running--;
@@ -25,10 +31,34 @@ class ConcurrencyLimiter {
       if (next) next();
     }
   }
+
+  /* [ZeroLabs] 2026-06-20 10:50 AM - added: live-adjustable cap + jitter for sliders */
+  setMax(n) {
+    const next = Math.max(1, Math.min(20, Number(n) || this.maxConcurrent));
+    const increased = next > this.maxConcurrent;
+    this.maxConcurrent = next;
+    if (increased) {
+      let slots = this.maxConcurrent - this.running;
+      while (slots-- > 0) {
+        const resolve = this.queue.shift();
+        if (!resolve) break;
+        resolve();
+      }
+    }
+  }
+
+  setJitter(ms) {
+    this.jitterMs = Math.max(0, Math.min(1000, Number(ms) || 0));
+  }
 }
 
 // Global concurrency limiter for all network requests
-const networkLimiter = new ConcurrencyLimiter(10);
+/* [ZeroLabs] 2026-06-20 10:35 AM - edited: lower cap to spare home DNS resolver */
+// Each link check is a DNS lookup + connection to the bookmark's host. A cap of
+// 5 (link+safety = ~10 requests in flight) keeps a burst of distinct-host
+// lookups from briefly stalling a local resolver (e.g. AdGuard Home).
+const MAX_CONCURRENT_NETWORK = 5;
+const networkLimiter = new ConcurrencyLimiter(MAX_CONCURRENT_NETWORK);
 
 // Parking domain list
 const PARKING_DOMAINS = [
@@ -893,6 +923,15 @@ self.addEventListener('message', async (e) => {
 
     case 'resetRateLimit':
       virusTotalRateLimited = false;
+      break;
+
+    /* [ZeroLabs] 2026-06-20 10:50 AM - added: live scan concurrency/jitter from sliders */
+    case 'setConcurrency':
+      networkLimiter.setMax(data.value);
+      break;
+
+    case 'setJitter':
+      networkLimiter.setJitter(data.value);
       break;
 
     case 'scanBookmark':

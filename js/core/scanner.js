@@ -180,6 +180,29 @@ class ScannerService {
     }
   }
 
+  /* [ZeroLabs] 2026-06-20 10:50 AM - added: forward scan concurrency/jitter to worker */
+  // Read saved network-load settings and push them to the worker's limiter.
+  applyNetworkSettings() {
+    try {
+      const concurrency = parseInt(safeLocalStorage.getItem('scanConcurrency'), 10);
+      const jitter = parseInt(safeLocalStorage.getItem('scanJitter'), 10);
+      if (!isNaN(concurrency)) this.setConcurrency(concurrency);
+      if (!isNaN(jitter)) this.setJitter(jitter);
+    } catch (e) {}
+  }
+
+  setConcurrency(value) {
+    if (this.worker && this.workerInitialized) {
+      this.worker.postMessage({ action: 'setConcurrency', data: { value } });
+    }
+  }
+
+  setJitter(value) {
+    if (this.worker && this.workerInitialized) {
+      this.worker.postMessage({ action: 'setJitter', data: { value } });
+    }
+  }
+
   /**
    * Get decrypted API key from storage
    * Uses shared encryption utilities
@@ -206,6 +229,8 @@ class ScannerService {
     switch (action) {
       case 'initComplete':
         this.workerInitialized = true;
+        /* [ZeroLabs] 2026-06-20 10:50 AM - added: apply saved concurrency/jitter to worker */
+        this.applyNetworkSettings();
         break;
 
       case 'linkResult':

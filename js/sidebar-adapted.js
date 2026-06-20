@@ -60,7 +60,8 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    getManifest: () => ({ version: '1.5.0' }),
+    /* [ZeroLabs] 2026-06-20 11:01 AM - edited: bump website version to 1.6.0 */
+    getManifest: () => ({ version: '1.6.0' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -648,6 +649,7 @@ async function init() {
   loadContainerOpacity();
   // loadCustomTextColor(); // Moved to after event listener setup (line ~5388)
   loadCheckingSettings();
+  loadScanConcurrency();
   await loadSetupCardFlag();
   await loadSupabaseAnnouncementFlag();
   await loadWhitelist();
@@ -977,6 +979,32 @@ function loadCheckingSettings() {
   const safetyCheckbox = document.getElementById('enableSafetyChecking');
   if (linkCheckbox) linkCheckbox.checked = linkCheckingEnabled;
   if (safetyCheckbox) safetyCheckbox.checked = safetyCheckingEnabled;
+}
+
+/* [ZeroLabs] 2026-06-20 10:50 AM - added: load + sync scan concurrency + jitter sliders */
+function loadScanConcurrency() {
+  let concurrency = 5; // Default cap (matches scanner-worker.js limiter)
+  let jitter = 0;      // Default: no jitter
+  const savedC = parseInt(safeLocalStorage.getItem('scanConcurrency'), 10);
+  const savedJ = parseInt(safeLocalStorage.getItem('scanJitter'), 10);
+  if (!isNaN(savedC)) concurrency = savedC;
+  if (!isNaN(savedJ)) jitter = savedJ;
+
+  const cSlider = document.getElementById('scanConcurrencySlider');
+  const cLabel = document.getElementById('scanConcurrencyValue');
+  if (cSlider) cSlider.value = concurrency;
+  if (cLabel) cLabel.textContent = concurrency;
+
+  const jSlider = document.getElementById('scanJitterSlider');
+  const jLabel = document.getElementById('scanJitterValue');
+  if (jSlider) jSlider.value = jitter;
+  if (jLabel) jLabel.textContent = jitter + 'ms';
+
+  // Push to the worker limiter (also re-applied on worker initComplete)
+  if (window.scannerService) {
+    window.scannerService.setConcurrency(concurrency);
+    window.scannerService.setJitter(jitter);
+  }
 }
 
 // Load display options from localStorage
@@ -1374,24 +1402,39 @@ async function autoCheckBookmarkStatuses() {
       }
       console.log('[Auto-Check] Scanner worker initialized, starting scan');
     }
+    /* [ZeroLabs] 2026-06-20 12:21 AM - added: don't stomp an in-progress scan queue */
+    // A scan may already be running (e.g. from a previous folder expansion).
+    // Appending to its queue preserves its progress instead of resetting the
+    // count to 0 and stealing the Stop button's state out from under it.
+    if (window.scannerService.isScanning) {
+      window.scannerService.scanQueue.push(...bookmarksToCheck);
+      window.scannerService.totalCount += bookmarksToCheck.length;
+      if (scanProgress) scanProgress.textContent = `Scanning: ${window.scannerService.scannedCount}/${window.scannerService.totalCount}`;
+      // Kick the queue in case it had already drained between batches
+      window.scannerService.processQueue();
+      return;
+    }
+
     // Set up scan state similar to manual scans
     window.scannerService.scanQueue = [...bookmarksToCheck];
     window.scannerService.totalCount = bookmarksToCheck.length;
     window.scannerService.scannedCount = 0;
     window.scannerService.isScanning = true;
     window.scannerService.bypassCache = false; // Don't bypass cache for auto-scan
-    
+
     // Update status bar to show scanning state
     if (scanStatusBar) scanStatusBar.classList.add('scanning');
     if (scanProgress) scanProgress.textContent = `Scanning: 0/${bookmarksToCheck.length}`;
-    
+
     // Show stop button, hide rescan button (same as manual scans)
     const stopBtn = document.getElementById('stopScanBtn');
+    const rescanBtn = document.getElementById('rescanAllBtn');
     if (stopBtn) stopBtn.style.display = 'flex';
-    
+    if (rescanBtn) rescanBtn.style.display = 'none';
+
     // Start queue processing (this will handle progress updates automatically)
     window.scannerService.processQueue();
-    
+
     return; // Exit early, queue processing will handle the rest
   }
 
@@ -1410,13 +1453,18 @@ async function autoCheckBookmarkStatuses() {
   
   // Show stop button, hide rescan button (same as manual scans)
   const stopBtn = document.getElementById('stopScanBtn');
+  const rescanBtn = document.getElementById('rescanAllBtn');
   if (stopBtn) stopBtn.style.display = 'flex';
-  
+  if (rescanBtn) rescanBtn.style.display = 'none';
+
+  /* [ZeroLabs] 2026-06-20 12:21 AM - added: reset cancel flag so Stop works on fallback */
+  scanCancelled = false;
+
   for (let i = 0; i < bookmarksToCheck.length; i += BATCH_SIZE) {
     // Check if scan was cancelled
     if (scanCancelled) {
       console.log('Scan cancelled, stopping...');
-      return;
+      break;
     }
   
     const batch = bookmarksToCheck.slice(i, i + BATCH_SIZE);
@@ -1509,15 +1557,22 @@ async function autoCheckBookmarkStatuses() {
   // Render once at the end of all batches
   renderBookmarks();
 
+  /* [ZeroLabs] 2026-06-20 12:21 AM - edited: respect cancel + restore rescan button */
   // Update status bar to show complete
-  if (scanProgress) scanProgress.textContent = 'Scan complete';
+  if (scanProgress) scanProgress.textContent = scanCancelled ? 'Scan stopped' : 'Scan complete';
   if (scanStatusBar) scanStatusBar.classList.remove('scanning');
-  
+
   // Hide stop button, show rescan button (same as manual scans)
   if (stopBtn) stopBtn.style.display = 'none';
+  if (rescanBtn) rescanBtn.style.display = 'flex';
 
   // Clear checkedBookmarks to free memory after scan completes
   checkedBookmarks.clear();
+
+  /* [ZeroLabs] 2026-06-20 10:35 AM - added: settle fallback status back to Ready */
+  setTimeout(() => {
+    if (scanProgress) scanProgress.textContent = 'Ready';
+  }, 2000);
 
   console.log(`Finished checking link status for ${bookmarksToCheck.length} bookmarks (safety checks disabled - use Test VT button)`);
 }
@@ -6756,6 +6811,29 @@ function setupEventListeners() {
     });
   }
 
+  /* [ZeroLabs] 2026-06-20 10:50 AM - added: scan concurrency + jitter sliders (DNS load) */
+  const scanConcurrencySlider = document.getElementById('scanConcurrencySlider');
+  const scanConcurrencyValueLabel = document.getElementById('scanConcurrencyValue');
+  if (scanConcurrencySlider) {
+    scanConcurrencySlider.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value, 10);
+      if (scanConcurrencyValueLabel) scanConcurrencyValueLabel.textContent = value;
+      safeLocalStorage.setItem('scanConcurrency', value);
+      if (window.scannerService) window.scannerService.setConcurrency(value);
+    });
+  }
+
+  const scanJitterSlider = document.getElementById('scanJitterSlider');
+  const scanJitterValueLabel = document.getElementById('scanJitterValue');
+  if (scanJitterSlider) {
+    scanJitterSlider.addEventListener('input', (e) => {
+      const value = parseInt(e.target.value, 10);
+      if (scanJitterValueLabel) scanJitterValueLabel.textContent = value + 'ms';
+      safeLocalStorage.setItem('scanJitter', value);
+      if (window.scannerService) window.scannerService.setJitter(value);
+    });
+  }
+
   // Accent color picker
   if (accentColorPicker && resetAccentColorBtn) {
     accentColorPicker.addEventListener('input', (e) => {
@@ -7135,7 +7213,10 @@ function setupEventListeners() {
     const stopScanBtn = document.getElementById('stopScanBtn');
     if (stopScanBtn) {
       stopScanBtn.addEventListener('click', async () => {
-        // Stop scan using scanner service
+        /* [ZeroLabs] 2026-06-20 12:21 AM - edited: also cancel front-end fallback loop */
+        // Set the flag too: the worker-less fallback batch loop only checks
+        // scanCancelled, so stopScan() alone would not halt it.
+        scanCancelled = true;
         if (scannerService) {
           scannerService.stopScan();
           console.log('User requested scan cancellation');

@@ -2331,193 +2331,7 @@ class App {
       });
     }
 
-    // Show sync diff dialog with merge/push/pull options
-    this.showSyncDiffDialog = async (diff, remoteData) => {
-      const modal = document.createElement('div');
-      modal.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; display: flex; align-items: center; justify-content: center; padding: 16px;';
-
-      const dialog = document.createElement('div');
-      dialog.style.cssText = 'background: var(--md-sys-color-surface, #1e1e1e); padding: 24px; border-radius: 12px; max-width: 700px; width: 100%; max-height: 80%; overflow-y: auto; color: var(--md-sys-color-on-surface, #e0e0e0);';
-
-      const hasChanges = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length > 0;
-
-      let content = '<h2 style="margin: 0 0 16px 0; font-size: 20px;">Snippet Sync Changes</h2>';
-
-      if (!hasChanges) {
-        content += '<p style="color: var(--md-sys-color-on-surface-variant, #aaa);">No changes detected. Your local bookmarks match the Snippet.</p>';
-      } else {
-        // Summary
-        content += '<div style="margin-bottom: 20px; padding: 16px; background: var(--md-sys-color-surface-variant, #2a2a2a); border-radius: 8px;">';
-        content += '<h3 style="margin: 0 0 12px 0; font-size: 16px;">Summary</h3>';
-        if (diff.added.length > 0) content += `<div style="margin-bottom: 4px; color: #4caf50;">✓ ${diff.added.length} item(s) to add</div>`;
-        if (diff.removed.length > 0) content += `<div style="margin-bottom: 4px; color: #f44336;">✗ ${diff.removed.length} item(s) to remove</div>`;
-        if (diff.moved.length > 0) content += `<div style="margin-bottom: 4px; color: #ff9800;">➜ ${diff.moved.length} item(s) to move</div>`;
-        if (diff.modified.length > 0) content += `<div style="color: #2196f3;">✎ ${diff.modified.length} item(s) to modify</div>`;
-        content += '</div>';
-
-        // Detailed changes (collapsed for mobile)
-        if (diff.added.length > 0) {
-          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #4caf50; margin-bottom: 8px;">Added Items</summary>';
-          diff.added.forEach(item => {
-            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(76, 175, 80, 0.1); border-left: 3px solid #4caf50; border-radius: 4px;">
-              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
-              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
-              ${item.url ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">${item.url}</div>` : ''}
-            </div>`;
-          });
-          content += '</details>';
-        }
-
-        if (diff.removed.length > 0) {
-          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #f44336; margin-bottom: 8px;">Removed Items</summary>';
-          diff.removed.forEach(item => {
-            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(244, 67, 54, 0.1); border-left: 3px solid #f44336; border-radius: 4px;">
-              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
-              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
-              ${item.url ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">${item.url}</div>` : ''}
-            </div>`;
-          });
-          content += '</details>';
-        }
-
-        if (diff.moved.length > 0) {
-          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #ff9800; margin-bottom: 8px;">Moved Items</summary>';
-          diff.moved.forEach(item => {
-            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(255, 152, 0, 0.1); border-left: 3px solid #ff9800; border-radius: 4px;">
-              <div style="font-weight: 500;">${item.title || 'Untitled'}</div>
-              <div style="font-size: 12px; color: #aaa;">From: ${item.from}</div>
-              <div style="font-size: 12px; color: #aaa;">To: ${item.to}</div>
-            </div>`;
-          });
-          content += '</details>';
-        }
-
-        if (diff.modified.length > 0) {
-          content += '<details style="margin-bottom: 12px;"><summary style="cursor: pointer; font-weight: 600; color: #2196f3; margin-bottom: 8px;">Modified Items</summary>';
-          diff.modified.forEach(item => {
-            content += `<div style="padding: 8px; margin-bottom: 4px; background: rgba(33, 150, 243, 0.1); border-left: 3px solid #2196f3; border-radius: 4px;">
-              <div style="font-weight: 500;">${item.oldTitle || 'Untitled'} → ${item.newTitle || 'Untitled'}</div>
-              <div style="font-size: 12px; color: #aaa;">${item.path}</div>
-              ${item.oldUrl !== item.newUrl ? `<div style="font-size: 11px; color: #888; margin-top: 4px; word-break: break-all;">URL: ${item.oldUrl} → ${item.newUrl}</div>` : ''}
-            </div>`;
-          });
-          content += '</details>';
-        }
-      }
-
-      content += `
-        <div style="display: flex; flex-direction: column; gap: 12px; margin-top: 20px;">
-          ${hasChanges ? `
-            <button id="mergeButton" style="width: 100%; padding: 12px; border-radius: 8px; border: none; background: #4caf50; color: #fff; cursor: pointer; font-size: 14px; font-weight: 600;">
-              Merge (Recommended)
-            </button>
-            <div style="display: flex; gap: 12px;">
-              <button id="pushLocalToRemote" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: #90caf9; color: #000; cursor: pointer; font-size: 14px;">
-                Push Local to Remote
-              </button>
-              <button id="applyRemoteChanges" style="flex: 1; padding: 12px; border-radius: 8px; border: none; background: #f44336; color: #fff; cursor: pointer; font-size: 14px;">
-                Pull Remote to Local
-              </button>
-            </div>
-          ` : ''}
-          <button id="closeDiffDialog" style="width: 100%; padding: 12px; border-radius: 8px; border: none; background: #2a2a2a; color: #aaa; cursor: pointer; font-size: 14px;">
-            Cancel
-          </button>
-        </div>
-      `;
-
-      dialog.innerHTML = content;
-      modal.appendChild(dialog);
-      document.body.appendChild(modal);
-
-      const mergeBtn = dialog.querySelector('#mergeButton');
-      if (mergeBtn) {
-        mergeBtn.addEventListener('click', async () => {
-          modal.remove();
-          await this.mergeBidirectional();
-        });
-      }
-
-      const pushBtn = dialog.querySelector('#pushLocalToRemote');
-      if (pushBtn) {
-        pushBtn.addEventListener('click', async () => {
-          modal.remove();
-          await syncManager.syncToRemote();
-          this.showToast('Pushed local bookmarks to remote successfully', 'success');
-        });
-      }
-
-      const applyBtn = dialog.querySelector('#applyRemoteChanges');
-      if (applyBtn) {
-        applyBtn.addEventListener('click', async () => {
-          modal.remove();
-
-          // STEP 1: Take a snapshot of current bookmarks before destructive sync
-          const preSyncSnapshot = await syncManager.getLocalBookmarks();
-
-          // STEP 2: Clear all old changelog entries (they will have invalid IDs after sync)
-          await clearChangelog();
-
-          // STEP 3: Add a special changelog entry for this sync operation with full snapshot
-          await addChangelogEntry('pre-sync-snapshot', 'sync', 'Pull Remote to Local', null, {
-            snapshot: preSyncSnapshot,
-            timestamp: Date.now(),
-            operation: 'Pull Remote to Local'
-          });
-
-          await syncManager.saveLocalBookmarks(remoteData);
-          await syncManager.setLocalVersion(remoteData.version);
-          this.showToast('Pulled remote bookmarks to local successfully', 'success');
-          // Reload bookmarks in UI
-          await this.loadBookmarks();
-        });
-      }
-
-      dialog.querySelector('#closeDiffDialog').addEventListener('click', () => modal.remove());
-      modal.addEventListener('click', (e) => {
-        if (e.target === modal) modal.remove();
-      });
-    };
-
-    // Bidirectional merge function
-    this.mergeBidirectional = async () => {
-      try {
-        this.showToast('Merging local and remote bookmarks...', 'info');
-
-        const remoteId = syncManager.getRemoteId();
-        const adapter = syncManager.getAdapter();
-        const remoteData = await adapter.readBookmarks(remoteId);
-        const localData = await syncManager.getLocalBookmarks();
-
-        // STEP 1: Take a snapshot of current bookmarks before destructive merge
-        const preSyncSnapshot = JSON.parse(JSON.stringify(localData));
-
-        // STEP 2: Clear all old changelog entries (they will have invalid IDs after merge)
-        await clearChangelog();
-
-        // STEP 3: Add a special changelog entry for this merge operation with full snapshot
-        await addChangelogEntry('pre-sync-snapshot', 'sync', 'Bidirectional Merge', null, {
-          snapshot: preSyncSnapshot,
-          timestamp: Date.now(),
-          operation: 'Bidirectional Merge'
-        });
-
-        // Merge in both directions using sync-manager's merge function
-        const remoteIntoLocal = syncManager.mergeBookmarksIntoTree(remoteData, localData);
-        const fullyMerged = syncManager.mergeBookmarksIntoTree(localData, remoteIntoLocal);
-
-        // Apply merged result to both local and remote
-        await syncManager.saveLocalBookmarks(fullyMerged);
-        await adapter.updateBookmarks(remoteId, fullyMerged);
-
-        this.showToast('Merge completed successfully! All bookmarks preserved.', 'success');
-        // Reload bookmarks in UI
-        await this.loadBookmarks();
-      } catch (error) {
-        console.error('[MergeBidirectional] Error:', error);
-        this.showToast(`Merge failed: ${error.message}`, 'error');
-      }
-    };
+    /* [ZeroLabs] 2026-06-20 11:01 AM - removed: dead per-sync merge diff dialog + bidirectional merge */
 
     // Manual sync button - opens GitLab Sync Settings dialog
     const manualSyncBtn = document.getElementById('manualSyncBtn');
@@ -2673,6 +2487,13 @@ class App {
     window.addEventListener('sync:syncError', (e) => {
       if (e.detail) {
         this.showToast(e.detail, 'error');
+      }
+    });
+
+    /* [ZeroLabs] 2026-06-20 10:47 AM - added: content-divergence nudge listener */
+    window.addEventListener('sync:syncNudge', (e) => {
+      if (e.detail) {
+        this.showToast(e.detail, 'info');
       }
     });
 
@@ -3084,38 +2905,7 @@ class App {
     }, 5000);
   }
 
-  /**
-   * Merge local and remote bookmarks, preserving folder structure
-   */
-  mergeBookmarkTrees(localTree, remoteTree) {
-    const merged = JSON.parse(JSON.stringify(localTree));
-
-    const mergeFolder = (local, remote, path = '') => {
-      if (!remote || !remote.children) return;
-
-      for (const remoteChild of remote.children) {
-        const localChild = local.children.find(c => c.id === remoteChild.id);
-
-        if (localChild) {
-          if (remoteChild.children && localChild.children) {
-            mergeFolder(localChild, remoteChild, path + '/' + localChild.title);
-          }
-        } else {
-          local.children.push(JSON.parse(JSON.stringify(remoteChild)));
-        }
-      }
-    };
-
-    for (const rootKey in remoteTree.roots) {
-      if (merged.roots[rootKey]) {
-        mergeFolder(merged.roots[rootKey], remoteTree.roots[rootKey], rootKey);
-      } else {
-        merged.roots[rootKey] = JSON.parse(JSON.stringify(remoteTree.roots[rootKey]));
-      }
-    }
-
-    return merged;
-  }
+  /* [ZeroLabs] 2026-06-20 11:01 AM - removed: orphaned mergeBookmarkTrees (per-sync merge) */
 
   /**
    * Show sync conflict dialog (for deletions - requires confirmation)
@@ -3186,17 +2976,6 @@ class App {
           font-size: 1em;
           min-width: auto;
         ">Keep Local</button>
-        <button id="mergeBookmarks" style="
-          background: var(--md-sys-color-primary);
-          color: var(--md-sys-color-on-primary);
-          border: none;
-          padding: 10px 20px;
-          border-radius: 6px;
-          cursor: pointer;
-          font-size: 1em;
-          font-weight: 500;
-          min-width: auto;
-        ">Merge</button>
         <button id="replaceLocal" style="
           background: var(--md-sys-color-error);
           color: var(--md-sys-color-on-error);
@@ -3241,29 +3020,7 @@ class App {
       this.showToast('Local bookmarks kept. Remote changes were not applied.', 'info');
     });
 
-    dialog.querySelector('#mergeBookmarks').addEventListener('click', async () => {
-      modal.remove();
-      try {
-        const localTree = await syncManager.loadLocalBookmarks();
-        const mergedTree = this.mergeBookmarkTrees(localTree, remoteData);
-        mergedTree.version = remoteData.version;
-        
-        await syncManager.saveLocalBookmarks(mergedTree);
-        await syncManager.setLocalVersion(remoteData.version);
-        await bookmarkManager.reload();
-        
-        if (window.reloadBookmarkUI) {
-          await window.reloadBookmarkUI();
-        }
-        
-        this.showToast('Bookmarks merged successfully!', 'success');
-        window.location.reload();
-      } catch (error) {
-        console.error('Merge failed:', error);
-        this.showToast('Merge failed: ' + error.message, 'error');
-      }
-    });
-
+    /* [ZeroLabs] 2026-06-20 11:01 AM - removed: per-sync merge button handler */
     dialog.querySelector('#replaceLocal').addEventListener('click', async () => {
       modal.remove();
       try {

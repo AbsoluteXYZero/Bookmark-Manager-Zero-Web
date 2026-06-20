@@ -560,7 +560,32 @@ class SyncManager {
         console.log('[SyncFromRemote] Sync complete, version:', remoteData.version);
         return true; // Indicate that data was updated
       } else {
+        // Versions match - but the version counter is unreliable across clients
+        // (extensions rewrite the snippet without always bumping it). Do a cheap
+        // content check so we don't falsely report "up to date" when data differs.
+        /* [ZeroLabs] 2026-06-20 10:47 AM - added: content-diff nudge on equal version */
+        const diff = this.calculateBookmarkDiff(localData, remoteData);
+        const changeCount = diff.added.length + diff.removed.length + diff.moved.length + diff.modified.length;
+
+        if (changeCount > 0) {
+          console.log('[SyncFromRemote] Versions match but content differs:', {
+            added: diff.added.length, removed: diff.removed.length,
+            moved: diff.moved.length, modified: diff.modified.length
+          });
+
+          // Non-destructive nudge. Dedupe by remote signature so 5-min polling
+          // doesn't repeat the toast every cycle (resets on reload).
+          const signature = `${remoteData.version}:${changeCount}:${remoteBookmarkCount}`;
+          if (this._lastDivergeNudge !== signature) {
+            this._lastDivergeNudge = signature;
+            this.emitEvent('syncNudge',
+              `Cloud differs from this device (${diff.added.length} to pull, ${diff.removed.length} only here). Open GitLab sync to reconcile.`);
+          }
+          return false;
+        }
+
         console.log('[SyncFromRemote] Local is up to date (local:', localVersion, ', remote:', remoteData.version, ')');
+        this._lastDivergeNudge = null;
         return false;
       }
     } catch (error) {
