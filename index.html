@@ -449,17 +449,27 @@
       position: relative;
     }
 
+    /* [ZeroLabs] 2026-06-20 1:46 PM - edited: in-flow flex row to stop button/title overlap */
+    .header-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
     .header-settings {
-      position: absolute;
-      top: 6px;
-      right: 8px;
-      z-index: 101;
+      order: 2;
+      flex-shrink: 0;
       display: flex;
       align-items: center;
       gap: 4px;
     }
 
+    /* [ZeroLabs] 2026-06-20 1:46 PM - edited: flex item that shrinks/wraps beside buttons */
     .logo-container {
+      order: 1;
+      flex: 1;
+      min-width: 0;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -481,8 +491,10 @@
       filter: drop-shadow(0 1px 4px rgba(34, 197, 94, 0.3));
     }
 
+    /* [ZeroLabs] 2026-06-20 1:46 PM - edited: allow title/subtitle to wrap, never clip */
     .logo-text {
       flex: 1;
+      min-width: 0;
     }
 
     .logo-title {
@@ -2745,6 +2757,8 @@
     </div>
   </div>
   <div class="header">
+    <!-- [ZeroLabs] 2026-06-20 1:46 PM - added: header-top flex wrapper (logo + actions) -->
+    <div class="header-top">
     <div class="header-settings">
       <button id="manualSyncBtn" class="btn btn-icon" title="Sync bookmarks with GitLab snippets (Shift+Click to force push)">
         <svg width="100%" height="100%" viewBox="0 0 24 24" style="display: block;">
@@ -3059,6 +3073,7 @@
         <div class="logo-title">Bookmark Manager Zero</div>
         <div class="logo-subtitle">A modern safety & privacy first bookmark manager</div>
       </div>
+    </div>
     </div>
 
     <div class="collapsible-header" id="collapsibleHeader">
