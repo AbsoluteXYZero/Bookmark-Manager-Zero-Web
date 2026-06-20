@@ -138,20 +138,36 @@ const APP_VERSION = browser.runtime.getManifest().version;
 
 /* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
 function fitHeaderText() {
+  /* [ZeroLabs] 2026-06-20 - TEMP DEBUG: prints measurements to an on-screen bar. Remove after diagnosing. */
+  let dbg = 'win=' + window.innerWidth + ' dpr=' + (window.devicePixelRatio || 1);
+  const hs = document.querySelector('.header-settings');
+  dbg += ' btns=' + (hs ? Math.round(hs.getBoundingClientRect().width) : 'NA');
+  const ht = document.querySelector('.header-top');
+  dbg += ' top=' + (ht ? Math.round(ht.getBoundingClientRect().width) : 'NA');
   ['.logo-title', '.logo-subtitle'].forEach(sel => {
     const el = document.querySelector(sel);
-    if (!el) return;
+    if (!el) { dbg += ` | ${sel}=MISSING`; return; }
     el.style.fontSize = '';                         // reset to CSS base before measuring
     const avail = el.clientWidth;                    // width actually left beside the current buttons
-    if (avail <= 0) return;
     const range = document.createRange();            // true single-line text width (overflow-proof)
     range.selectNodeContents(el);
     const natural = range.getBoundingClientRect().width;
-    if (natural > avail) {
-      const base = parseFloat(getComputedStyle(el).fontSize) || 11;
-      el.style.fontSize = Math.max(5, base * (avail / natural)) + 'px';
+    const base = parseFloat(getComputedStyle(el).fontSize) || 11;
+    let applied = base;
+    if (avail > 0 && natural > avail) {
+      applied = Math.max(5, base * (avail / natural));
+      el.style.fontSize = applied + 'px';
     }
+    dbg += ` | ${sel.replace('.logo-', '')}: avail=${Math.round(avail)} nat=${Math.round(natural)} base=${base.toFixed(1)} set=${applied.toFixed(1)}`;
   });
+  let bar = document.getElementById('__fitdbg');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = '__fitdbg';
+    bar.style.cssText = 'position:fixed;left:0;bottom:0;z-index:2147483647;background:#000;color:#0f0;font:10px/1.3 monospace;padding:4px 6px;max-width:100vw;white-space:normal;word-break:break-all;pointer-events:none;';
+    if (document.body) document.body.appendChild(bar);
+  }
+  if (bar) bar.textContent = dbg;
 }
 window.fitHeaderText = fitHeaderText;
 
