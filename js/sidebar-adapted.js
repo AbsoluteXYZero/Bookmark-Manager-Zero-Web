@@ -138,32 +138,30 @@ const APP_VERSION = browser.runtime.getManifest().version;
 
 /* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
 function fitHeaderText() {
-  /* [ZeroLabs] 2026-06-20 - iterative shrink-to-fit with safety margin + TEMP debug bar */
+  /* [ZeroLabs] 2026-06-20 - scale rendered pixels (transform) to bypass WebView min-font-size clamp */
   const MARGIN = 8;                                   // px of clearance to keep from the buttons
   const hs = document.querySelector('.header-settings');
-  const hsLeft = hs ? hs.getBoundingClientRect().left : Infinity;   // buttons' left edge
+  const hsLeft = hs ? hs.getBoundingClientRect().left : Infinity;
   let dbg = 'win=' + window.innerWidth + ' hsL=' + (hs ? Math.round(hsLeft) : 'NA');
 
   ['.logo-title', '.logo-subtitle'].forEach(sel => {
     const el = document.querySelector(sel);
     if (!el) { dbg += ` | ${sel}=MISSING`; return; }
-    el.style.fontSize = '';
-    let size = parseFloat(getComputedStyle(el).fontSize) || 11;
-    const box = el.clientWidth - MARGIN;             // target width (leave clearance)
-    let w = 0;
-    for (let i = 0; i < 14; i++) {                    // re-measure after each step (handles non-linearity)
-      const r = document.createRange();
-      r.selectNodeContents(el);
-      w = r.getBoundingClientRect().width;
-      if (w <= box || size <= 5) break;
-      size = Math.max(5, size * (box / w) - 0.1);
-      el.style.fontSize = size + 'px';
+    el.style.transformOrigin = 'left center';
+    el.style.transform = '';                          // reset before measuring natural width
+    const box = el.clientWidth - MARGIN;              // target width (leave clearance from buttons)
+    let r = document.createRange();
+    r.selectNodeContents(el);
+    const w = r.getBoundingClientRect().width;        // rendered text width (font-clamp baked in)
+    let scale = 1;
+    if (w > box && box > 0) {
+      scale = Math.max(0.3, box / w);                 // shrink pixels, not font-size
+      el.style.transform = 'scale(' + scale + ')';
     }
-    // actual rendered right edge of the text vs the buttons' left edge
-    const rr = document.createRange();
-    rr.selectNodeContents(el);
-    const textRight = rr.getBoundingClientRect().right;
-    dbg += ` | ${sel.replace('.logo-', '')}: box=${Math.round(el.clientWidth)} w=${Math.round(w)} size=${size.toFixed(1)} txtR=${Math.round(textRight)} ${textRight > hsLeft ? 'OVERLAP' : 'ok'}`;
+    r = document.createRange();
+    r.selectNodeContents(el);
+    const textRight = r.getBoundingClientRect().right;
+    dbg += ` | ${sel.replace('.logo-', '')}: w=${Math.round(w)} sc=${scale.toFixed(2)} txtR=${Math.round(textRight)} ${textRight > hsLeft ? 'OVERLAP' : 'ok'}`;
   });
 
   let bar = document.getElementById('__fitdbg');
