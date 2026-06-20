@@ -138,28 +138,34 @@ const APP_VERSION = browser.runtime.getManifest().version;
 
 /* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
 function fitHeaderText() {
-  /* [ZeroLabs] 2026-06-20 - TEMP DEBUG: prints measurements to an on-screen bar. Remove after diagnosing. */
-  let dbg = 'win=' + window.innerWidth + ' dpr=' + (window.devicePixelRatio || 1);
+  /* [ZeroLabs] 2026-06-20 - iterative shrink-to-fit with safety margin + TEMP debug bar */
+  const MARGIN = 8;                                   // px of clearance to keep from the buttons
   const hs = document.querySelector('.header-settings');
-  dbg += ' btns=' + (hs ? Math.round(hs.getBoundingClientRect().width) : 'NA');
-  const ht = document.querySelector('.header-top');
-  dbg += ' top=' + (ht ? Math.round(ht.getBoundingClientRect().width) : 'NA');
+  const hsLeft = hs ? hs.getBoundingClientRect().left : Infinity;   // buttons' left edge
+  let dbg = 'win=' + window.innerWidth + ' hsL=' + (hs ? Math.round(hsLeft) : 'NA');
+
   ['.logo-title', '.logo-subtitle'].forEach(sel => {
     const el = document.querySelector(sel);
     if (!el) { dbg += ` | ${sel}=MISSING`; return; }
-    el.style.fontSize = '';                         // reset to CSS base before measuring
-    const avail = el.clientWidth;                    // width actually left beside the current buttons
-    const range = document.createRange();            // true single-line text width (overflow-proof)
-    range.selectNodeContents(el);
-    const natural = range.getBoundingClientRect().width;
-    const base = parseFloat(getComputedStyle(el).fontSize) || 11;
-    let applied = base;
-    if (avail > 0 && natural > avail) {
-      applied = Math.max(5, base * (avail / natural));
-      el.style.fontSize = applied + 'px';
+    el.style.fontSize = '';
+    let size = parseFloat(getComputedStyle(el).fontSize) || 11;
+    const box = el.clientWidth - MARGIN;             // target width (leave clearance)
+    let w = 0;
+    for (let i = 0; i < 14; i++) {                    // re-measure after each step (handles non-linearity)
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      w = r.getBoundingClientRect().width;
+      if (w <= box || size <= 5) break;
+      size = Math.max(5, size * (box / w) - 0.1);
+      el.style.fontSize = size + 'px';
     }
-    dbg += ` | ${sel.replace('.logo-', '')}: avail=${Math.round(avail)} nat=${Math.round(natural)} base=${base.toFixed(1)} set=${applied.toFixed(1)}`;
+    // actual rendered right edge of the text vs the buttons' left edge
+    const rr = document.createRange();
+    rr.selectNodeContents(el);
+    const textRight = rr.getBoundingClientRect().right;
+    dbg += ` | ${sel.replace('.logo-', '')}: box=${Math.round(el.clientWidth)} w=${Math.round(w)} size=${size.toFixed(1)} txtR=${Math.round(textRight)} ${textRight > hsLeft ? 'OVERLAP' : 'ok'}`;
   });
+
   let bar = document.getElementById('__fitdbg');
   if (!bar) {
     bar = document.createElement('div');
