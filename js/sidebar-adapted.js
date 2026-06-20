@@ -136,6 +136,22 @@ const browser = {
 // ============================================================================
 const APP_VERSION = browser.runtime.getManifest().version;
 
+/* [ZeroLabs] 2026-06-20 2:40 PM - added: measure-and-fit so header text scales to its real available width, never clips/wraps */
+function fitHeaderText() {
+  ['.logo-title', '.logo-subtitle'].forEach(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.style.fontSize = '';                 // reset to CSS base (max) before measuring
+    const avail = el.clientWidth;           // flex-allocated width (space left beside the buttons)
+    const content = el.scrollWidth;         // intrinsic single-line text width
+    if (avail > 0 && content > avail) {
+      const base = parseFloat(getComputedStyle(el).fontSize) || 11;
+      el.style.fontSize = Math.max(5, base * (avail / content)) + 'px';
+    }
+  });
+}
+window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
+
 // ============================================================================
 // FIRST-TIME SETUP CARD
 // ============================================================================
@@ -626,6 +642,7 @@ async function init() {
   /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
+  requestAnimationFrame(fitHeaderText);
 
   // Force update filter button icon
   const filterToggle = document.getElementById('filterToggle');
@@ -7983,6 +8000,7 @@ async function initUI() {
   /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
   if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
+  requestAnimationFrame(fitHeaderText);
 
   // Setup all UI elements and event listeners
   loadTheme();
