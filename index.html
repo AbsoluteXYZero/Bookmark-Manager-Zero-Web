@@ -1681,8 +1681,12 @@
     /* The folder SVG has a tab (y=5-7) so its body centers lower than the 32px box.
        WebView's font metrics raise the glyph further, making the number sit too high.
        Desktop/extensions render fine, so nudge down only under .android-webview. */
+    /* TEMPORARY DIAGNOSTIC - loud values + red so the WebView class is unmistakable.
+       If numbers turn red AND drop low: class works, just tune `top` back to ~2px.
+       If nothing changes: the .android-webview class isn't being applied. */
     .android-webview .folder-count {
-      top: 2px;
+      top: 6px;
+      color: red;
     }
 
     /* Auto-shrink font size based on digit count */
