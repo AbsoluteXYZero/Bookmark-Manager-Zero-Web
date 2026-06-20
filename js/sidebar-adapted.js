@@ -623,7 +623,8 @@ async function init() {
   // Force update logo title to bypass cache
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
-  if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 11px;">v${APP_VERSION}</span>`;
+  /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
+  if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
 
   // Force update filter button icon
@@ -7979,7 +7980,8 @@ async function initUI() {
   // Force update logo title
   const logoTitle = document.querySelector('.logo-title');
   const logoSubtitle = document.querySelector('.logo-subtitle');
-  if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 11px;">v${APP_VERSION}</span>`;
+  /* [ZeroLabs] 2026-06-20 1:58 PM - edited: version scales with title (em) */
+  if (logoTitle) logoTitle.innerHTML = `Bookmark Manager Zero • <span style="color: var(--md-sys-color-primary); font-weight: 500; font-size: 0.85em;">v${APP_VERSION}</span>`;
   if (logoSubtitle) logoSubtitle.textContent = 'A modern safety & privacy first bookmark manager';
 
   // Setup all UI elements and event listeners
