@@ -136,6 +136,50 @@ const browser = {
 // ============================================================================
 const APP_VERSION = browser.runtime.getManifest().version;
 
+/* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
+function fitHeaderText() {
+  ['.logo-title', '.logo-subtitle'].forEach(sel => {
+    const el = document.querySelector(sel);
+    if (!el) return;
+    el.style.fontSize = '';                         // reset to CSS base before measuring
+    const avail = el.clientWidth;                    // width actually left beside the current buttons
+    if (avail <= 0) return;
+    const range = document.createRange();            // true single-line text width (overflow-proof)
+    range.selectNodeContents(el);
+    const natural = range.getBoundingClientRect().width;
+    if (natural > avail) {
+      const base = parseFloat(getComputedStyle(el).fontSize) || 11;
+      el.style.fontSize = Math.max(5, base * (avail / natural)) + 'px';
+    }
+  });
+}
+window.fitHeaderText = fitHeaderText;
+
+function initHeaderFit() {
+  requestAnimationFrame(fitHeaderText);
+  // Observe the BUTTON cluster: its width changes when GitLab login swaps the buttons
+  // (login -> sync + logout). .header-top stays full-width so observing it wouldn't fire.
+  const cluster = document.querySelector('.header-settings');
+  if (cluster && window.ResizeObserver && !cluster.dataset.fitObserved) {
+    cluster.dataset.fitObserved = '1';
+    new ResizeObserver(() => requestAnimationFrame(fitHeaderText)).observe(cluster);
+  }
+  if (!window._headerFitResize) {
+    window._headerFitResize = true;
+    window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
+  }
+}
+window.initHeaderFit = initHeaderFit;
+
+// Run once the DOM is ready; the ResizeObserver above then re-fits automatically
+// whenever the button cluster changes width (e.g. GitLab login swaps login -> sync+logout).
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initHeaderFit);
+} else {
+  initHeaderFit();
+}
+window.addEventListener('load', () => requestAnimationFrame(fitHeaderText));
+
 // ============================================================================
 // FIRST-TIME SETUP CARD
 // ============================================================================
