@@ -3976,6 +3976,9 @@
       const isEdge = /Edg/i.test(navigator.userAgent);
       const isAndroidWebView = /wv/.test(navigator.userAgent);
 
+      /* [ZeroLabs] 2026-06-20 1:09 PM - added: tag Android WebView for CSS targeting */
+      if (isAndroidWebView) document.documentElement.classList.add('android-webview');
+
       if (isEdge && !isAndroidWebView) {
         // Show the warning overlay
         const overlay = document.getElementById('edgeWarningOverlay');
