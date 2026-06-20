@@ -1531,14 +1531,6 @@
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
-    /* [ZeroLabs] 2026-06-20 1:09 PM - added: Android WebView seats count in folder body */
-    /* The folder SVG has a tab (y=5-7) so its body centers lower than the 32px box.
-       WebView's font metrics raise the glyph further, making the number sit too high.
-       Desktop/extensions render fine, so nudge down only under .android-webview. */
-    .android-webview .folder-count {
-      top: 2px;
-    }
-
     /* Auto-shrink font size based on digit count */
     .folder-count[data-digits="3"] {
       font-size: 10px;
