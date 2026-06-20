@@ -136,13 +136,29 @@ const browser = {
 // ============================================================================
 const APP_VERSION = browser.runtime.getManifest().version;
 
+/* [ZeroLabs] 2026-06-20 4:10 PM - added: enforce header layout via inline JS (immune to stale cached themes.css) */
+function applyHeaderLayout() {
+  // Inline styles beat any stylesheet, so a stale/cached themes.css cannot leave
+  // .header-settings position:absolute (which floats the buttons over the title).
+  const set = (sel, styles) => {
+    const el = document.querySelector(sel);
+    if (el) Object.assign(el.style, styles);
+  };
+  set('.header-top',      { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' });
+  set('.header-settings', { position: 'static', order: '2', flex: '0 0 auto' });
+  set('.logo-container',  { order: '1', flex: '1 1 0', minWidth: '0' });
+  set('.logo-text',       { flex: '1 1 0', minWidth: '0', whiteSpace: 'nowrap' });
+}
+
 /* [ZeroLabs] 2026-06-20 2:40 PM - added: measure-and-fit so header text scales to its real available width, never clips/wraps */
 function fitHeaderText() {
+  applyHeaderLayout();                       // force correct layout first (beats stale CSS)
   ['.logo-title', '.logo-subtitle'].forEach(sel => {
     const el = document.querySelector(sel);
     if (!el) return;
-    el.style.fontSize = '';                 // reset to CSS base (max) before measuring
-    const avail = el.clientWidth;           // flex-allocated box width (space left beside the buttons)
+    el.style.whiteSpace = 'nowrap';
+    el.style.fontSize = '';                  // reset to CSS base (max) before measuring
+    const avail = el.clientWidth;            // flex-allocated box width (space left beside the buttons)
     if (avail <= 0) return;
     // Measure the TRUE single-line text width (scrollWidth is unreliable for overflow:visible)
     const range = document.createRange();
