@@ -480,6 +480,7 @@
     }
 
     .logo-title {
+      font-size: clamp(5px, 3vw, 11px);   /* fallback if container queries unsupported */
       font-size: clamp(5px, 6cqi, 11px);
       white-space: nowrap;
       font-weight: 500;
@@ -489,6 +490,7 @@
     }
 
     .logo-subtitle {
+      font-size: clamp(4px, 2.3vw, 8px);   /* fallback if container queries unsupported */
       font-size: clamp(4px, 4cqi, 8px);
       white-space: nowrap;
       color: var(--md-sys-color-on-surface-variant);
