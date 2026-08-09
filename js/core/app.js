@@ -36,6 +36,14 @@ class App {
     try {
       console.log('Initializing Bookmark Manager Zero Web...');
 
+      /* [ZeroLabs] 2026-08-09 1:31 PM - added: detect share intent before anything scans */
+      this.shareIntent = this.parseShareIntent();
+      if (this.shareIntent) {
+        window.__bmzShareMode = true;
+        document.documentElement.classList.add('share-mode');
+        console.log('[Share] Share intent detected, link and safety checking disabled');
+      }
+
       // Initialize IndexedDB first (needed for everything)
       await dbManager.init();
 
@@ -58,6 +66,30 @@ class App {
     } catch (error) {
       console.error('Failed to initialize app:', error);
       this.showError('Failed to initialize application', error);
+    }
+  }
+
+  /**
+   * Read an Android share intent off the URL fragment.
+   * Fragment rather than query string so the shared URL is never sent to the
+   * GitLab Pages server or written into its access logs.
+   * Format: #share?url=<encoded>&title=<encoded>
+   */
+  /* [ZeroLabs] 2026-08-09 1:31 PM - added: parse share intent from hash */
+  parseShareIntent() {
+    try {
+      const hash = window.location.hash || '';
+      const prefix = '#share?';
+      if (!hash.startsWith(prefix)) return null;
+
+      const params = new URLSearchParams(hash.slice(prefix.length));
+      const url = params.get('url');
+      if (!url) return null;
+
+      return { url, title: params.get('title') || '' };
+    } catch (e) {
+      console.warn('[Share] Failed to parse share intent:', e.message);
+      return null;
     }
   }
 
@@ -3273,6 +3305,16 @@ class App {
     }
 
     // blocklistService and scannerService are initialized on first use (lazy loading)
+
+    /* [ZeroLabs] 2026-08-09 1:31 PM - added: open prefilled modal for share intent */
+    if (this.shareIntent && !this._shareHandled && window.openShareBookmarkModal) {
+      this._shareHandled = true;
+
+      // Drop the fragment so a reload does not re-trigger the share
+      history.replaceState(null, '', window.location.pathname + window.location.search);
+
+      await window.openShareBookmarkModal(this.shareIntent.url, this.shareIntent.title);
+    }
   }
 
   async showPreRotationPrompt(daysLeft, token) {

@@ -2321,6 +2321,39 @@
       color: var(--md-sys-color-on-surface);
     }
 
+    /* [ZeroLabs] 2026-08-09 1:43 PM - added: branded modal title bar */
+    .modal-header-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex: 1;
+      min-width: 0;
+    }
+
+    /* Logo is share-window branding only; the desktop modals are unchanged */
+    .modal-header-icon {
+      display: none;
+      width: 24px;
+      height: 24px;
+      flex-shrink: 0;
+      border-radius: 5px;
+    }
+    .share-mode .modal-header-icon {
+      display: block;
+    }
+
+    /* Title shares the bar with the logo and the close button, so it scales
+       down with the window instead of wrapping or being cut off */
+    .share-mode .modal-header h3 {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      font-size: clamp(12px, 4.4vw, 18px);
+    }
+    .share-mode .modal-close {
+      flex-shrink: 0;
+    }
+
     .modal-close {
       background: none;
       border: none;
@@ -2590,6 +2623,119 @@
     }
     #manualSyncBtn.sync-success:not(.syncing) #syncArrows path {
       fill: #4caf50;
+    }
+
+    /* [ZeroLabs] 2026-08-09 1:31 PM - added: recent folder chips + share status */
+    .recent-folders-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 8px;
+    }
+    .recent-folders-row.hidden { display: none; }
+    .recent-folders-label {
+      width: 100%;
+      font-size: 11px;
+      color: var(--md-sys-color-on-surface-variant);
+      margin-bottom: 2px;
+    }
+    .recent-folder-chip {
+      padding: 5px 10px;
+      border-radius: 14px;
+      border: 1px solid var(--md-sys-color-outline-variant);
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface-variant);
+      font-size: 12px;
+      line-height: 1.2;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .recent-folder-chip:hover {
+      background: var(--md-sys-color-surface-container-high);
+    }
+    .recent-folder-chip.active {
+      background: var(--md-sys-color-primary-container);
+      border-color: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary-container);
+    }
+
+    /* [ZeroLabs] 2026-08-09 1:31 PM - added: duplicate bookmark notice */
+    .share-duplicate {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--md-sys-color-warning);
+    }
+    .share-duplicate.hidden { display: none; }
+    .share-duplicate-head {
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .share-duplicate-text { flex: 1; min-width: 0; }
+    .share-duplicate-toggle {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 12px;
+      color: var(--md-sys-color-primary);
+      text-decoration: underline;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .share-duplicate-paths {
+      margin: 6px 0 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .share-duplicate-paths.hidden { display: none; }
+    .share-duplicate-paths li {
+      padding: 3px 0;
+      word-break: break-word;
+    }
+
+    .share-status {
+      margin-top: 12px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      line-height: 1.45;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .share-status.hidden { display: none; }
+    .share-status.info {
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface-variant);
+    }
+    .share-status.error {
+      background: rgba(239, 68, 68, 0.12);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: var(--md-sys-color-on-surface);
+    }
+    .share-status.success {
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: var(--md-sys-color-on-surface);
+    }
+    .share-status-stage {
+      font-weight: 600;
+    }
+    .share-status-reason {
+      color: var(--md-sys-color-on-surface-variant);
+      word-break: break-word;
+    }
+    .share-status-actions {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .share-status-actions .btn {
+      padding: 6px 12px;
+      font-size: 12px;
     }
   </style>
   <script>
@@ -3651,8 +3797,12 @@
   <div id="addBookmarkModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="addBookmarkModalTitle" aria-hidden="true">
     <div class="modal-overlay" aria-hidden="true"></div>
     <div class="modal-content">
+      <!-- [ZeroLabs] 2026-08-09 1:43 PM - edited: BMZ branding in share window title bar -->
       <div class="modal-header">
-        <h3 id="addBookmarkModalTitle">Add New Bookmark</h3>
+        <div class="modal-header-title">
+          <img id="addBookmarkModalIcon" class="modal-header-icon" src="icons/bookmark-48.png" alt="" aria-hidden="true">
+          <h3 id="addBookmarkModalTitle">Add New Bookmark</h3>
+        </div>
         <button class="modal-close" id="addBookmarkModalClose" aria-label="Close dialog">×</button>
       </div>
       <div class="modal-body">
@@ -3663,16 +3813,34 @@
         <div class="form-group">
           <label for="newBookmarkUrl">URL:</label>
           <input type="text" id="newBookmarkUrl" class="form-input" placeholder="https://example.com">
+          <!-- [ZeroLabs] 2026-08-09 1:31 PM - added: inline duplicate bookmark notice -->
+          <div id="shareDuplicateNotice" class="share-duplicate hidden">
+            <div class="share-duplicate-head">
+              <span class="share-duplicate-text"></span>
+              <button type="button" id="shareDuplicateToggle" class="share-duplicate-toggle" aria-expanded="false">Show location</button>
+            </div>
+            <ul id="shareDuplicatePaths" class="share-duplicate-paths hidden"></ul>
+          </div>
         </div>
         <div class="form-group">
           <label for="newBookmarkFolder">Add to folder:</label>
           <select id="newBookmarkFolder" class="form-input">
             <option value="">Root</option>
           </select>
+          <!-- [ZeroLabs] 2026-08-09 1:31 PM - added: recent saved-into folder chips -->
+          <div id="recentFoldersRow" class="recent-folders-row hidden">
+            <span class="recent-folders-label">Recently saved to</span>
+          </div>
           <label style="display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; cursor: pointer;">
             <input type="checkbox" id="sortBookmarkFoldersAlpha" style="cursor: pointer;">
             <span>Sort alphabetically</span>
           </label>
+        </div>
+        <!-- [ZeroLabs] 2026-08-09 1:31 PM - added: share pull/save/push status + retry -->
+        <div id="addBookmarkStatus" class="share-status hidden" role="status" aria-live="polite">
+          <span class="share-status-stage"></span>
+          <span class="share-status-reason"></span>
+          <div class="share-status-actions"></div>
         </div>
       </div>
       <div class="modal-footer">

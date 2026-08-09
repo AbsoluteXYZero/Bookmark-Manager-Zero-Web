@@ -7,6 +7,44 @@ import { encryptApiKey, decryptApiKey } from './encryption.js';
 
 const MAX_CHANGELOG_ENTRIES = 1000;
 
+/* [ZeroLabs] 2026-08-09 1:31 PM - added: recent saved-into folder MRU */
+const RECENT_FOLDERS_KEY = 'bmz_recentFolders';
+const MAX_RECENT_FOLDERS = 6;
+
+/**
+ * Read the most-recently-saved-into folder IDs, newest first.
+ * Only folders a bookmark was actually saved into are recorded --
+ * merely browsing/expanding a folder is deliberately not counted.
+ * @returns {string[]}
+ */
+export function getRecentFolders() {
+  try {
+    const raw = safeLocalStorage.getItem(RECENT_FOLDERS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(id => typeof id === 'string' && id.length > 0);
+  } catch (e) {
+    console.warn('[RecentFolders] Failed to parse stored list:', e.message);
+    return [];
+  }
+}
+
+/**
+ * Record a folder as most-recently-saved-into.
+ * @param {string} folderId
+ */
+export function recordRecentFolder(folderId) {
+  if (!folderId) return;
+  try {
+    const next = [folderId, ...getRecentFolders().filter(id => id !== folderId)]
+      .slice(0, MAX_RECENT_FOLDERS);
+    safeLocalStorage.setItem(RECENT_FOLDERS_KEY, JSON.stringify(next));
+  } catch (e) {
+    console.warn('[RecentFolders] Failed to record folder:', e.message);
+  }
+}
+
 /**
  * Safe localStorage wrapper for Edge compatibility
  * Handles SecurityError when localStorage is blocked

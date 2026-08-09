@@ -446,8 +446,8 @@ class SyncManager {
    * Sync remote changes to local (pull)
    * @param {boolean} force - Force pull even if versions match (explicit user-triggered pull, cloud wins)
    */
-  /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force param for manual pull */
-  async syncFromRemote(force = false) {
+  /* [ZeroLabs] 2026-08-09 1:31 PM - edited: throwOnError param for share flow */
+  async syncFromRemote(force = false, throwOnError = false) {
     if (this.isSyncing) {
       console.log('[SyncFromRemote] Already syncing, skipping...');
       return;
@@ -606,6 +606,9 @@ class SyncManager {
           requiresSetup: true
         });
       }
+
+      /* [ZeroLabs] 2026-08-09 1:31 PM - added: surface real reason to share flow */
+      if (throwOnError) throw error;
 
       return false;
     } finally {

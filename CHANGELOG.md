@@ -1,7 +1,25 @@
 ## Changelog
 
+<!-- [ZeroLabs] 2026-08-09 1:43 PM - edited: released as V1.8.0 -->
+### V1.8.0 (Current) - Share to BMZ (Android)
+
+**New Features:**
+- **Share a link straight into BMZ (Android app)** - Sharing a page from any mobile browser now offers "Save to BMZ" in the Android share sheet. It opens a small floating window over the browser rather than launching the full app, so a link can be filed without leaving what you were reading. Saving no longer means waiting for a bookmark to travel through a browser account sync to a desktop before BMZ ever sees it.
+- **Recently saved-to folders** - The Add Bookmark dialog now defaults to the folder you last saved a bookmark into, with up to five other recent folders offered as one-tap chips underneath. Only folders you actually saved or moved a bookmark into are counted; simply browsing a folder does not affect the list. Applies to the normal Add Bookmark dialog as well as the share window.
+- **Duplicate warning without a popup** - The share window shows an inline note under the URL when the page is already bookmarked, with a button to reveal the full folder path of every existing copy. The old blocking confirm dialog still applies everywhere else.
+
+**Sync:**
+- **Share saves sync immediately** - When GitLab sync is configured, the share window pulls the latest bookmarks before writing and pushes the new bookmark straight afterwards, so it reaches your other devices without waiting for the next app launch. Pulling first matters: the phone usually holds the stalest copy, and pushing from a stale copy would overwrite changes made elsewhere.
+- **Every stage reports its own failure** - If the pull, the save, or the push fails, the window says which stage failed and why (offline, GitLab unreachable, expired token, missing snippet, rate limit) and offers a retry. A failed pull additionally offers to save on this device only. A bookmark that saves but fails to push stays flagged as pending and syncs on the next launch.
+- **Stale window protection** - After a share saves a bookmark, the main app window reloads its bookmark tree when reopened, so it cannot save its pre-share copy over the top of what was just added.
+
+**Changes:**
+- **No scanning during a share** - Link checking and safety checking are disabled entirely in the share window, including the usual scan of a newly added bookmark. Filing a link stays a quick write with no burst of network requests behind it.
+
+---
+
 <!-- [ZeroLabs] 2026-06-20 11:01 AM - added: v1.6.0 changelog entry -->
-### V1.6.0 (Current) - Sync Fixes & Cleanup
+### V1.6.0 - Sync Fixes & Cleanup
 
 **New Features:**
 - **Scan Intensity Slider** - New slider in Settings controls how many bookmarks are link/safety-checked at once (1-20, default 5). Each check is a live request that triggers a DNS lookup, so scanning a large library all at once could briefly overwhelm a local DNS resolver (AdGuard Home, Pi-hole) and knock out your internet. Lowering this keeps scans gentle on your network. Persists across sessions and applies live to an in-progress scan.
@@ -16,6 +34,7 @@
 - **Settings Slider Handle** - Added proper slider-handle styling for Chromium browsers and the Android WebView so the handle renders centered on the track instead of missing or sitting too low.
 - **Folder Count Position (Android app)** - The bookmark count inside a folder icon sat too high in the Android app because it was centered in the icon's square bounding box rather than the folder body (the folder shape's top-left tab pushes the body lower), an offset exaggerated by the WebView's font metrics. The number is now nudged into the folder body in the Android app only; desktop browsers and the extensions were already correct and are unchanged. Also added reliable Android-app detection (the app overrides its user agent, so the standard WebView check did not apply).
 - **Manual sync now works when versions match** - "Sync from Cloud to Browser" and "Sync from Browser to Cloud" previously did nothing when the local and remote version numbers were equal but the bookmarks actually differed — the sync silently reported "up to date." Both buttons now force the operation: cloud-to-browser pulls and reconciles, browser-to-cloud pushes, regardless of version.
+- **Header buttons no longer overlap the title** - On the Android app, with an enlarged device font the GitLab, sync, logout, and settings buttons could cover the right end of the title and subtitle. The buttons now occupy their own reserved space and the title and subtitle scale down to fit the remaining width on a single line, clear of the buttons at any width and after signing in. (Scaling uses a CSS transform because the WebView ignores small font sizes when the device font is enlarged.)
 
 **Improvements:**
 - **Divergence detection on auto-sync** - When versions match but the cloud and local bookmarks differ, auto-sync now surfaces a one-time notice ("Cloud differs from this device — open GitLab sync to reconcile") instead of falsely reporting everything is in sync.

@@ -196,7 +196,8 @@ class BookmarkManager {
     console.log(`Created ${type}:`, newNode);
 
     // If this is a bookmark (not a folder), trigger automatic scan
-    if (type === 'bookmark' && window.scannerService) {
+    /* [ZeroLabs] 2026-08-09 1:31 PM - edited: no auto-scan in share window */
+    if (type === 'bookmark' && window.scannerService && !window.__bmzShareMode) {
       console.log('[BookmarkManager] New bookmark created, triggering automatic scan...');
       // Use setTimeout to avoid blocking
       setTimeout(() => {

@@ -19,13 +19,16 @@ import {
   logError,
   setupGlobalErrorHandlers
 } from './utils/error-notification-manager.js';
+/* [ZeroLabs] 2026-08-09 1:31 PM - edited: import recent folder MRU helpers */
 import {
   safeLocalStorage,
   storeEncryptedApiKey,
   getDecryptedApiKey,
   addChangelogEntry,
   getChangelogEntries,
-  clearChangelog
+  clearChangelog,
+  getRecentFolders,
+  recordRecentFolder
 } from './utils/storage-utils.js';
 import {
   loadTheme,
@@ -61,7 +64,8 @@ import {
 const browser = {
   runtime: {
     /* [ZeroLabs] 2026-06-20 11:01 AM - edited: bump website version to 1.6.0 */
-    getManifest: () => ({ version: '1.6.0' }),
+    /* [ZeroLabs] 2026-08-09 1:43 PM - edited: bump version to 1.8.0 */
+    getManifest: () => ({ version: '1.8.0' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -166,6 +170,14 @@ function initHeaderFit() {
     cluster.dataset.fitObserved = '1';
     new ResizeObserver(() => requestAnimationFrame(fitHeaderText)).observe(cluster);
   }
+  // Re-fit when the title/subtitle text changes (e.g. the version string is injected after load)
+  ['.logo-title', '.logo-subtitle'].forEach((sel) => {
+    const t = document.querySelector(sel);
+    if (t && window.MutationObserver && !t.dataset.fitTextObserved) {
+      t.dataset.fitTextObserved = '1';
+      new MutationObserver(() => requestAnimationFrame(fitHeaderText)).observe(t, { childList: true, characterData: true, subtree: true });
+    }
+  });
   if (!window._headerFitResize) {
     window._headerFitResize = true;
     window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
@@ -1389,6 +1401,12 @@ async function rescanAllBookmarks() {
 // Automatically check bookmark statuses for unchecked bookmarks
 // Uses rate limiting to prevent browser overload
 async function autoCheckBookmarkStatuses() {
+  /* [ZeroLabs] 2026-08-09 1:31 PM - added: no scanning in share window */
+  if (window.__bmzShareMode) {
+    console.log('[Share] Share mode active, skipping link/safety scan');
+    return;
+  }
+
   // Skip if both checking types are disabled
   if (!linkCheckingEnabled && !safetyCheckingEnabled) {
     console.log('Link and safety checking are both disabled, skipping...');
@@ -4513,6 +4531,86 @@ function populateFolderDropdown(selectElement, sortAlphabetically = false) {
   });
 }
 
+/* [ZeroLabs] 2026-08-09 1:31 PM - added: recent saved-into folder helpers */
+// Recent folder IDs that still exist as options in the dropdown
+function getValidRecentFolders(selectElement) {
+  return getRecentFolders().filter(id =>
+    selectElement.querySelector(`option[value="${CSS.escape(id)}"]`)
+  );
+}
+
+// Pick the default target folder: most recent saved-into, then legacy last-used,
+// then Bookmarks Menu, then the first real folder
+function applyDefaultBookmarkFolder(selectElement) {
+  const recent = getValidRecentFolders(selectElement);
+  if (recent.length > 0) {
+    selectElement.value = recent[0];
+    return;
+  }
+
+  const lastUsedFolder = safeLocalStorage.getItem('lastBookmarkFolder');
+  if (lastUsedFolder && selectElement.querySelector(`option[value="${CSS.escape(lastUsedFolder)}"]`)) {
+    selectElement.value = lastUsedFolder;
+    return;
+  }
+
+  // Find Bookmarks Menu folder (usually has 'menu' in the ID)
+  const menuOption = Array.from(selectElement.options).find(opt =>
+    opt.value.includes('menu') || opt.textContent.toLowerCase().includes('bookmarks menu')
+  );
+  if (menuOption) {
+    selectElement.value = menuOption.value;
+  } else if (selectElement.options.length > 1) {
+    // Fallback to first non-root option
+    selectElement.selectedIndex = 1;
+  }
+}
+
+// Render the other recently saved-into folders as quick-pick chips
+function renderRecentFolderChips(selectElement) {
+  const row = document.getElementById('recentFoldersRow');
+  if (!row) return;
+
+  // Skip the first entry - it is already the dropdown default
+  const others = getValidRecentFolders(selectElement).slice(1, 6);
+
+  if (others.length === 0) {
+    row.classList.add('hidden');
+    row.innerHTML = '<span class="recent-folders-label">Recently saved to</span>';
+    return;
+  }
+
+  row.classList.remove('hidden');
+  row.innerHTML = '<span class="recent-folders-label">Recently saved to</span>';
+
+  others.forEach(id => {
+    const folder = bookmarkManager.getFolder(id);
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'recent-folder-chip';
+    chip.dataset.folderId = id;
+    chip.textContent = folder?.title || 'Unnamed Folder';
+    chip.title = chip.textContent;
+    if (selectElement.value === id) chip.classList.add('active');
+    chip.addEventListener('click', () => {
+      selectElement.value = id;
+      row.querySelectorAll('.recent-folder-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+    });
+    row.appendChild(chip);
+  });
+
+  // Attach the sync-highlight listener once, not on every re-render
+  if (!selectElement.dataset.chipSyncBound) {
+    selectElement.dataset.chipSyncBound = 'true';
+    selectElement.addEventListener('change', () => {
+      row.querySelectorAll('.recent-folder-chip').forEach(c => {
+        c.classList.toggle('active', c.dataset.folderId === selectElement.value);
+      });
+    });
+  }
+}
+
 // Open add bookmark modal
 async function openAddBookmarkModal() {
   const modal = document.getElementById('addBookmarkModal');
@@ -4529,28 +4627,21 @@ async function openAddBookmarkModal() {
   sortCheckbox.checked = sortPref;
   populateFolderDropdown(folderSelect, sortPref);
 
-  // Set default folder - prefer last used, then Bookmarks Menu, then first available
-  const lastUsedFolder = safeLocalStorage.getItem('lastBookmarkFolder');
-  if (lastUsedFolder && folderSelect.querySelector(`option[value="${lastUsedFolder}"]`)) {
-    folderSelect.value = lastUsedFolder;
-  } else {
-    // Find Bookmarks Menu folder (usually has 'menu' in the ID)
-    const menuOption = Array.from(folderSelect.options).find(opt =>
-      opt.value.includes('menu') || opt.textContent.toLowerCase().includes('bookmarks menu')
-    );
-    if (menuOption) {
-      folderSelect.value = menuOption.value;
-    } else if (folderSelect.options.length > 1) {
-      // Fallback to first non-root option
-      folderSelect.selectedIndex = 1;
-    }
-  }
+  // Set default folder - prefer most recently saved into, then Bookmarks Menu, then first available
+  /* [ZeroLabs] 2026-08-09 1:31 PM - edited: default to most recent saved-into folder */
+  applyDefaultBookmarkFolder(folderSelect);
+  renderRecentFolderChips(folderSelect);
 
   // Add event listener for sort checkbox
   sortCheckbox.addEventListener('change', (e) => {
     const sortAlpha = e.target.checked;
     safeLocalStorage.setItem('sortFoldersAlphabetically', sortAlpha);
+    const previous = folderSelect.value;
     populateFolderDropdown(folderSelect, sortAlpha);
+    if (previous && folderSelect.querySelector(`option[value="${previous}"]`)) {
+      folderSelect.value = previous;
+    }
+    renderRecentFolderChips(folderSelect);
   });
 
   modal.classList.remove('hidden');
@@ -4566,6 +4657,443 @@ function closeAddBookmarkModal() {
   modal.classList.add('hidden');
   modal.setAttribute('aria-hidden', 'true');
   releaseFocusTrap();
+  /* [ZeroLabs] 2026-08-09 1:31 PM - added: reset share status on close */
+  clearShareStatus();
+  clearShareDuplicateNotice();
+
+  // In a share window the modal is the whole point, so dismissing it by any
+  // route (Cancel, the X, or a completed save) dismisses the window itself
+  if (window.__bmzShareMode && !shareFlow.closing) {
+    shareFlow.closing = true;
+    if (window.BMZAndroid && typeof window.BMZAndroid.closeShareWindow === 'function') {
+      // Tell the host whether anything was actually written, so the main
+      // window only reloads its in-memory tree when it has gone stale
+      window.BMZAndroid.closeShareWindow(shareFlow.saved);
+    }
+  }
+}
+
+/* [ZeroLabs] 2026-08-09 1:31 PM - added: share-to-BMZ flow (pull, save, push) */
+
+// Tracks the in-flight background pull started when the share window opens
+const shareFlow = {
+  pullPromise: null,
+  pullError: null,
+  saved: false,
+  closing: false
+};
+
+// Normalize a URL so trivial differences do not hide a real duplicate.
+// Protocol, a leading www., and a trailing slash are ignored; query and
+// fragment are kept because they can address different pages.
+function normalizeUrlForCompare(url) {
+  if (!url) return '';
+  let value = url.trim().toLowerCase();
+  value = value.replace(/^[a-z][a-z0-9+.-]*:\/\//, '');
+  value = value.replace(/^www\./, '');
+  value = value.replace(/\/+$/, '');
+  return value;
+}
+
+// Every existing bookmark pointing at the same page
+function findDuplicateBookmarks(url) {
+  const target = normalizeUrlForCompare(url);
+  if (!target) return [];
+
+  const matches = [];
+  const walk = (nodes) => {
+    if (!Array.isArray(nodes)) return;
+    for (const node of nodes) {
+      if (node.type === 'bookmark' && node.url && normalizeUrlForCompare(node.url) === target) {
+        matches.push(node);
+      }
+      if (node.children) walk(node.children);
+    }
+  };
+  walk(bookmarkTree);
+
+  return matches;
+}
+
+// Show or hide the inline "already bookmarked" subtitle under the URL field
+async function updateShareDuplicateNotice(url) {
+  const notice = document.getElementById('shareDuplicateNotice');
+  const textEl = notice?.querySelector('.share-duplicate-text');
+  const toggle = document.getElementById('shareDuplicateToggle');
+  const pathList = document.getElementById('shareDuplicatePaths');
+  if (!notice || !textEl || !toggle || !pathList) return;
+
+  const matches = findDuplicateBookmarks(url);
+
+  if (matches.length === 0) {
+    notice.classList.add('hidden');
+    pathList.classList.add('hidden');
+    pathList.innerHTML = '';
+    toggle.textContent = 'Show location';
+    toggle.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  textEl.textContent = matches.length === 1
+    ? 'This site is already in your bookmarks.'
+    : `This site is already in your bookmarks (${matches.length} copies).`;
+
+  // Resolve the full folder path for each copy
+  const paths = [];
+  for (const match of matches) {
+    const parent = findParentById(bookmarkTree, match.id);
+    const path = parent ? await getFolderPath(parent.id) : 'Root';
+    paths.push({ path, title: match.title });
+  }
+
+  pathList.innerHTML = '';
+  paths.forEach(entry => {
+    const li = document.createElement('li');
+    li.textContent = `${entry.path} / ${entry.title}`;
+    pathList.appendChild(li);
+  });
+
+  toggle.textContent = matches.length === 1 ? 'Show location' : 'Show locations';
+  toggle.setAttribute('aria-expanded', 'false');
+  pathList.classList.add('hidden');
+  notice.classList.remove('hidden');
+}
+
+function clearShareDuplicateNotice() {
+  const notice = document.getElementById('shareDuplicateNotice');
+  const pathList = document.getElementById('shareDuplicatePaths');
+  if (notice) notice.classList.add('hidden');
+  if (pathList) {
+    pathList.classList.add('hidden');
+    pathList.innerHTML = '';
+  }
+}
+
+// Render a status line inside the add-bookmark modal, with optional action buttons
+function setShareStatus(kind, stage, reason, actions = []) {
+  const el = document.getElementById('addBookmarkStatus');
+  if (!el) return;
+
+  el.className = `share-status ${kind}`;
+  el.querySelector('.share-status-stage').textContent = stage || '';
+
+  const reasonEl = el.querySelector('.share-status-reason');
+  reasonEl.textContent = reason || '';
+  reasonEl.style.display = reason ? '' : 'none';
+
+  const actionsEl = el.querySelector('.share-status-actions');
+  actionsEl.innerHTML = '';
+  actions.forEach(action => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = action.primary ? 'btn btn-primary' : 'btn';
+    btn.textContent = action.label;
+    btn.addEventListener('click', action.onClick);
+    actionsEl.appendChild(btn);
+  });
+  actionsEl.style.display = actions.length ? '' : 'none';
+}
+
+function clearShareStatus() {
+  const el = document.getElementById('addBookmarkStatus');
+  if (!el) return;
+  el.className = 'share-status hidden';
+  el.querySelector('.share-status-stage').textContent = '';
+  el.querySelector('.share-status-reason').textContent = '';
+  el.querySelector('.share-status-actions').innerHTML = '';
+}
+
+function setShareSaveEnabled(enabled) {
+  const saveBtn = document.getElementById('addBookmarkModalSave');
+  if (saveBtn) saveBtn.disabled = !enabled;
+}
+
+// Turn a thrown value into something worth showing the user
+function describeSyncError(error) {
+  const message = (error && error.message) ? error.message : String(error || 'Unknown error');
+  if (/Failed to fetch|NetworkError|network/i.test(message)) {
+    return 'Could not reach GitLab. Check your connection.';
+  }
+  if (/rate limit/i.test(message)) {
+    return message;
+  }
+  if (/not found/i.test(message)) {
+    return 'The GitLab snippet no longer exists. Open BMZ and set up sync again.';
+  }
+  if (/401|403|unauthorized|forbidden/i.test(message)) {
+    return 'GitLab rejected the request. Your token may have expired.';
+  }
+  return message;
+}
+
+// True when a remote is configured and we are expected to sync
+function isRemoteConfigured() {
+  return !!syncManager.getRemoteId();
+}
+
+// Stage 1: pull the latest tree so we never push a stale one back over it
+async function runSharePull() {
+  if (!isRemoteConfigured()) return { skipped: true, reason: 'local-only' };
+
+  if (!navigator.onLine) {
+    throw new Error('This device is offline.');
+  }
+
+  await syncManager.syncFromRemote(false, true);
+  await bookmarkManager.reload();
+  await loadBookmarks();
+
+  // Refresh the folder picker against the freshly pulled tree
+  const folderSelect = document.getElementById('newBookmarkFolder');
+  if (folderSelect) {
+    const previous = folderSelect.value;
+    const sortPref = safeLocalStorage.getItem('sortFoldersAlphabetically') === 'true';
+    populateFolderDropdown(folderSelect, sortPref);
+    if (previous && folderSelect.querySelector(`option[value="${CSS.escape(previous)}"]`)) {
+      folderSelect.value = previous;
+    } else {
+      applyDefaultBookmarkFolder(folderSelect);
+    }
+    renderRecentFolderChips(folderSelect);
+  }
+
+  // The pulled tree may contain copies this device had not seen yet
+  const urlInput = document.getElementById('newBookmarkUrl');
+  if (urlInput) await updateShareDuplicateNotice(urlInput.value);
+
+  return { skipped: false };
+}
+
+// Kick off the pull in the background while the user reviews the form
+function startSharePull() {
+  shareFlow.pullError = null;
+
+  if (!isRemoteConfigured()) {
+    shareFlow.pullPromise = Promise.resolve({ skipped: true });
+    clearShareStatus();
+    return;
+  }
+
+  setShareStatus('info', 'Checking cloud for latest bookmarks...', '');
+
+  shareFlow.pullPromise = runSharePull()
+    .then(result => {
+      clearShareStatus();
+      return result;
+    })
+    .catch(error => {
+      console.error('[Share] Pull failed:', error);
+      shareFlow.pullError = error;
+      setShareStatus(
+        'error',
+        'Could not fetch your latest bookmarks',
+        describeSyncError(error),
+        [
+          { label: 'Retry', primary: true, onClick: () => startSharePull() }
+        ]
+      );
+      return { failed: true };
+    });
+}
+
+// Open the add-bookmark modal prefilled from an Android share intent
+async function openShareBookmarkModal(url, title) {
+  window.__bmzShareMode = true;
+
+  await openAddBookmarkModal();
+
+  const titleInput = document.getElementById('newBookmarkTitle');
+  const urlInput = document.getElementById('newBookmarkUrl');
+  const modalTitle = document.getElementById('addBookmarkModalTitle');
+  const saveBtn = document.getElementById('addBookmarkModalSave');
+
+  if (modalTitle) modalTitle.textContent = 'Save to Bookmark Manager Zero';
+  if (saveBtn) saveBtn.textContent = 'Save Bookmark';
+  if (urlInput) urlInput.value = url || '';
+  if (titleInput) {
+    titleInput.value = title || '';
+    titleInput.select();
+  }
+
+  // Inline duplicate notice, refreshed as the URL is edited
+  const toggle = document.getElementById('shareDuplicateToggle');
+  const pathList = document.getElementById('shareDuplicatePaths');
+  if (toggle && pathList && !toggle.dataset.bound) {
+    toggle.dataset.bound = 'true';
+    toggle.addEventListener('click', () => {
+      const showing = !pathList.classList.toggle('hidden');
+      const count = pathList.children.length;
+      const noun = count === 1 ? 'location' : 'locations';
+      toggle.textContent = showing ? `Hide ${noun}` : `Show ${noun}`;
+      toggle.setAttribute('aria-expanded', String(showing));
+    });
+  }
+
+  if (urlInput && !urlInput.dataset.dupBound) {
+    urlInput.dataset.dupBound = 'true';
+    let dupTimer = null;
+    urlInput.addEventListener('input', () => {
+      clearTimeout(dupTimer);
+      dupTimer = setTimeout(() => updateShareDuplicateNotice(urlInput.value), 250);
+    });
+  }
+
+  await updateShareDuplicateNotice(url);
+
+  startSharePull();
+}
+
+// Stage 3: push the new bookmark up. Force is safe here because we just pulled.
+async function runSharePush() {
+  if (!isRemoteConfigured()) return { skipped: true };
+
+  if (!navigator.onLine) {
+    throw new Error('This device is offline.');
+  }
+
+  await syncManager.syncToRemote(true);
+
+  // syncToRemote can return early without throwing, so confirm it actually landed
+  const stillPending = await syncManager.hasPendingChanges();
+  if (stillPending) {
+    throw new Error('GitLab did not confirm the update.');
+  }
+
+  return { skipped: false };
+}
+
+// Push with retry UI. The bookmark is already saved locally by this point.
+async function pushSharedBookmark(folderPath) {
+  if (!isRemoteConfigured()) {
+    finishShare(`Saved to ${folderPath}`);
+    return;
+  }
+
+  setShareStatus('info', 'Syncing to GitLab...', '');
+  setShareSaveEnabled(false);
+
+  try {
+    await runSharePush();
+    finishShare(`Saved to ${folderPath} and synced`);
+  } catch (error) {
+    console.error('[Share] Push failed:', error);
+    await syncManager.markPendingChanges(true);
+    setShareStatus(
+      'error',
+      'Saved on this device, but the sync to GitLab failed',
+      `${describeSyncError(error)} It will sync the next time BMZ opens.`,
+      [
+        { label: 'Retry sync', primary: true, onClick: () => pushSharedBookmark(folderPath) },
+        { label: 'Close', onClick: () => finishShare(null) }
+      ]
+    );
+    setShareSaveEnabled(true);
+  }
+}
+
+// Report success and hand control back to the Android host if present
+function finishShare(successMessage) {
+  if (successMessage) {
+    setShareStatus('success', successMessage, '');
+  }
+
+  // closeAddBookmarkModal is the single exit point and dismisses the host window
+  setTimeout(closeAddBookmarkModal, successMessage ? 900 : 0);
+}
+
+// Stage 2 wrapper: wait on the pull, write the bookmark, then push
+async function saveSharedBookmark(title, url, parentId) {
+  setShareSaveEnabled(false);
+
+  try {
+    // Wait for the background pull before touching the tree
+    const pullResult = await (shareFlow.pullPromise || Promise.resolve({ skipped: true }));
+
+    if (pullResult && pullResult.failed) {
+      setShareStatus(
+        'error',
+        'Not synced with the cloud yet',
+        `${describeSyncError(shareFlow.pullError)} Saving now risks overwriting changes made on your other devices.`,
+        [
+          {
+            label: 'Retry sync',
+            primary: true,
+            onClick: async () => {
+              startSharePull();
+              setShareSaveEnabled(true);
+            }
+          },
+          {
+            label: 'Save on this device only',
+            onClick: () => saveSharedBookmarkLocalOnly(title, url, parentId)
+          }
+        ]
+      );
+      setShareSaveEnabled(true);
+      return;
+    }
+
+    setShareStatus('info', 'Saving bookmark...', '');
+
+    const folderPath = await createSharedBookmark(title, url, parentId);
+    await pushSharedBookmark(folderPath);
+  } catch (error) {
+    console.error('[Share] Save failed:', error);
+    setShareStatus(
+      'error',
+      'Could not save the bookmark',
+      describeSyncError(error),
+      [
+        { label: 'Retry', primary: true, onClick: () => saveSharedBookmark(title, url, parentId) }
+      ]
+    );
+    setShareSaveEnabled(true);
+  }
+}
+
+// Explicit user choice: skip the cloud, write locally, leave it pending
+async function saveSharedBookmarkLocalOnly(title, url, parentId) {
+  setShareSaveEnabled(false);
+  setShareStatus('info', 'Saving on this device...', '');
+
+  try {
+    const folderPath = await createSharedBookmark(title, url, parentId);
+    await syncManager.markPendingChanges(true);
+    finishShare(`Saved to ${folderPath} on this device. It will sync later.`);
+  } catch (error) {
+    console.error('[Share] Local-only save failed:', error);
+    setShareStatus(
+      'error',
+      'Could not save the bookmark',
+      describeSyncError(error),
+      [
+        { label: 'Retry', primary: true, onClick: () => saveSharedBookmarkLocalOnly(title, url, parentId) }
+      ]
+    );
+    setShareSaveEnabled(true);
+  }
+}
+
+// Shared write step used by both the synced and local-only share paths
+async function createSharedBookmark(title, url, parentId) {
+  const newBookmark = await bookmarkManager.create({
+    title: title || url,
+    url,
+    parentId
+  });
+
+  shareFlow.saved = true;
+
+  const folderPath = parentId ? await getFolderPath(parentId) : 'Root';
+  await addChangelogEntry('create', 'bookmark', newBookmark.title, newBookmark.url, { folderPath });
+
+  recordRecentFolder(parentId);
+  safeLocalStorage.setItem('lastBookmarkFolder', parentId);
+
+  await loadBookmarks();
+  renderBookmarks();
+
+  return folderPath;
 }
 
 // Save new bookmark
@@ -4599,6 +5127,14 @@ async function saveNewBookmark() {
 
 
   try {
+    /* [ZeroLabs] 2026-08-09 1:31 PM - added: share flow owns pull/save/push */
+    // Share mode shows duplicates inline under the URL field instead of
+    // blocking on a confirm dialog, so it skips the prompt below
+    if (window.__bmzShareMode) {
+      await saveSharedBookmark(title, url, parentId);
+      return;
+    }
+
     // SAFETY: Check for duplicate bookmarks to prevent accidental duplication
     const existingBookmarks = bookmarkManager.search(url);
     if (existingBookmarks.length > 0) {
@@ -4623,8 +5159,10 @@ async function saveNewBookmark() {
     await addChangelogEntry('create', 'bookmark', newBookmark.title, newBookmark.url, { folderPath });
 
     // Remember the selected folder for next time
+    /* [ZeroLabs] 2026-08-09 1:31 PM - edited: also feed the recent folder MRU */
     if (parentId) {
       safeLocalStorage.setItem('lastBookmarkFolder', parentId);
+      recordRecentFolder(parentId);
     }
 
     await loadBookmarks();
@@ -4870,6 +5408,11 @@ async function saveMoveToModal() {
       fromFolder,
       toFolder
     });
+
+    /* [ZeroLabs] 2026-08-09 1:31 PM - added: moving a bookmark counts as saving into a folder */
+    if (itemType === 'bookmark') {
+      recordRecentFolder(destinationId);
+    }
 
     closeMoveToModal();
     await loadBookmarks();
@@ -8055,3 +8598,6 @@ if (document.readyState === 'loading') {
 
 // Export full init function for app.js to call after authentication
 window.initSidebar = init;
+
+/* [ZeroLabs] 2026-08-09 1:31 PM - added: entry point for Android share intents */
+window.openShareBookmarkModal = openShareBookmarkModal;
