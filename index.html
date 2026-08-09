@@ -2660,6 +2660,103 @@
       color: var(--md-sys-color-on-primary-container);
     }
 
+    /* [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker */
+    /* Desktop keeps the native select, which already renders as a real
+       dropdown; only the share window swaps in the tree */
+    .folder-picker { display: none; }
+    .share-mode .folder-picker { display: block; }
+    .share-mode #newBookmarkFolder { display: none; }
+
+    .folder-picker-toggle {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 12px 16px;
+      border: 1px solid var(--md-sys-color-outline);
+      border-radius: 8px;
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface);
+      font-size: 14px;
+      font-family: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .folder-picker-toggle:focus {
+      outline: none;
+      border-color: var(--md-sys-color-primary);
+    }
+    .folder-picker-value {
+      flex: 1;
+      min-width: 0;
+      white-space: nowrap;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .folder-picker-value::-webkit-scrollbar { display: none; }
+    .folder-picker-caret {
+      flex-shrink: 0;
+      font-size: 12px;
+      color: var(--md-sys-color-on-surface-variant);
+      transition: transform 0.15s ease;
+    }
+    .folder-picker-toggle[aria-expanded="true"] .folder-picker-caret {
+      transform: rotate(180deg);
+    }
+
+    /* Expands inline beneath the button. The modal content is a scroll
+       container, so an absolutely positioned panel would be clipped by it. */
+    .folder-picker-panel {
+      margin-top: 6px;
+      border: 1px solid var(--md-sys-color-outline-variant);
+      border-radius: 8px;
+      background: var(--md-sys-color-surface);
+      max-height: 240px;
+      overflow-y: auto;
+      overflow-x: auto;
+    }
+    .folder-picker-panel.hidden { display: none; }
+
+    .folder-picker-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 10px;
+      font-size: 13px;
+      color: var(--md-sys-color-on-surface);
+      cursor: pointer;
+      white-space: nowrap;
+      border-bottom: 1px solid var(--md-sys-color-outline-variant);
+    }
+    .folder-picker-row:last-child { border-bottom: none; }
+    .folder-picker-row:hover { background: var(--md-sys-color-surface-variant); }
+    .folder-picker-row.selected {
+      background: var(--md-sys-color-primary-container);
+      color: var(--md-sys-color-on-primary-container);
+    }
+
+    /* Expand toggle is its own hit target so opening a parent does not
+       select it, matching the folder list in the main app */
+    .folder-picker-twisty {
+      flex-shrink: 0;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: none;
+      background: none;
+      padding: 0;
+      font-size: 10px;
+      color: var(--md-sys-color-on-surface-variant);
+      cursor: pointer;
+      transition: transform 0.15s ease;
+    }
+    .folder-picker-twisty.expanded { transform: rotate(90deg); }
+    .folder-picker-twisty.leaf { visibility: hidden; cursor: default; }
+
+    .folder-picker-name { white-space: nowrap; }
+
     /* [ZeroLabs] 2026-08-09 1:31 PM - added: duplicate bookmark notice */
     .share-duplicate {
       margin-top: 6px;
@@ -3827,6 +3924,17 @@
           <select id="newBookmarkFolder" class="form-input">
             <option value="">Root</option>
           </select>
+          <!-- [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker (share window) -->
+          <!-- The select above stays in the DOM as the value holder; this is its
+               visible replacement in the share window, where Android renders a
+               native select as a full-screen list instead of a dropdown -->
+          <div class="folder-picker" id="newBookmarkFolderPicker">
+            <button type="button" class="folder-picker-toggle" id="newBookmarkFolderToggle" aria-expanded="false">
+              <span class="folder-picker-value" id="newBookmarkFolderValue">Select a folder</span>
+              <span class="folder-picker-caret" aria-hidden="true">&#9662;</span>
+            </button>
+            <div class="folder-picker-panel hidden" id="newBookmarkFolderPanel" role="tree"></div>
+          </div>
           <!-- [ZeroLabs] 2026-08-09 1:31 PM - added: recent saved-into folder chips -->
           <div id="recentFoldersRow" class="recent-folders-row hidden">
             <span class="recent-folders-label">Recently saved to</span>

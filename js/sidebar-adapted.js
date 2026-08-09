@@ -4592,11 +4592,8 @@ function renderRecentFolderChips(selectElement) {
     chip.textContent = folder?.title || 'Unnamed Folder';
     chip.title = chip.textContent;
     if (selectElement.value === id) chip.classList.add('active');
-    chip.addEventListener('click', () => {
-      selectElement.value = id;
-      row.querySelectorAll('.recent-folder-chip').forEach(c => c.classList.remove('active'));
-      chip.classList.add('active');
-    });
+    /* [ZeroLabs] 2026-08-09 1:43 PM - edited: route through the shared selection setter */
+    chip.addEventListener('click', () => setSelectedFolder(selectElement, id));
     row.appendChild(chip);
   });
 
@@ -4631,6 +4628,8 @@ async function openAddBookmarkModal() {
   /* [ZeroLabs] 2026-08-09 1:31 PM - edited: default to most recent saved-into folder */
   applyDefaultBookmarkFolder(folderSelect);
   renderRecentFolderChips(folderSelect);
+  /* [ZeroLabs] 2026-08-09 1:43 PM - added: sync the tree picker to the selection */
+  initFolderPicker(folderSelect);
 
   // Add event listener for sort checkbox
   sortCheckbox.addEventListener('change', (e) => {
@@ -4642,6 +4641,7 @@ async function openAddBookmarkModal() {
       folderSelect.value = previous;
     }
     renderRecentFolderChips(folderSelect);
+    renderFolderTreePicker(folderSelect);
   });
 
   modal.classList.remove('hidden');
@@ -4682,6 +4682,177 @@ const shareFlow = {
   saved: false,
   closing: false
 };
+
+/* [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker */
+
+// Which parent folders are currently expanded in the picker panel
+const folderPicker = { expanded: new Set() };
+
+// Ancestor folder IDs of a folder, nearest parent first
+function getFolderAncestorPath(folderId) {
+  const path = [];
+  let current = folderId;
+  let guard = 0;
+
+  while (current && guard++ < 200) {
+    const parent = findParentById(bookmarkTree, current);
+    if (!parent) break;
+    path.push(parent.id);
+    current = parent.id;
+  }
+
+  return path;
+}
+
+// Show the full path of the selected folder on the picker button
+async function updateFolderPickerLabel(select) {
+  const valueEl = document.getElementById('newBookmarkFolderValue');
+  if (!valueEl) return;
+
+  if (!select.value) {
+    valueEl.textContent = 'Select a folder';
+    return;
+  }
+
+  valueEl.textContent = await getFolderPath(select.value);
+}
+
+// Single place that changes the target folder, so the hidden select, the
+// button label, the chips and the tree rows can never disagree
+function setSelectedFolder(select, folderId) {
+  select.value = folderId;
+  updateFolderPickerLabel(select);
+
+  const chipRow = document.getElementById('recentFoldersRow');
+  if (chipRow) {
+    chipRow.querySelectorAll('.recent-folder-chip').forEach(chip => {
+      chip.classList.toggle('active', chip.dataset.folderId === folderId);
+    });
+  }
+
+  const panel = document.getElementById('newBookmarkFolderPanel');
+  if (panel) {
+    panel.querySelectorAll('.folder-picker-row').forEach(row => {
+      row.classList.toggle('selected', row.dataset.folderId === folderId);
+    });
+  }
+
+  closeFolderPickerPanel();
+}
+
+// Build the indented, expandable folder tree
+function renderFolderTreePicker(select) {
+  const panel = document.getElementById('newBookmarkFolderPanel');
+  if (!panel) return;
+
+  const sortAlpha = safeLocalStorage.getItem('sortFoldersAlphabetically') === 'true';
+  panel.innerHTML = '';
+
+  const addRows = (nodes, depth) => {
+    if (!Array.isArray(nodes)) return;
+
+    let folders = nodes.filter(node => node.type === 'folder');
+    if (sortAlpha) {
+      folders = folders.slice().sort((a, b) =>
+        (a.title || '').toLowerCase().localeCompare((b.title || '').toLowerCase())
+      );
+    }
+
+    for (const folder of folders) {
+      const childFolders = (folder.children || []).filter(child => child.type === 'folder');
+      const isExpanded = folderPicker.expanded.has(folder.id);
+
+      const row = document.createElement('div');
+      row.className = 'folder-picker-row' + (select.value === folder.id ? ' selected' : '');
+      row.dataset.folderId = folder.id;
+      row.style.paddingLeft = (10 + depth * 16) + 'px';
+      row.setAttribute('role', 'treeitem');
+      row.setAttribute('aria-selected', String(select.value === folder.id));
+
+      // Expanding a parent is a separate hit target from selecting it,
+      // the same way the folder list behaves in the main app
+      const twisty = document.createElement('button');
+      twisty.type = 'button';
+      twisty.className = 'folder-picker-twisty'
+        + (childFolders.length ? (isExpanded ? ' expanded' : '') : ' leaf');
+      twisty.textContent = String.fromCharCode(0x25B6);
+
+      if (childFolders.length) {
+        twisty.setAttribute('aria-label', isExpanded ? 'Collapse folder' : 'Expand folder');
+        twisty.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (isExpanded) {
+            folderPicker.expanded.delete(folder.id);
+          } else {
+            folderPicker.expanded.add(folder.id);
+          }
+          renderFolderTreePicker(select);
+        });
+      } else {
+        twisty.tabIndex = -1;
+      }
+      row.appendChild(twisty);
+
+      const name = document.createElement('span');
+      name.className = 'folder-picker-name';
+      name.textContent = folder.title || 'Unnamed Folder';
+      row.appendChild(name);
+
+      row.addEventListener('click', () => setSelectedFolder(select, folder.id));
+      panel.appendChild(row);
+
+      if (isExpanded && childFolders.length) {
+        addRows(folder.children, depth + 1);
+      }
+    }
+  };
+
+  addRows(bookmarkTree, 0);
+}
+
+function openFolderPickerPanel(select) {
+  const panel = document.getElementById('newBookmarkFolderPanel');
+  const toggle = document.getElementById('newBookmarkFolderToggle');
+  if (!panel || !toggle) return;
+
+  // Reveal the current selection rather than making the user hunt for it
+  getFolderAncestorPath(select.value).forEach(id => folderPicker.expanded.add(id));
+  renderFolderTreePicker(select);
+
+  panel.classList.remove('hidden');
+  toggle.setAttribute('aria-expanded', 'true');
+
+  const selectedRow = panel.querySelector('.folder-picker-row.selected');
+  if (selectedRow) selectedRow.scrollIntoView({ block: 'nearest' });
+}
+
+function closeFolderPickerPanel() {
+  const panel = document.getElementById('newBookmarkFolderPanel');
+  const toggle = document.getElementById('newBookmarkFolderToggle');
+  if (panel) panel.classList.add('hidden');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
+}
+
+// Bind the picker once and sync it to the current selection
+function initFolderPicker(select) {
+  const toggle = document.getElementById('newBookmarkFolderToggle');
+  if (!toggle) return;
+
+  if (!toggle.dataset.bound) {
+    toggle.dataset.bound = 'true';
+    toggle.addEventListener('click', () => {
+      const panel = document.getElementById('newBookmarkFolderPanel');
+      if (panel && panel.classList.contains('hidden')) {
+        openFolderPickerPanel(select);
+      } else {
+        closeFolderPickerPanel();
+      }
+    });
+  }
+
+  closeFolderPickerPanel();
+  updateFolderPickerLabel(select);
+}
 
 // Normalize a URL so trivial differences do not hide a real duplicate.
 // Protocol, a leading www., and a trailing slash are ignored; query and
@@ -4855,6 +5026,9 @@ async function runSharePull() {
       applyDefaultBookmarkFolder(folderSelect);
     }
     renderRecentFolderChips(folderSelect);
+    /* [ZeroLabs] 2026-08-09 1:43 PM - added: refresh picker against pulled tree */
+    updateFolderPickerLabel(folderSelect);
+    renderFolderTreePicker(folderSelect);
   }
 
   // The pulled tree may contain copies this device had not seen yet
@@ -4907,7 +5081,8 @@ async function openShareBookmarkModal(url, title) {
   const modalTitle = document.getElementById('addBookmarkModalTitle');
   const saveBtn = document.getElementById('addBookmarkModalSave');
 
-  if (modalTitle) modalTitle.textContent = 'Save to Bookmark Manager Zero';
+  /* [ZeroLabs] 2026-08-09 1:43 PM - edited: short title so it clears the X on any screen */
+  if (modalTitle) modalTitle.textContent = 'Save to BMZ';
   if (saveBtn) saveBtn.textContent = 'Save Bookmark';
   if (urlInput) urlInput.value = url || '';
   if (titleInput) {
