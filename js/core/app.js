@@ -1062,6 +1062,7 @@ class App {
       console.log(`[UseRemoteStorage] Has local bookmarks: ${hasLocalBookmarks}`);
 
       if (hasLocalBookmarks) {
+        /* [ZeroLabs] 2026-08-18 12:32 AM - edited: fall back to the diff when checksums differ (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
         // Compare checksums — skip the dialog if local and remote are already identical
         let alreadyInSync = false;
         try {
@@ -1071,6 +1072,19 @@ class App {
             const localChecksum = await snippetAdapter.calculateChecksum(localTree);
             const remoteChecksum = remoteData.checksum || await snippetAdapter.calculateChecksum(remoteData);
             alreadyInSync = localChecksum === remoteChecksum;
+
+            if (!alreadyInSync) {
+              // The checksum is byte-exact over the whole tree, titles included,
+              // and Firefox writes its toolbar root as "Bookmarks Toolbar" while
+              // Chrome writes "Bookmarks bar". It therefore can never match on a
+              // snippet last written by a different browser. The diff is the
+              // authoritative comparison: it normalizes those root naming
+              // differences and the browser's internal-URL rewrites, so an empty
+              // diff means genuinely in sync even when the hashes disagree.
+              const diff = syncManager.calculateBookmarkDiff(localTree, remoteData);
+              alreadyInSync = (diff.added.length + diff.removed.length +
+                               diff.moved.length + diff.modified.length) === 0;
+            }
           }
         } catch (e) {
           // Comparison failed — fall through to show dialog as normal

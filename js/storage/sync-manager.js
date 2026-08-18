@@ -344,6 +344,26 @@ class SyncManager {
       return normalized[title] || title;
     };
 
+    /* [ZeroLabs] 2026-08-18 12:32 AM - added: match browser-rewritten internal URLs (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+    // BMZ stores and transmits every URL verbatim, but chrome.bookmarks.create
+    // canonicalizes browser-internal URLs before writing them, so a bookmark
+    // pushed as about:debugging#/runtime/this-firefox comes back from Chrome as
+    // chrome://debugging/#/runtime/this-firefox. Nothing in BMZ changed it and
+    // neither did the user, so the diff must not report it as an edit.
+    //
+    // Comparison only. Nothing is rewritten, stored, or applied.
+    const normalizeUrlForDiff = (url) => {
+      if (!url) return url;
+      const scheme = /^(about:|chrome:\/\/)/i.exec(url);
+      if (!scheme) return url; // Ordinary URLs are compared exactly as before
+
+      let rest = url.slice(scheme[0].length);
+      // chrome:// parses the first segment as a host and gives it a trailing
+      // slash that the opaque about: form does not have
+      rest = rest.replace(/\/(?=#)/, '').replace(/\/$/, '');
+      return `internal:${rest.toLowerCase()}`;
+    };
+
     // Recursively map all items by content-based key (not ID, since different browsers use different IDs)
     const mapItems = (node, map, parentPath = '') => {
       if (!node) return;
@@ -357,7 +377,7 @@ class SyncManager {
         // Use content-based key instead of ID
         const isBookmark = node.url || node.type === 'bookmark';
         const key = isBookmark
-          ? `bookmark:${node.url}:${path}`
+          ? `bookmark:${normalizeUrlForDiff(node.url)}:${path}`
           : `folder:${path}`;
 
         map.set(key, { node, path, parentId: node.parentId, originalId: node.id });
@@ -424,7 +444,10 @@ class SyncManager {
         const normalizedLocalTitle = normalizeTitle(localValue.node.title || '');
         const normalizedRemoteTitle = normalizeTitle(remoteValue.node.title || '');
         const titleDiffers = normalizedLocalTitle !== normalizedRemoteTitle;
-        const urlDiffers = localValue.node.url !== remoteValue.node.url;
+        /* [ZeroLabs] 2026-08-18 12:32 AM - edited: ignore browser-rewritten internal URLs */
+        // Same normalization as the content key above. Without it the pair
+        // matches as the same bookmark and then immediately reports as an edit.
+        const urlDiffers = normalizeUrlForDiff(localValue.node.url) !== normalizeUrlForDiff(remoteValue.node.url);
         if (titleDiffers || urlDiffers) {
           diff.modified.push({
             id: localValue.originalId,
@@ -475,6 +498,15 @@ class SyncManager {
       if (rateLimitStatus.remaining !== null && rateLimitStatus.remaining < 10) {
         const resetDate = new Date(rateLimitStatus.reset * 1000);
         throw new Error(`API rate limit nearly exhausted (${rateLimitStatus.remaining} remaining). Sync will retry after ${resetDate.toLocaleTimeString()}`);
+      }
+
+      /* [ZeroLabs] 2026-08-18 12:32 AM - added: converge pins on every pull (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
+      // Pins can differ even when the bookmarks themselves are identical, so
+      // this runs regardless of whether the tree turns out to have changed.
+      if (typeof window !== 'undefined' && window.bmzQuickAccessMeta) {
+        await window.bmzQuickAccessMeta.loadForSnippet(remoteId).catch(err => {
+          console.error('[QuickAccess] Pin sync failed:', err);
+        });
       }
 
       const remoteData = await adapter.readBookmarks(remoteId);

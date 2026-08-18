@@ -553,6 +553,48 @@ class SnippetAdapter {
   /**
    * Update Snippet with new bookmark data
    */
+  /* [ZeroLabs] 2026-08-18 12:32 AM - added: read quick access meta file (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+  // Returns { pins, tombstones, exists } or null on a network/auth failure, so
+  // callers can tell "no pins yet" apart from "could not check".
+  async readQuickAccessMeta(snippetId = null) {
+    const id = snippetId || this.snippetId;
+    if (!id) return null;
+
+    try {
+      const headers = await this.getHeaders();
+      const response = await fetch(`${this.apiBase}/snippets/${id}`, { headers });
+      if (!response.ok) return null;
+
+      const snippet = await response.json();
+      const metaFile = snippet.files?.find(f =>
+        f.path === 'bmz-meta.json' || f.file_name === 'bmz-meta.json'
+      );
+
+      // A snippet with no meta file means no pins yet, which is the normal state
+      // of every snippet that existed before this feature. Not an error.
+      if (!metaFile) return { pins: [], tombstones: [], exists: false };
+
+      let content = metaFile.content;
+      if (!content) {
+        const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bmz-meta.json/raw`, { headers });
+        if (!fileResponse.ok) return { pins: [], tombstones: [], exists: true };
+        content = await fileResponse.text();
+      }
+
+      if (!content || content.trim() === '') return { pins: [], tombstones: [], exists: true };
+
+      const parsed = JSON.parse(content);
+      return {
+        pins: Array.isArray(parsed.quickAccess) ? parsed.quickAccess : [],
+        tombstones: Array.isArray(parsed.quickAccessRemoved) ? parsed.quickAccessRemoved : [],
+        exists: true
+      };
+    } catch (error) {
+      console.error('[ReadSnippet] Failed to read quick access meta:', error);
+      return null;
+    }
+  }
+
   async updateBookmarks(snippetId = null, bookmarkTree, version = null) {
     const id = snippetId || this.snippetId;
     console.log('[UpdateSnippet] Attempting to update Snippet:', {
@@ -579,20 +621,44 @@ class SnippetAdapter {
       // Check rate limits before updating
       this.checkRateLimit();
 
+      /* [ZeroLabs] 2026-08-18 12:32 AM - added: push quick access meta alongside (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+      // Pins live in their own file so a client that has never heard of Quick
+      // Access cannot blank them: GitLab only rewrites the files named in the
+      // request, and older builds name only bookmarks.json.
+      const files = [
+        {
+          action: 'update',
+          file_path: 'bookmarks.json',
+          content: JSON.stringify(dataWithMeta, null, 2)
+        }
+      ];
+
+      // Only ever write pins for a snippet whose meta has already been read,
+      // otherwise a snippet switch followed by a fast sync would overwrite the
+      // new snippet's pins with the previous snippet's cache.
+      const metaPayload = (typeof window !== 'undefined' && window.bmzQuickAccessMeta)
+        ? window.bmzQuickAccessMeta.buildPayloadFor(id)
+        : null;
+      if (metaPayload) {
+        files.push({
+          action: metaPayload.exists ? 'update' : 'create',
+          file_path: 'bmz-meta.json',
+          content: metaPayload.content
+        });
+      }
+
       const headers = await this.getHeaders();
       const response = await fetch(`${this.apiBase}/snippets/${id}`, {
         method: 'PUT',
         headers,
-        body: JSON.stringify({
-          files: [
-            {
-              action: 'update',
-              file_path: 'bookmarks.json',
-              content: JSON.stringify(dataWithMeta, null, 2)
-            }
-          ]
-        })
+        body: JSON.stringify({ files })
       });
+
+      // A successful write means the file is there now, so later pushes update
+      // rather than create.
+      if (metaPayload && response.ok && typeof window !== 'undefined' && window.bmzQuickAccessMeta) {
+        window.bmzQuickAccessMeta.markWritten();
+      }
 
       // Update rate limit tracking
       this.updateRateLimitFromResponse(response);
