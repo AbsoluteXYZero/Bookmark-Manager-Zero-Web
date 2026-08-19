@@ -2578,6 +2578,10 @@ class App {
 
     /* [ZeroLabs] 2026-06-20 10:47 AM - added: content-divergence nudge listener */
     window.addEventListener('sync:syncNudge', (e) => {
+      /* [ZeroLabs] 2026-08-19 7:12 PM - added: share window shows this inline instead */
+      // The share window presents the same information with sync actions
+      // attached, so a toast on top of it would just be a duplicate.
+      if (window.__bmzShareMode) return;
       if (e.detail) {
         this.showToast(e.detail, 'info');
       }

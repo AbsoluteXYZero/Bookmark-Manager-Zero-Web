@@ -5405,6 +5405,8 @@ const shareFlow = {
   /* [ZeroLabs] 2026-08-19 6:01 PM - added: captured deletion conflict */
   conflictDiff: null,
   conflictRemote: null,
+  /* [ZeroLabs] 2026-08-19 7:12 PM - added: captured divergence nudge */
+  nudgeMessage: null,
   watchdog: null
 };
 
@@ -5416,6 +5418,14 @@ window.addEventListener('sync:syncConflict', (e) => {
   if (!window.__bmzShareMode) return;
   shareFlow.conflictDiff = e.detail?.diff || null;
   shareFlow.conflictRemote = e.detail?.remoteData || null;
+});
+
+/* [ZeroLabs] 2026-08-19 7:12 PM - added: capture the divergence nudge too */
+// Emitted when versions match but content differs. Carries a message string
+// only, no diff, so the share window can warn but cannot list bookmarks.
+window.addEventListener('sync:syncNudge', (e) => {
+  if (!window.__bmzShareMode) return;
+  shareFlow.nudgeMessage = typeof e.detail === 'string' ? e.detail : null;
 });
 
 /* [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker */
@@ -5766,14 +5776,25 @@ async function runSharePull() {
     throw new Error('This device is offline.');
   }
 
-  /* [ZeroLabs] 2026-08-19 6:01 PM - added: treat a deletion conflict as its own result */
-  // syncFromRemote returns false (it does NOT throw) when the cloud has
-  // deletions this device has not applied. Ignoring that return value made the
-  // share flow believe it was in sync, so saving went on to force-push a stale
-  // local tree over the cloud and resurrect every deleted bookmark.
+  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: distinguish the three false returns */
+  // syncFromRemote returns false (it does NOT throw) in three different
+  // situations, and they mean very different things:
+  //   1. a real deletion conflict, which emits syncConflict carrying the diff
+  //   2. versions match but content differs, which emits syncNudge (text only)
+  //   3. local is already up to date, which emits nothing
+  // Case 3 is the normal path, so the boolean alone cannot be treated as a
+  // problem. Only the captured events distinguish 1 and 2 from it.
   const pulled = await syncManager.syncFromRemote(false, true);
-  if (pulled === false) {
+
+  if (pulled === false && shareFlow.conflictDiff) {
     return { conflict: true, diff: shareFlow.conflictDiff, remoteData: shareFlow.conflictRemote };
+  }
+
+  if (pulled === false && shareFlow.nudgeMessage) {
+    // Cloud and device differ with no deletions to apply. Local is still stale,
+    // so saving would force-push over the cloud's changes; warn, but there is
+    // no diff object here to list individual bookmarks from.
+    return { diverged: true, message: shareFlow.nudgeMessage };
   }
 
   await bookmarkManager.reload();
@@ -5807,6 +5828,35 @@ async function runSharePull() {
 // Present the conflict with the actual titles that would be lost, then offer
 // both directions. Previously this state was invisible to the share flow, so
 // saving force-pushed a stale local tree and undid the cloud's deletions.
+/* [ZeroLabs] 2026-08-19 7:12 PM - added: milder state for a no-deletion divergence */
+// Reached when versions match but content differs. There is no diff to itemise,
+// so this states the difference and offers the same two directions.
+function showShareDiverged(message) {
+  setShareStatus(
+    'error',
+    'Your bookmarks differ from the cloud',
+    message || 'This device and the cloud are out of step. Saving now would push this device\'s list over the cloud copy.',
+    [
+      { label: 'Sync from Cloud to Device', primary: true, onClick: () => resolveShareConflict('pull') },
+      { label: 'Sync from Device to Cloud', onClick: () => resolveShareConflict('push') },
+      {
+        label: 'Save on this device only',
+        onClick: () => {
+          const titleInput = document.getElementById('newBookmarkTitle');
+          const urlInput = document.getElementById('newBookmarkUrl');
+          const folderSelect = document.getElementById('newBookmarkFolder');
+          saveSharedBookmarkLocalOnly(
+            titleInput ? titleInput.value : '',
+            urlInput ? urlInput.value : '',
+            folderSelect ? folderSelect.value : null
+          );
+        }
+      }
+    ]
+  );
+  setShareSaveEnabled(false);
+}
+
 function showShareConflict(diff) {
   const removed = (diff && diff.removed) || [];
   const added = (diff && diff.added) || [];
@@ -5820,9 +5870,13 @@ function showShareConflict(diff) {
   if (modified.length) parts.push(`${modified.length} changed`);
 
   const noun = removed.length === 1 ? 'bookmark' : 'bookmarks';
+  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: never render an empty summary */
+  // parts is empty when this is called without a diff, which used to print a
+  // bare "()" and claim a difference that had not been established.
+  const summary = parts.length ? ` (${parts.join(', ')})` : '';
   const reason = removed.length
-    ? `The cloud has changes this device has not applied (${parts.join(', ')}). Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
-    : `The cloud has changes this device has not applied (${parts.join(', ')}).`;
+    ? `The cloud has changes this device has not applied${summary}. Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
+    : `The cloud has changes this device has not applied${summary}.`;
 
   // Cap the list so the floating share window stays usable on a phone
   const MAX_LISTED = 12;
@@ -5878,14 +5932,24 @@ async function resolveShareConflict(direction) {
 
   try {
     if (direction === 'pull') {
-      // applyRemoteSync, not syncFromRemote: force does NOT bypass the deletion
-      // guard, so re-pulling would just hit the same conflict again. This is the
-      // same call the full app's "Use Snippet" button makes once the user has
-      // decided, and it writes the remote tree including its deletions.
-      const remote = shareFlow.conflictRemote;
-      if (!remote) throw new Error('Lost track of the cloud copy. Retry the sync.');
-      const applied = await syncManager.applyRemoteSync(remote);
-      if (!applied) throw new Error('GitLab did not confirm the update.');
+      if (shareFlow.conflictRemote) {
+        // applyRemoteSync, not syncFromRemote: force does NOT bypass the
+        // deletion guard, so re-pulling would hit the same conflict again. This
+        // is the call the full app's "Use Snippet" button makes once the user
+        // has decided, and it writes the remote tree including its deletions.
+        const applied = await syncManager.applyRemoteSync(shareFlow.conflictRemote);
+        if (!applied) throw new Error('GitLab did not confirm the update.');
+      } else {
+        /* [ZeroLabs] 2026-08-19 7:12 PM - added: forced pull for the no-diff divergence */
+        // Versions matched, so only a forced pull enters the apply branch. If
+        // that turns out to involve deletions, the guard fires and hands back a
+        // real diff, which is worth showing before anything is applied.
+        const applied = await syncManager.syncFromRemote(true, true);
+        if (applied === false && shareFlow.conflictDiff) {
+          showShareConflict(shareFlow.conflictDiff);
+          return;
+        }
+      }
       await bookmarkManager.reload();
       await loadBookmarks();
     } else {
@@ -5945,6 +6009,7 @@ function startSharePull() {
   /* [ZeroLabs] 2026-08-19 6:01 PM - added: reset captured conflict on each attempt */
   shareFlow.conflictDiff = null;
   shareFlow.conflictRemote = null;
+  shareFlow.nudgeMessage = null;
 
   if (!isRemoteConfigured()) {
     shareFlow.pullPromise = Promise.resolve({ skipped: true });
@@ -5959,6 +6024,10 @@ function startSharePull() {
       /* [ZeroLabs] 2026-08-19 6:01 PM - added: surface a conflict instead of clearing */
       if (result && result.conflict) {
         showShareConflict(result.diff);
+        return result;
+      }
+      if (result && result.diverged) {
+        showShareDiverged(result.message);
         return result;
       }
       clearShareStatus();
@@ -6118,6 +6187,11 @@ async function saveSharedBookmark(title, url, parentId) {
     // undoing the deletions that exist on the cloud.
     if (pullResult && pullResult.conflict) {
       showShareConflict(pullResult.diff);
+      return;
+    }
+
+    if (pullResult && pullResult.diverged) {
+      showShareDiverged(pullResult.message);
       return;
     }
 
@@ -8151,10 +8225,31 @@ function setupEventListeners() {
   try {
     // Search
     if (searchInput) {
+      /* [ZeroLabs] 2026-08-19 7:12 PM - added: clear search button (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
+      // Shown only while there is something to clear, so it never sits in an
+      // empty box. Restores focus so typing can continue straight after.
+      const searchClear = document.getElementById('searchClear');
+      const updateSearchClear = () => {
+        if (searchClear) searchClear.classList.toggle('hidden', !searchInput.value);
+      };
+
       searchInput.addEventListener('input', (e) => {
         searchTerm = e.target.value;
+        updateSearchClear();
         renderBookmarks();
       });
+
+      if (searchClear) {
+        searchClear.addEventListener('click', () => {
+          searchInput.value = '';
+          searchTerm = '';
+          updateSearchClear();
+          renderBookmarks();
+          searchInput.focus();
+        });
+      }
+
+      updateSearchClear();
     } else {
       console.warn('[Setup] searchInput element not found');
     }
