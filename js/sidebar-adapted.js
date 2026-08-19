@@ -65,8 +65,8 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    /* [ZeroLabs] 2026-08-18 12:51 AM - edited: bump version to 1.9.0 */
-    getManifest: () => ({ version: '1.9.0' }),
+    /* [ZeroLabs] 2026-08-19 7:12 PM - edited: bump version to 2.0 */
+    getManifest: () => ({ version: '2.0' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -4008,15 +4008,13 @@ function openContextMenuModal(item, isFolder) {
       </button>
     `;
 
-    /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access pin/unpin action (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+    /* [ZeroLabs] 2026-08-19 5:23 PM - edited: pin and unpin share one slot above Delete (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+    // Both states occupy the SAME position, directly above Delete, so the item
+    // never moves when you pin or unpin: only its label and colour change.
+    // Only the removal state is red, since adding loses nothing. In the Quick
+    // Access menu Delete has been stripped, so it simply lands last there.
     const pinIcon = '<svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24"><path d="M12,17.27L18.18,21L16.54,13.97L22,9.24L14.81,8.62L12,2L9.19,8.62L2,9.24L7.45,13.97L5.82,21L12,17.27Z"/></svg>';
     const pinned = isPinned(item.url);
-    const pinButton = `
-      <button class="action-btn" data-action="${pinned ? 'unpin-quick-access' : 'pin-quick-access'}">
-        <span class="icon">${pinIcon}</span>
-        <span>${pinned ? 'Remove from Quick Access' : 'Add to Quick Access'}</span>
-      </button>
-    `;
 
     if (contextMenuOrigin === 'quick-access') {
       // Opened from the Quick Access section. Delete and Move to belong to the
@@ -4027,12 +4025,18 @@ function openContextMenuModal(item, isFolder) {
         .replace(/\s*<button class="action-btn" data-action="move-to">[\s\S]*?<\/button>/, '');
     }
 
-    // Sits directly under Open with Textise rather than at the bottom of the
-    // menu. Function replacer, not a $1 string, so the SVG path can never be
-    // read as a substitution pattern.
-    const readerViewButton = /<button class="action-btn" data-action="reader-view">[\s\S]*?<\/button>/;
-    if (readerViewButton.test(buttonsHtml)) {
-      buttonsHtml = buttonsHtml.replace(readerViewButton, (match) => match + pinButton);
+    const pinButton = `
+      <button class="action-btn${pinned ? ' danger' : ''}" data-action="${pinned ? 'unpin-quick-access' : 'pin-quick-access'}">
+        <span class="icon">${pinIcon}</span>
+        <span>${pinned ? 'Remove from Quick Access' : 'Add to Quick Access'}</span>
+      </button>
+    `;
+
+    // Function replacer, not a $1 string, so the SVG path can never be read as
+    // a substitution pattern.
+    const deleteButton = /<button class="action-btn danger" data-action="delete">[\s\S]*?<\/button>/;
+    if (deleteButton.test(buttonsHtml)) {
+      buttonsHtml = buttonsHtml.replace(deleteButton, (match) => pinButton + match);
     } else {
       buttonsHtml += pinButton;
     }
@@ -4918,10 +4922,17 @@ async function handleBookmarkAction(action, bookmark) {
       pinBookmark(bookmark);
       break;
 
-    case 'unpin-quick-access':
-      // Unpin only. The bookmark itself is never touched from here.
+    /* [ZeroLabs] 2026-08-19 5:23 PM - edited: confirm before unpinning */
+    case 'unpin-quick-access': {
+      // Unpin only. The bookmark itself is never touched from here, and the
+      // message says so, because the red styling would otherwise imply deletion.
+      const pinLabel = bookmark.title || bookmark.url;
+      if (!confirm(`Remove "${pinLabel}" from Quick Access?\n\nThis only unpins it. The bookmark itself will not be deleted.`)) {
+        break;
+      }
       unpinUrl(bookmark.url);
       break;
+    }
 
     case 'open':
       // Open in new tab (website version always opens in new tab)
@@ -5390,8 +5401,22 @@ const shareFlow = {
   pullPromise: null,
   pullError: null,
   saved: false,
-  closing: false
+  closing: false,
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: captured deletion conflict */
+  conflictDiff: null,
+  conflictRemote: null,
+  watchdog: null
 };
+
+/* [ZeroLabs] 2026-08-19 6:01 PM - added: capture sync conflicts inside the share window */
+// syncFromRemote emits this and then returns false. In share mode the generic
+// full-app conflict dialog is suppressed (see app.js) and the diff is handled
+// inline instead, so the decision can be made without leaving the share window.
+window.addEventListener('sync:syncConflict', (e) => {
+  if (!window.__bmzShareMode) return;
+  shareFlow.conflictDiff = e.detail?.diff || null;
+  shareFlow.conflictRemote = e.detail?.remoteData || null;
+});
 
 /* [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker */
 
@@ -5651,7 +5676,11 @@ function clearShareDuplicateNotice() {
 }
 
 // Render a status line inside the add-bookmark modal, with optional action buttons
-function setShareStatus(kind, stage, reason, actions = []) {
+/* [ZeroLabs] 2026-08-19 6:01 PM - edited: optional details list */
+// details is a plain array of strings, rendered as a scrollable list. Used to
+// name the bookmarks a sync would delete, so the choice is made against the
+// actual titles rather than just a count.
+function setShareStatus(kind, stage, reason, actions = [], details = []) {
   const el = document.getElementById('addBookmarkStatus');
   if (!el) return;
 
@@ -5661,6 +5690,17 @@ function setShareStatus(kind, stage, reason, actions = []) {
   const reasonEl = el.querySelector('.share-status-reason');
   reasonEl.textContent = reason || '';
   reasonEl.style.display = reason ? '' : 'none';
+
+  const detailsEl = el.querySelector('.share-status-details');
+  if (detailsEl) {
+    detailsEl.innerHTML = '';
+    details.forEach(text => {
+      const li = document.createElement('li');
+      li.textContent = text; // textContent, never innerHTML: these are bookmark titles
+      detailsEl.appendChild(li);
+    });
+    detailsEl.style.display = details.length ? 'block' : 'none';
+  }
 
   const actionsEl = el.querySelector('.share-status-actions');
   actionsEl.innerHTML = '';
@@ -5682,6 +5722,12 @@ function clearShareStatus() {
   el.querySelector('.share-status-stage').textContent = '';
   el.querySelector('.share-status-reason').textContent = '';
   el.querySelector('.share-status-actions').innerHTML = '';
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: clear the details list too */
+  const detailsEl = el.querySelector('.share-status-details');
+  if (detailsEl) {
+    detailsEl.innerHTML = '';
+    detailsEl.style.display = 'none';
+  }
 }
 
 function setShareSaveEnabled(enabled) {
@@ -5720,7 +5766,16 @@ async function runSharePull() {
     throw new Error('This device is offline.');
   }
 
-  await syncManager.syncFromRemote(false, true);
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: treat a deletion conflict as its own result */
+  // syncFromRemote returns false (it does NOT throw) when the cloud has
+  // deletions this device has not applied. Ignoring that return value made the
+  // share flow believe it was in sync, so saving went on to force-push a stale
+  // local tree over the cloud and resurrect every deleted bookmark.
+  const pulled = await syncManager.syncFromRemote(false, true);
+  if (pulled === false) {
+    return { conflict: true, diff: shareFlow.conflictDiff, remoteData: shareFlow.conflictRemote };
+  }
+
   await bookmarkManager.reload();
   await loadBookmarks();
 
@@ -5748,9 +5803,148 @@ async function runSharePull() {
   return { skipped: false };
 }
 
+/* [ZeroLabs] 2026-08-19 6:01 PM - added: resolve a deletion conflict inside the share window */
+// Present the conflict with the actual titles that would be lost, then offer
+// both directions. Previously this state was invisible to the share flow, so
+// saving force-pushed a stale local tree and undid the cloud's deletions.
+function showShareConflict(diff) {
+  const removed = (diff && diff.removed) || [];
+  const added = (diff && diff.added) || [];
+  const moved = (diff && diff.moved) || [];
+  const modified = (diff && diff.modified) || [];
+
+  const parts = [];
+  if (added.length) parts.push(`${added.length} added`);
+  if (removed.length) parts.push(`${removed.length} removed`);
+  if (moved.length) parts.push(`${moved.length} moved`);
+  if (modified.length) parts.push(`${modified.length} changed`);
+
+  const noun = removed.length === 1 ? 'bookmark' : 'bookmarks';
+  const reason = removed.length
+    ? `The cloud has changes this device has not applied (${parts.join(', ')}). Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
+    : `The cloud has changes this device has not applied (${parts.join(', ')}).`;
+
+  // Cap the list so the floating share window stays usable on a phone
+  const MAX_LISTED = 12;
+  const listed = removed.slice(0, MAX_LISTED).map(item => {
+    const title = item.title || item.url || 'Untitled';
+    return item.path ? `${title}  (${item.path})` : title;
+  });
+  if (removed.length > MAX_LISTED) {
+    listed.push(`and ${removed.length - MAX_LISTED} more`);
+  }
+
+  setShareStatus(
+    'error',
+    'Your bookmarks differ from the cloud',
+    reason,
+    [
+      {
+        label: 'Sync from Cloud to Device',
+        primary: true,
+        onClick: () => resolveShareConflict('pull')
+      },
+      {
+        label: 'Sync from Device to Cloud',
+        onClick: () => resolveShareConflict('push')
+      },
+      {
+        label: 'Save on this device only',
+        onClick: () => {
+          const titleInput = document.getElementById('newBookmarkTitle');
+          const urlInput = document.getElementById('newBookmarkUrl');
+          const folderSelect = document.getElementById('newBookmarkFolder');
+          saveSharedBookmarkLocalOnly(
+            titleInput ? titleInput.value : '',
+            urlInput ? urlInput.value : '',
+            folderSelect ? folderSelect.value : null
+          );
+        }
+      }
+    ],
+    listed
+  );
+
+  setShareSaveEnabled(false);
+}
+
+// Apply the user's choice, then hand control back to the form rather than
+// saving automatically: a cloud pull can move or delete the folder that was
+// selected, and can change whether this URL is already a duplicate.
+async function resolveShareConflict(direction) {
+  const label = direction === 'pull' ? 'Applying cloud changes...' : 'Overwriting cloud with this device...';
+  setShareStatus('info', label, '');
+  setShareSaveEnabled(false);
+
+  try {
+    if (direction === 'pull') {
+      // applyRemoteSync, not syncFromRemote: force does NOT bypass the deletion
+      // guard, so re-pulling would just hit the same conflict again. This is the
+      // same call the full app's "Use Snippet" button makes once the user has
+      // decided, and it writes the remote tree including its deletions.
+      const remote = shareFlow.conflictRemote;
+      if (!remote) throw new Error('Lost track of the cloud copy. Retry the sync.');
+      const applied = await syncManager.applyRemoteSync(remote);
+      if (!applied) throw new Error('GitLab did not confirm the update.');
+      await bookmarkManager.reload();
+      await loadBookmarks();
+    } else {
+      // force=true means browser wins, keeping the bookmarks the cloud deleted
+      await syncManager.syncToRemote(true);
+    }
+
+    shareFlow.conflictDiff = null;
+    shareFlow.conflictRemote = null;
+    shareFlow.pullError = null;
+    shareFlow.pullPromise = Promise.resolve({ skipped: false });
+
+    // The tree may have changed under the form, so rebuild the picker and the
+    // duplicate notice before letting the save proceed.
+    const folderSelect = document.getElementById('newBookmarkFolder');
+    if (folderSelect) {
+      const previous = folderSelect.value;
+      const sortPref = safeLocalStorage.getItem('sortFoldersAlphabetically') === 'true';
+      populateFolderDropdown(folderSelect, sortPref);
+      if (previous && folderSelect.querySelector(`option[value="${CSS.escape(previous)}"]`)) {
+        folderSelect.value = previous;
+      } else {
+        applyDefaultBookmarkFolder(folderSelect);
+      }
+      renderRecentFolderChips(folderSelect);
+      updateFolderPickerLabel(folderSelect);
+      renderFolderTreePicker(folderSelect);
+    }
+
+    const urlInput = document.getElementById('newBookmarkUrl');
+    if (urlInput) await updateShareDuplicateNotice(urlInput.value);
+
+    setShareStatus(
+      'success',
+      direction === 'pull' ? 'Cloud changes applied' : 'Cloud updated from this device',
+      'Check the folder below, then save.'
+    );
+    setShareSaveEnabled(true);
+  } catch (error) {
+    console.error('[Share] Conflict resolution failed:', error);
+    setShareStatus(
+      'error',
+      'Could not finish that sync',
+      describeSyncError(error),
+      [
+        { label: 'Try again', primary: true, onClick: () => resolveShareConflict(direction) },
+        { label: 'Back', onClick: () => showShareConflict(shareFlow.conflictDiff) }
+      ]
+    );
+    setShareSaveEnabled(false);
+  }
+}
+
 // Kick off the pull in the background while the user reviews the form
 function startSharePull() {
   shareFlow.pullError = null;
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: reset captured conflict on each attempt */
+  shareFlow.conflictDiff = null;
+  shareFlow.conflictRemote = null;
 
   if (!isRemoteConfigured()) {
     shareFlow.pullPromise = Promise.resolve({ skipped: true });
@@ -5762,6 +5956,11 @@ function startSharePull() {
 
   shareFlow.pullPromise = runSharePull()
     .then(result => {
+      /* [ZeroLabs] 2026-08-19 6:01 PM - added: surface a conflict instead of clearing */
+      if (result && result.conflict) {
+        showShareConflict(result.diff);
+        return result;
+      }
       clearShareStatus();
       return result;
     })
@@ -5857,10 +6056,30 @@ async function pushSharedBookmark(folderPath) {
   setShareStatus('info', 'Syncing to GitLab...', '');
   setShareSaveEnabled(false);
 
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: watchdog so a slow push explains itself */
+  // The bookmark is already saved locally at this point. The request is NOT
+  // cancelled here, it keeps running and can still succeed; this only stops the
+  // window from sitting on "Syncing to GitLab..." with no explanation. The hard
+  // abort lives in snippet-adapter's fetch timeout.
+  clearTimeout(shareFlow.watchdog);
+  shareFlow.watchdog = setTimeout(() => {
+    setShareStatus(
+      'info',
+      'Still syncing to GitLab',
+      'This is taking longer than usual. Your bookmark is already saved on this device, so you can close this and it will sync next time BMZ opens.',
+      [
+        { label: 'Keep waiting', primary: true, onClick: () => {} },
+        { label: 'Close', onClick: () => finishShare(null) }
+      ]
+    );
+  }, 10000);
+
   try {
     await runSharePush();
+    clearTimeout(shareFlow.watchdog);
     finishShare(`Saved to ${folderPath} and synced`);
   } catch (error) {
+    clearTimeout(shareFlow.watchdog);
     console.error('[Share] Push failed:', error);
     await syncManager.markPendingChanges(true);
     setShareStatus(
@@ -5893,6 +6112,14 @@ async function saveSharedBookmark(title, url, parentId) {
   try {
     // Wait for the background pull before touching the tree
     const pullResult = await (shareFlow.pullPromise || Promise.resolve({ skipped: true }));
+
+    /* [ZeroLabs] 2026-08-19 6:01 PM - added: block the save while a conflict is unresolved */
+    // Without this the save would run on a stale tree and then force-push it,
+    // undoing the deletions that exist on the cloud.
+    if (pullResult && pullResult.conflict) {
+      showShareConflict(pullResult.diff);
+      return;
+    }
 
     if (pullResult && pullResult.failed) {
       setShareStatus(

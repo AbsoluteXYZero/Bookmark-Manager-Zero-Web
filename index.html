@@ -2947,6 +2947,20 @@
       color: var(--md-sys-color-on-surface-variant);
       word-break: break-word;
     }
+    /* [ZeroLabs] 2026-08-19 6:01 PM - added: deletion list inside the share status */
+    .share-status-details {
+      display: none;
+      margin: 0;
+      padding: 6px 0 0 18px;
+      max-height: 140px;
+      overflow-y: auto;
+      color: var(--md-sys-color-on-surface-variant);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .share-status-details li {
+      word-break: break-word;
+    }
     .share-status-actions {
       display: flex;
       gap: 8px;
@@ -4079,6 +4093,8 @@
         <div id="addBookmarkStatus" class="share-status hidden" role="status" aria-live="polite">
           <span class="share-status-stage"></span>
           <span class="share-status-reason"></span>
+          <!-- [ZeroLabs] 2026-08-19 6:01 PM - added: list of bookmarks a sync would delete -->
+          <ul class="share-status-details"></ul>
           <div class="share-status-actions"></div>
         </div>
       </div>
@@ -4326,7 +4342,7 @@
   <!-- Connect GitLab Modal (for local mode users) -->
   <div id="connectGitlabModal" class="modal hidden" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 10000; align-items: center; justify-content: center;">
     <div style="background: var(--md-sys-color-surface, #1e1e1e); border-radius: 12px; max-width: 500px; width: 90%; max-height: 90vh; overflow-y: auto; padding: 24px; color: var(--md-sys-color-on-surface, #e0e0e0);">
-      <h2 style="margin: 0 0 16px 0; font-size: 20px; text-align: center;">GitLab Snippet<br>Sync Setup</h2>
+      <h2 style="margin: 0 0 16px 0; font-size: 20px; text-align: center;">GitLab Sync Setup</h2>
 
       <div style="margin-bottom: 16px; padding: 12px; border: 1px solid var(--md-sys-color-outline, #444); border-radius: 8px;">
         <p style="margin: 0 0 10px 0; font-size: 13px; font-weight: 500; color: var(--md-sys-color-on-surface, #e0e0e0);">Token Storage</p>

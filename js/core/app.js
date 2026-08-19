@@ -1812,30 +1812,52 @@ class App {
     if (snippetId) {
       dialog.innerHTML = `
         <h2 style="margin:0 0 12px 0;font-size:20px;">GitLab Sync Settings</h2>
-        <p style="margin:0 0 16px 0;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">
-          Connected to Snippet: <code style="font-size:11px;">${snippetId}</code>
-        </p>
         <div style="display:flex;flex-direction:column;gap:10px;">
           <button id="syncFromSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-8 2V5h2v6h1.17L12 13.17 9.83 11H11zm-6 8v2h14v-2H5z"/></svg>
-            Sync from Cloud to Browser
+            Sync from Cloud to Device
           </button>
           <button id="syncToSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
-            Sync from Browser to Cloud
+            Sync from Device to Cloud
           </button>
           <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
-          <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
-            <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
-            <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
+          <button id="snippetOptionsToggle" aria-expanded="false" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>Snippet Options</span>
+            <svg id="snippetOptionsChevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;transition:transform 0.2s ease;transform:rotate(-90deg);"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
+          </button>
+          <div id="snippetOptionsPanel" style="display:none;flex-direction:column;gap:10px;">
+            <p style="margin:0;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">
+              Connected to Snippet: <code style="font-size:11px;">${snippetId}</code>
+            </p>
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
+              <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
+              <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
+            </div>
+            <button id="createNewSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Create New Snippet with Current Bookmarks</button>
+            <button id="selectExistingSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Select Existing Snippet</button>
+            <button id="disconnectSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Disconnect & Remove Token</button>
           </div>
-          <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
-          <button id="createNewSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Create New Snippet</button>
-          <button id="selectExistingSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Select Existing Snippet</button>
-          <button id="disconnectSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Disconnect & Remove Token</button>
           <button id="closeSyncSettings" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Close</button>
         </div>
       `;
+
+      /* [ZeroLabs] 2026-08-19 6:01 PM - added: collapsible snippet options section (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
+      // Collapsed by default: this dialog only renders when a snippet is already
+      // connected, so the two sync buttons are all most visits need.
+      const snippetOptionsToggle = dialog.querySelector('#snippetOptionsToggle');
+      const snippetOptionsPanel = dialog.querySelector('#snippetOptionsPanel');
+      const snippetOptionsChevron = dialog.querySelector('#snippetOptionsChevron');
+      if (snippetOptionsToggle && snippetOptionsPanel) {
+        snippetOptionsToggle.addEventListener('click', () => {
+          const isOpen = snippetOptionsPanel.style.display !== 'none';
+          snippetOptionsPanel.style.display = isOpen ? 'none' : 'flex';
+          snippetOptionsToggle.setAttribute('aria-expanded', String(!isOpen));
+          if (snippetOptionsChevron) {
+            snippetOptionsChevron.style.transform = isOpen ? 'rotate(-90deg)' : 'rotate(0deg)';
+          }
+        });
+      }
     } else {
       dialog.innerHTML = `
         <h2 style="margin:0 0 16px 0;font-size:20px;text-align:center;">GitLab Sync Setup</h2>
@@ -1843,11 +1865,11 @@ class App {
           <p style="margin:0 0 10px 0;font-size:13px;font-weight:500;color:var(--md-sys-color-on-surface,#e0e0e0);">Token Storage</p>
           <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin-bottom:10px;font-size:13px;">
             <input type="radio" name="tokenMode" value="local" ${currentMode !== 'supabase' ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;">
-            <span><strong>Local</strong> <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(this device only)</span></span>
+            <span><span style="display:inline-flex;align-items:center;gap:5px;"><strong>Local</strong><span class="bmz-tooltip-wrap" style="position:relative;display:inline-flex;align-items:center;"><span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--md-sys-color-on-surface-variant,#aaa);color:var(--md-sys-color-surface,#1e1e1e);font-size:10px;font-weight:700;cursor:help;flex-shrink:0;line-height:1;">i</span><span class="bmz-tooltip" style="display:none;position:fixed;background:var(--md-sys-color-inverse-surface,#e0e0e0);color:var(--md-sys-color-inverse-on-surface,#1a1a1a);padding:8px 10px;border-radius:6px;font-size:12px;width:220px;z-index:10010;line-height:1.4;pointer-events:none;white-space:normal;">Token stored on this device only. When it auto-renews, you'll be shown the new token and asked to update your other BMZ clients manually.</span></span></span><br><span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(this device only)</span></span>
           </label>
           <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:13px;">
             <input type="radio" name="tokenMode" value="supabase" ${currentMode === 'supabase' ? 'checked' : ''} style="margin-top:2px;flex-shrink:0;">
-            <span><strong>Supabase</strong> <span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(auto-sync across devices)</span></span>
+            <span><span style="display:inline-flex;align-items:center;gap:5px;"><strong>Supabase</strong><span class="bmz-tooltip-wrap" style="position:relative;display:inline-flex;align-items:center;"><span style="display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;border-radius:50%;background:var(--md-sys-color-on-surface-variant,#aaa);color:var(--md-sys-color-surface,#1e1e1e);font-size:10px;font-weight:700;cursor:help;flex-shrink:0;line-height:1;">i</span><span class="bmz-tooltip" style="display:none;position:fixed;background:var(--md-sys-color-inverse-surface,#e0e0e0);color:var(--md-sys-color-inverse-on-surface,#1a1a1a);padding:8px 10px;border-radius:6px;font-size:12px;width:220px;z-index:10010;line-height:1.4;pointer-events:none;white-space:normal;">Your token is encrypted and stored in Supabase. When it renews, all your BMZ clients update silently, with no manual steps. Only your encrypted token is stored; it can only access your GitLab bookmark snippet.</span></span></span><br><span style="color:var(--md-sys-color-on-surface-variant,#aaa);font-size:12px;">(auto-sync across devices)</span></span>
           </label>
           <div id="supabaseQuickLoad" style="display:none;margin-top:12px;padding:10px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);">
             ☁️ Already set up on another device? <button id="loadFromSupabaseBtn" style="background:none;border:none;color:var(--md-sys-color-primary,#818cf8);cursor:pointer;font-size:12px;text-decoration:underline;padding:0;">Sign in to load automatically →</button>
@@ -1937,6 +1959,24 @@ class App {
         }
       });
     } else {
+      /* [ZeroLabs] 2026-08-19 6:01 PM - added: tooltip hover for token storage i icons (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
+      // Fixed positioning so the tooltip stays inside the viewport instead of
+      // being clipped by the dialog's overflow.
+      dialog.querySelectorAll('.bmz-tooltip-wrap').forEach(wrap => {
+        const tip = wrap.querySelector('.bmz-tooltip');
+        wrap.addEventListener('mouseenter', () => {
+          const rect = wrap.getBoundingClientRect();
+          const tipWidth = 220;
+          let left = rect.left;
+          if (left + tipWidth > window.innerWidth - 8) left = window.innerWidth - tipWidth - 8;
+          if (left < 8) left = 8;
+          tip.style.top = (rect.bottom + 6) + 'px';
+          tip.style.left = left + 'px';
+          tip.style.display = 'block';
+        });
+        wrap.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+      });
+
       dialog.querySelectorAll('input[name="tokenMode"]').forEach(radio => {
         radio.addEventListener('change', () => {
           const isSupabase = dialog.querySelector('input[name="tokenMode"]:checked')?.value === 'supabase';
@@ -2561,6 +2601,11 @@ class App {
 
     // Handle sync conflicts (deletions present - require confirmation)
     window.addEventListener('sync:syncConflict', async (e) => {
+      /* [ZeroLabs] 2026-08-19 6:01 PM - added: share window resolves conflicts inline */
+      // The Android share window is a small floating window; this full-screen
+      // dialog is unusable there and belongs to the main app. sidebar-adapted.js
+      // captures the same event and presents the choice inline instead.
+      if (window.__bmzShareMode) return;
       const { diff, remoteData, message } = e.detail;
       await this.showSyncConflictDialog(diff, remoteData, message);
     });

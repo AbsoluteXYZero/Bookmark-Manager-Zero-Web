@@ -38,6 +38,35 @@ class SnippetAdapter {
     };
   }
 
+  /* [ZeroLabs] 2026-08-19 6:01 PM - added: request timeout so a stalled network cannot hang forever */
+  /**
+   * fetch with a hard timeout.
+   *
+   * Every request here previously had none, so a stalled mobile connection left
+   * the promise pending forever: no error, no catch, no completion. That is what
+   * left the Android share window sitting on "Syncing to GitLab..." after the
+   * bookmark had already been written locally.
+   *
+   * Aborting is safe to retry: the snippet write is a whole-file PUT, so
+   * repeating it produces the same result whether or not the first attempt
+   * reached GitLab.
+   */
+  async fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, { ...options, signal: controller.signal });
+    } catch (error) {
+      if (error.name === 'AbortError') {
+        throw new Error(`GitLab did not respond within ${Math.round(timeoutMs / 1000)} seconds.`);
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /**
    * Update rate limit info from response headers (GitLab uses RateLimit-* headers)
    */
@@ -134,7 +163,7 @@ class SnippetAdapter {
       const now = Date.now();
       if (!this.userCache || now > this.userCacheExpiry) {
         console.log('[GetAllSnippets] Fetching user info (cache expired or empty)...');
-        const userResponse = await fetch(`${this.apiBase}/user`, { headers });
+        const userResponse = await this.fetchWithTimeout(`${this.apiBase}/user`, { headers });
         this.updateRateLimitFromResponse(userResponse);
 
         if (userResponse.ok) {
@@ -151,7 +180,7 @@ class SnippetAdapter {
       // Fetch all snippets for the authenticated user
       // per_page=100 ensures we get up to 100 snippets in one request
       console.log('[GetAllSnippets] Fetching from:', `${this.apiBase}/snippets?per_page=100`);
-      const response = await fetch(`${this.apiBase}/snippets?per_page=100`, { headers });
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets?per_page=100`, { headers });
 
       // Update rate limit tracking
       this.updateRateLimitFromResponse(response);
@@ -351,7 +380,7 @@ class SnippetAdapter {
       this.checkRateLimit();
 
       console.log('[CreateSnippet] Sending request to GitLab API...');
-      const response = await fetch(`${this.apiBase}/snippets`, {
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets`, {
         method: 'POST',
         headers,
         body: JSON.stringify({
@@ -451,7 +480,7 @@ class SnippetAdapter {
 
       const headers = await this.getHeaders();
       console.log('[ReadSnippet] Fetching from:', `${this.apiBase}/snippets/${id}`);
-      const response = await fetch(`${this.apiBase}/snippets/${id}`, { headers });
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, { headers });
 
       // Update rate limit tracking
       this.updateRateLimitFromResponse(response);
@@ -508,7 +537,7 @@ class SnippetAdapter {
       if (!content) {
         console.log('[ReadSnippet] Content not in response, fetching via API...');
         // Use the authenticated API endpoint instead of raw_url to avoid CORS
-        const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
+        const fileResponse = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}/files/main/bookmarks.json/raw`, { headers });
         if (!fileResponse.ok) {
           if (fileResponse.status === 429) {
             // Show rate limit popup and allow retry
@@ -562,7 +591,7 @@ class SnippetAdapter {
 
     try {
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/snippets/${id}`, { headers });
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, { headers });
       if (!response.ok) return null;
 
       const snippet = await response.json();
@@ -576,7 +605,7 @@ class SnippetAdapter {
 
       let content = metaFile.content;
       if (!content) {
-        const fileResponse = await fetch(`${this.apiBase}/snippets/${id}/files/main/bmz-meta.json/raw`, { headers });
+        const fileResponse = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}/files/main/bmz-meta.json/raw`, { headers });
         if (!fileResponse.ok) return { pins: [], tombstones: [], exists: true };
         content = await fileResponse.text();
       }
@@ -648,7 +677,7 @@ class SnippetAdapter {
       }
 
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/snippets/${id}`, {
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, {
         method: 'PUT',
         headers,
         body: JSON.stringify({ files })
@@ -740,7 +769,7 @@ class SnippetAdapter {
 
     try {
       const headers = await this.getHeaders();
-      const response = await fetch(`${this.apiBase}/snippets/${id}`, {
+      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, {
         method: 'DELETE',
         headers
       });

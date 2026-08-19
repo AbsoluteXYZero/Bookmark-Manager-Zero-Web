@@ -1,6 +1,25 @@
 ## Changelog
 
-### V1.9.0 (Current) - Quick Access & Recently Opened
+### V2.0 (Current) - Sync Clarity & Share Reliability
+
+**Bug Fixes:**
+- **The share window no longer hangs forever after saving** - Sharing a link could leave the window stuck on "Syncing to GitLab..." with no error and no way forward, even though the bookmark had already been saved. None of BMZ's requests to GitLab had a time limit, so a stalled mobile connection left the sync waiting indefinitely rather than failing. Every request now gives up after 30 seconds and reports what went wrong, with the option to retry. Reporting a failure is safe to act on: the bookmark is written to your device before the sync begins, so nothing is lost either way.
+- **Sharing a link no longer resurrects bookmarks you deleted elsewhere** - If another device had deleted bookmarks that this one had not caught up on yet, the share window did not notice, and saving pushed your out-of-date list back to the cloud, restoring every one of those deleted bookmarks. The share window now detects that situation before saving anything.
+
+**New Features:**
+- **Resolve sync differences without leaving the share window** - When your bookmarks differ from the cloud, the share window now shows what changed and names the specific bookmarks that a sync would delete, along with the folder each one sits in. You can then sync in either direction on the spot, or save to this device only. Previously this meant backing out of the share, opening the full app, and running a sync there just to see what the difference was.
+- **A warning when a sync is taking too long** - If a save has not finished after ten seconds, the share window now says so, reminds you the bookmark is already saved on your device, and lets you close it rather than sit and wait. The sync keeps running in the background and still completes on its own.
+- **Snippet Options are tucked away** - The GitLab Sync Settings dialog now opens to just the two sync buttons. The snippet ID, token storage, and the create, select, and disconnect actions live behind a "Snippet Options" section you expand when you need it, which are things you set once and rarely revisit.
+
+**Improvements:**
+- **Clearer sync button wording** - The two sync buttons now read "Sync from Cloud to Device" and "Sync from Device to Cloud", which say plainly which way your bookmarks are about to move. They previously referred to a "Snippet" or a "Browser" depending on which version of BMZ you were using, and "Browser" was misleading here, since the web app and Android app keep bookmarks in their own storage rather than in a browser's bookmarks.
+- **Identical sync wording everywhere** - The Firefox, Chrome, and web versions had drifted apart, naming the same things differently in each. Every label in the GitLab sync dialogs is now the same across all three.
+- **Token storage options explain themselves** - Local and Supabase each carry an information icon with a full explanation of what that choice means for your token when it renews.
+- **Quick Access menu item no longer moves** - Add and Remove now occupy the same position in the right-click menu, just above Delete, so the item stays where you expect once a bookmark is pinned. Remove is shown in red and asks for confirmation first, with a reminder that it only unpins and never deletes the bookmark.
+
+---
+
+### V1.9.0 - Quick Access & Recently Opened
 
 **New Features:**
 - **Quick Access** - Pin the bookmarks you use most to a section at the top of the list. Right-click any bookmark and choose "Add to Quick Access", or drag one onto the section. Pinned entries are mirrors, not copies: the same bookmark, shown in a second place. Delete the bookmark from its real folder and the pin disappears with it. Removing a pin only unpins it and never touches the underlying bookmark, so there is no way to destroy a bookmark from the Quick Access section.
