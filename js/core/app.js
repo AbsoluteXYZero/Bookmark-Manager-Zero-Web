@@ -991,10 +991,21 @@ class App {
 
           const itemDiv = document.createElement('div');
           itemDiv.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
-          itemDiv.innerHTML = `
-            <div style="font-weight: 500; margin-bottom: 4px;">${description}</div>
-            <div style="font-size: 12px; color: var(--md-sys-color-on-surface-variant);">${fileCount} files • Updated ${lastUpdated}</div>
-          `;
+
+          /* [ZeroLabs] 2026-08-19 7:12 PM - edited: build with textContent, not innerHTML */
+          // The title comes from the snippet and was interpolated raw, so markup
+          // in a snippet name rendered as markup. This module has no escapeHtml
+          // helper, and textContent is the stronger fix anyway.
+          const titleDiv = document.createElement('div');
+          titleDiv.style.cssText = 'font-weight: 500; margin-bottom: 4px;';
+          titleDiv.textContent = description;
+
+          const metaDiv = document.createElement('div');
+          metaDiv.style.cssText = 'font-size: 12px; color: var(--md-sys-color-on-surface-variant);';
+          metaDiv.textContent = `${fileCount} files • Updated ${lastUpdated}`;
+
+          itemDiv.appendChild(titleDiv);
+          itemDiv.appendChild(metaDiv);
 
           itemDiv.onclick = async () => {
             await this.useRemoteStorage(item.id, provider);
