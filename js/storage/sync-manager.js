@@ -553,10 +553,16 @@ class SyncManager {
         if (diff.removed.length > 0 && !isFirstSync) {
           console.log('[SyncFromRemote] Deletions detected on subsequent sync - requiring user confirmation');
           // Emit event with diff data for UI to handle
+          /* [ZeroLabs] 2026-08-19 7:12 PM - edited: pass the totals through */
+          // Both counts are already computed above. The share window shows them
+          // so the choice can be made against how big each side actually is,
+          // not just the shape of the difference.
           this.emitEvent('syncConflict', {
             diff,
             remoteData,
             requiresConfirmation: true,
+            localCount: localBookmarkCount,
+            remoteCount: remoteBookmarkCount,
             message: `Remote has ${diff.removed.length} deletion(s). Review changes before syncing.`
           });
 
@@ -610,8 +616,15 @@ class SyncManager {
           const signature = `${remoteData.version}:${changeCount}:${remoteBookmarkCount}`;
           if (this._lastDivergeNudge !== signature) {
             this._lastDivergeNudge = signature;
-            this.emitEvent('syncNudge',
-              `Cloud differs from this device (${diff.added.length} to pull, ${diff.removed.length} only here). Open GitLab sync to reconcile.`);
+            /* [ZeroLabs] 2026-08-19 7:12 PM - edited: structured payload with totals */
+            // Was a bare string. Now an object so the share window can build its
+            // own wording and show the totals; the toast still uses .message.
+            this.emitEvent('syncNudge', {
+              message: `Cloud differs from this device (${diff.added.length} to pull, ${diff.removed.length} only here). Open GitLab sync to reconcile.`,
+              diff,
+              localCount: localBookmarkCount,
+              remoteCount: remoteBookmarkCount
+            });
           }
           return false;
         }

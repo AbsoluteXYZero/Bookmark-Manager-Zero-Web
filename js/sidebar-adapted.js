@@ -5405,8 +5405,11 @@ const shareFlow = {
   /* [ZeroLabs] 2026-08-19 6:01 PM - added: captured deletion conflict */
   conflictDiff: null,
   conflictRemote: null,
-  /* [ZeroLabs] 2026-08-19 7:12 PM - added: captured divergence nudge */
+  /* [ZeroLabs] 2026-08-19 7:12 PM - added: captured divergence nudge and totals */
   nudgeMessage: null,
+  nudgeDiff: null,
+  localCount: null,
+  remoteCount: null,
   watchdog: null
 };
 
@@ -5418,6 +5421,9 @@ window.addEventListener('sync:syncConflict', (e) => {
   if (!window.__bmzShareMode) return;
   shareFlow.conflictDiff = e.detail?.diff || null;
   shareFlow.conflictRemote = e.detail?.remoteData || null;
+  /* [ZeroLabs] 2026-08-19 7:12 PM - added: capture the totals */
+  shareFlow.localCount = e.detail?.localCount ?? null;
+  shareFlow.remoteCount = e.detail?.remoteCount ?? null;
 });
 
 /* [ZeroLabs] 2026-08-19 7:12 PM - added: capture the divergence nudge too */
@@ -5425,7 +5431,18 @@ window.addEventListener('sync:syncConflict', (e) => {
 // only, no diff, so the share window can warn but cannot list bookmarks.
 window.addEventListener('sync:syncNudge', (e) => {
   if (!window.__bmzShareMode) return;
-  shareFlow.nudgeMessage = typeof e.detail === 'string' ? e.detail : null;
+  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: take the diff and totals, drop the text */
+  // The stock message ends with "Open GitLab sync to reconcile", which is wrong
+  // here: the share window has both sync buttons right underneath it. The
+  // wording is rebuilt locally from the structured fields instead.
+  if (e.detail && typeof e.detail === 'object') {
+    shareFlow.nudgeDiff = e.detail.diff || null;
+    shareFlow.localCount = e.detail.localCount ?? null;
+    shareFlow.remoteCount = e.detail.remoteCount ?? null;
+    shareFlow.nudgeMessage = 'differs';
+  } else {
+    shareFlow.nudgeMessage = typeof e.detail === 'string' ? e.detail : null;
+  }
 });
 
 /* [ZeroLabs] 2026-08-09 1:43 PM - added: expandable folder tree picker */
@@ -5828,14 +5845,55 @@ async function runSharePull() {
 // Present the conflict with the actual titles that would be lost, then offer
 // both directions. Previously this state was invisible to the share flow, so
 // saving force-pushed a stale local tree and undid the cloud's deletions.
+/* [ZeroLabs] 2026-08-19 7:12 PM - added: totals sentence */
+// Says how big each side actually is, which the category counts alone never
+// showed. Returns '' when the counts are unavailable so nothing half-formed
+// can render.
+function shareTotalsSentence() {
+  const local = shareFlow.localCount;
+  const remote = shareFlow.remoteCount;
+  if (typeof local !== 'number' || typeof remote !== 'number') return '';
+
+  const noun = (n) => (n === 1 ? 'bookmark' : 'bookmarks');
+  let comparison;
+  if (remote > local) {
+    comparison = `The cloud has ${remote - local} more.`;
+  } else if (local > remote) {
+    comparison = `This device has ${local - remote} more.`;
+  } else {
+    // Equal totals still differ in content, so say so rather than imply a match
+    comparison = 'Same total, but the contents differ.';
+  }
+
+  return ` Cloud has ${remote} ${noun(remote)}, this device has ${local} ${noun(local)}. ${comparison}`;
+}
+
 /* [ZeroLabs] 2026-08-19 7:12 PM - added: milder state for a no-deletion divergence */
 // Reached when versions match but content differs. There is no diff to itemise,
 // so this states the difference and offers the same two directions.
 function showShareDiverged(message) {
+  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: own wording plus totals */
+  // Built here rather than reusing the stock nudge text, whose closing line
+  // told the user to open GitLab sync, which is exactly where they already are.
+  const diff = shareFlow.nudgeDiff;
+  const parts = [];
+  if (diff) {
+    if (diff.added.length) parts.push(`${diff.added.length} to pull`);
+    if (diff.removed.length) parts.push(`${diff.removed.length} only here`);
+    if (diff.moved.length) parts.push(`${diff.moved.length} moved`);
+    if (diff.modified.length) parts.push(`${diff.modified.length} changed`);
+  }
+  const summary = parts.length ? ` (${parts.join(', ')})` : '';
+  const totals = shareTotalsSentence();
+
+  const reason = (summary || totals)
+    ? `The cloud and this device are out of step${summary}.${totals} Saving now would push this device's list over the cloud copy.`
+    : (message || 'This device and the cloud are out of step. Saving now would push this device\'s list over the cloud copy.');
+
   setShareStatus(
     'error',
     'Your bookmarks differ from the cloud',
-    message || 'This device and the cloud are out of step. Saving now would push this device\'s list over the cloud copy.',
+    reason,
     [
       { label: 'Sync from Cloud to Device', primary: true, onClick: () => resolveShareConflict('pull') },
       { label: 'Sync from Device to Cloud', onClick: () => resolveShareConflict('push') },
@@ -5874,9 +5932,10 @@ function showShareConflict(diff) {
   // parts is empty when this is called without a diff, which used to print a
   // bare "()" and claim a difference that had not been established.
   const summary = parts.length ? ` (${parts.join(', ')})` : '';
+  const totals = shareTotalsSentence();
   const reason = removed.length
-    ? `The cloud has changes this device has not applied${summary}. Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
-    : `The cloud has changes this device has not applied${summary}.`;
+    ? `The cloud has changes this device has not applied${summary}.${totals} Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
+    : `The cloud has changes this device has not applied${summary}.${totals}`;
 
   // Cap the list so the floating share window stays usable on a phone
   const MAX_LISTED = 12;
@@ -6010,6 +6069,9 @@ function startSharePull() {
   shareFlow.conflictDiff = null;
   shareFlow.conflictRemote = null;
   shareFlow.nudgeMessage = null;
+  shareFlow.nudgeDiff = null;
+  shareFlow.localCount = null;
+  shareFlow.remoteCount = null;
 
   if (!isRemoteConfigured()) {
     shareFlow.pullPromise = Promise.resolve({ skipped: true });

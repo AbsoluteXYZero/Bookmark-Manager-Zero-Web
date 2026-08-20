@@ -2593,8 +2593,12 @@ class App {
       // The share window presents the same information with sync actions
       // attached, so a toast on top of it would just be a duplicate.
       if (window.__bmzShareMode) return;
-      if (e.detail) {
-        this.showToast(e.detail, 'info');
+      /* [ZeroLabs] 2026-08-19 7:12 PM - edited: detail is now an object */
+      // syncNudge used to carry a bare string; it now carries counts too so the
+      // share window can word its own message. The toast wants just the text.
+      const nudgeText = typeof e.detail === 'string' ? e.detail : e.detail?.message;
+      if (nudgeText) {
+        this.showToast(nudgeText, 'info');
       }
     });
 
