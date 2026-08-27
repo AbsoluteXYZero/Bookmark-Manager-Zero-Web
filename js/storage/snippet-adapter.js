@@ -624,6 +624,43 @@ class SnippetAdapter {
     }
   }
 
+  /* [ZeroLabs] 2026-08-27 - added: write the pins file on its own (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+  // updateBookmarks carries bmz-meta.json alongside bookmarks.json, but that only
+  // helps when the tree itself changed. Pinning something changes no bookmark, so
+  // without this the pin sat on the device until some unrelated edit happened to
+  // push. Only bmz-meta.json is named here, so bookmarks.json is untouched.
+  async updateQuickAccessMeta(snippetId = null, payload) {
+    const id = snippetId || this.snippetId;
+    if (!id || !payload) return false;
+
+    this.checkRateLimit();
+
+    const headers = await this.getHeaders();
+    const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({
+        files: [{
+          action: payload.exists ? 'update' : 'create',
+          file_path: 'bmz-meta.json',
+          content: payload.content
+        }]
+      })
+    });
+
+    this.updateRateLimitFromResponse(response);
+
+    if (!response.ok) {
+      throw new Error(`Failed to update pins: ${response.status}`);
+    }
+
+    // The file is there now, so later pushes update rather than create
+    if (typeof window !== 'undefined' && window.bmzQuickAccessMeta) {
+      window.bmzQuickAccessMeta.markWritten();
+    }
+    return true;
+  }
+
   async updateBookmarks(snippetId = null, bookmarkTree, version = null) {
     const id = snippetId || this.snippetId;
     console.log('[UpdateSnippet] Attempting to update Snippet:', {

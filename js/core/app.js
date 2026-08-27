@@ -9,6 +9,8 @@ import authManager from '../auth/auth-manager.js';
 import oauthPAT from '../auth/oauth-pat.js';
 import snippetAdapter from '../storage/snippet-adapter.js';
 import syncManager from '../storage/sync-manager.js';
+/* [ZeroLabs] 2026-08-27 - added: the auto-sync toggle is stored here */
+import storageAdapter from '../storage/storage-adapter.js';
 import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
 import scannerService from './scanner.js';
@@ -275,6 +277,9 @@ class App {
 
     // Add show-login class to html element to make login screen visible
     document.documentElement.classList.add('show-login');
+
+    /* [ZeroLabs] 2026-08-27 - added: the app has decided, drop the boot loader */
+    document.documentElement.classList.add('booted');
 
     // Only set up handlers once - check if already initialized
     if (this._loginHandlersInitialized) {
@@ -802,8 +807,12 @@ class App {
           // User wants to keep local bookmarks, cancel setup
           console.log('[Createsnippet] User chose to keep local bookmarks, canceling setup');
           return; // Exit without creating snippet
-        } else if (userChoice === 'merge') {
-          // Create snippet with merged local bookmarks
+        } else if (userChoice === 'merge' || userChoice === 'replace-remote') {
+          /* [ZeroLabs] 2026-08-27 - edited: replace-remote left itemId undefined */
+          // The snippet does not exist yet, so merging into it and overwriting it
+          // are the same act: create it holding this device's bookmarks. Falling
+          // through with no branch left itemId undefined and the setup then
+          // stored "undefined" as the snippet id.
           itemId = await this.createSnippetWithLocalBookmarks();
         } else if (userChoice === 'replace') {
           // Create empty snippet (replace local)
@@ -834,6 +843,13 @@ class App {
       // Set initial version to 1 (matching what we created)
       console.log(`[CreateSnippet] Step 4.5: Setting initial version...`);
       await syncManager.setLocalVersion(1);
+
+      /* [ZeroLabs] 2026-08-27 - added: a new snippet already holds everything */
+      // It was created from this device's tree, so there is nothing outstanding
+      // for the attribution records to explain.
+      await syncManager.clearLocalBookmarkEvents();
+      await syncManager.clearHeldState();
+      await syncManager.setSnippetNeedsReconcile(false);
 
       // Sync from remote to get the merged data (if we merged) or empty data
       console.log(`[CreateSnippet] Step 5: Syncing from remote...`);
@@ -991,6 +1007,7 @@ class App {
 
           const itemDiv = document.createElement('div');
           itemDiv.style.cssText = 'background: var(--md-sys-color-surface-variant); padding: 16px; border-radius: 8px; margin-bottom: 8px; cursor: pointer; border: 2px solid transparent;';
+          itemDiv.className = 'bmz-dialog';
 
           /* [ZeroLabs] 2026-08-19 7:12 PM - edited: build with textContent, not innerHTML */
           // The title comes from the snippet and was interpolated raw, so markup
@@ -1182,6 +1199,15 @@ class App {
       console.log(`[Usesnippet] Clearing local version to force sync...`);
       await syncManager.setLocalVersion(0);
 
+      /* [ZeroLabs] 2026-08-27 - added: connecting is a fresh start for attribution */
+      // Every branch above leaves the two sides agreeing: merged, replaced one
+      // way, replaced the other, or nothing local to begin with. Any record of
+      // what this device did before that point describes a different snippet, and
+      // reading it against this one would invent removals.
+      await syncManager.clearLocalBookmarkEvents();
+      await syncManager.clearHeldState();
+      await syncManager.setSnippetNeedsReconcile(false);
+
       // Sync data from remote to local
       console.log(`[Usesnippet] Syncing from remote...`);
       await syncManager.syncFromRemote();
@@ -1209,104 +1235,28 @@ class App {
   /**
    * Create new remote storage (snippet)
    */
-  async createNewRemoteStorage(provider = 'gitlab') {
-    try {
-      // Check if we have local bookmarks that need to be merged
-      const hasLocalBookmarks = await this.hasLocalBookmarks();
-      console.log(`[Createsnippet] Has local bookmarks: ${hasLocalBookmarks}`);
-
-      let itemId;
-      if (hasLocalBookmarks) {
-        // Show merge confirmation dialog
-        const shouldMerge = await this.showMergeConfirmationDialog(null, 'new');
-        if (shouldMerge) {
-          // Create snippet with merged local bookmarks
-          itemId = await this.createSnippetWithLocalBookmarks();
-        } else {
-          // Create empty snippet (original behavior)
-          console.log(`[Createsnippet] Step 1: Creating empty snippet via adapter...`);
-          itemId = await snippetAdapter.createBookmarkSnippet();
-        }
-      } else {
-        // No local bookmarks, create empty snippet
-        console.log(`[Createsnippet] Step 1: Creating snippet via adapter...`);
-        itemId = await snippetAdapter.createBookmarkSnippet();
-      }
-
-      console.log(`[CreateSnippet] Step 1 Complete: Snippet created with ID:`, itemId);
-
-      console.log(`[CreateSnippet] Step 2: Setting snippet ID in adapter...`);
-      snippetAdapter.setSnippetId(itemId);
-
-      // Save snippet ID to sync manager
-      console.log(`[CreateSnippet] Step 4: Saving snippet ID to sync manager...`);
-      await syncManager.setSnippetId(itemId);
-
-      // Hide modal
-      console.log(`[CreateSnippet] Step 3: Hiding modal...`);
-      const modal = document.getElementById('snippetSetupModal');
-      modal.style.display = 'none';
-      modal.classList.add('hidden');
-
-      // Set initial version to 1 (matching what we created)
-      console.log(`[CreateSnippet] Step 4.5: Setting initial version...`);
-      await syncManager.setLocalVersion(1);
-
-      // Sync from remote to get the merged data (if we merged) or empty data
-      console.log(`[CreateSnippet] Step 5: Syncing from remote...`);
-      await syncManager.syncFromRemote();
-
-      // Reload bookmarks from local storage (now contains the snippet data)
-      console.log('[Createsnippet] Step 6: Reloading bookmarks from local...');
-      const tree = await bookmarkManager.reload();
-      console.log('[Createsnippet] Step 6 Complete: Tree loaded:', {
-        hasRoots: !!tree?.roots,
-        rootKeys: tree?.roots ? Object.keys(tree.roots) : [],
-        bookmark_bar: tree?.roots?.bookmark_bar,
-        menu: tree?.roots?.menu,
-        other: tree?.roots?.other,
-        mobile: tree?.roots?.mobile
-      });
-
-      // Initialize sidebar to render the UI
-      console.log('[Createsnippet] Step 7: Initializing sidebar...');
-      if (window.initSidebar) {
-        await window.initSidebar();
-        console.log('[Createsnippet] Step 7 Complete: Sidebar initialized');
-      } else {
-        console.warn('[Createsnippet] window.initSidebar not found!');
-      }
-
-      console.log(`[Createsnippet] All steps complete. snippet ID:`, itemId);
-    } catch (error) {
-      console.error('[Createsnippet] Failed:', error);
-      this.showSnippetSetupError('Failed to create snippet: ' + error.message);
-    }
-  }
+  /* [ZeroLabs] 2026-08-27 - removed: the second createNewRemoteStorage (duplicate) */
+  // The class defined this method twice. The later definition silently replaced
+  // the earlier one, and it was the worse of the two: it treated the merge
+  // dialog's return as a boolean, so every option including "Keep Local
+  // Bookmarks" created a snippet from the local tree. Nobody noticed because
+  // hasLocalBookmarks read an empty object store and the dialog never opened.
+  // The surviving definition, above, handles each choice by name.
 
   /**
    * Check if user has local bookmarks
    */
+  /* [ZeroLabs] 2026-08-27 - edited: read the tree, not an empty object store */
+  // This read dbManager.getAll('bookmarks'). That store is created in the schema
+  // and NOTHING has ever written to it - the tree lives under metadata as
+  // 'bookmarkTree' - so this returned false for everyone, always. The merge
+  // confirmation dialog it guards was therefore unreachable, and connecting a
+  // snippet took the "no local bookmarks" path and pulled straight over whatever
+  // was here.
   async hasLocalBookmarks() {
     try {
-      const localBookmarks = await dbManager.getAll('bookmarks');
-      if (localBookmarks && localBookmarks.length > 0) {
-        // Count actual bookmarks (not just folders)
-        let bookmarkCount = 0;
-        const countBookmarks = (nodes) => {
-          nodes.forEach(node => {
-            if (node.url) {
-              bookmarkCount++;
-            }
-            if (node.children) {
-              countBookmarks(node.children);
-            }
-          });
-        };
-        countBookmarks(localBookmarks);
-        return bookmarkCount > 0;
-      }
-      return false;
+      const localTree = await syncManager.loadLocalBookmarks();
+      return syncManager.countBookmarksInTree(localTree) > 0;
     } catch (error) {
       console.error('[hasLocalBookmarks] Error:', error);
       return false;
@@ -1520,15 +1470,19 @@ class App {
     try {
       console.log('[createSnippetWithLocalBookmarks] Starting merge process...');
 
-      // Get local bookmarks
-      const localBookmarks = await dbManager.getAll('bookmarks');
-      console.log('[createSnippetWithLocalBookmarks] Retrieved local bookmarks:', localBookmarks?.length || 0);
+      /* [ZeroLabs] 2026-08-27 - edited: read the tree, not an empty object store */
+      // Same wrong source as hasLocalBookmarks. It handed mergeBookmarksIntoTree
+      // an empty array, which fell into the legacy flat-array branch and merged
+      // nothing, so "create a snippet with my bookmarks" created an empty one.
+      const localTree = await syncManager.loadLocalBookmarks();
+      console.log('[createSnippetWithLocalBookmarks] Local bookmarks:',
+        syncManager.countBookmarksInTree(localTree));
 
       // Get empty bookmark tree structure
       const emptyTree = syncManager.getEmptyBookmarkTree();
 
       // Merge local bookmarks into the empty tree
-      const mergedTree = syncManager.mergeBookmarksIntoTree(localBookmarks, emptyTree);
+      const mergedTree = syncManager.mergeBookmarksIntoTree(localTree, emptyTree);
       console.log('[createSnippetWithLocalBookmarks] Merged tree created');
 
       // Create snippet with merged data
@@ -1554,12 +1508,16 @@ class App {
       const snippetData = await snippetAdapter.readBookmarks(snippetId);
       console.log('[mergeLocalBookmarksIntoSnippet] Retrieved snippet data');
 
-      // Get local bookmarks
-      const localBookmarks = await dbManager.getAll('bookmarks');
-      console.log('[mergeLocalBookmarksIntoSnippet] Retrieved local bookmarks:', localBookmarks?.length || 0);
+      /* [ZeroLabs] 2026-08-27 - edited: read the tree, not an empty object store */
+      // Same wrong source again, and the same silent no-op: choosing Merge on
+      // connect pushed the snippet back unchanged and this device's bookmarks
+      // were then replaced by it on the pull that follows.
+      const localTree = await syncManager.loadLocalBookmarks();
+      console.log('[mergeLocalBookmarksIntoSnippet] Local bookmarks:',
+        syncManager.countBookmarksInTree(localTree));
 
       // Merge local bookmarks into snippet data
-      const mergedTree = syncManager.mergeBookmarksIntoTree(localBookmarks, snippetData);
+      const mergedTree = syncManager.mergeBookmarksIntoTree(localTree, snippetData);
       console.log('[mergeLocalBookmarksIntoSnippet] Merged tree created');
 
       // Update snippet with merged data
@@ -1773,6 +1731,7 @@ class App {
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
     const dialog = document.createElement('div');
     dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:400px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);';
+    dialog.className = 'bmz-dialog';
     dialog.innerHTML = `
       <h2 style="margin:0 0 16px 0;font-size:18px;display:flex;align-items:center;gap:8px;">
         <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/></svg>
@@ -1819,22 +1778,32 @@ class App {
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center;';
     const dialog = document.createElement('div');
     dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:480px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);max-height:90vh;overflow-y:auto;';
+    dialog.className = 'bmz-dialog';
 
     if (snippetId) {
       dialog.innerHTML = `
-        <h2 style="margin:0 0 12px 0;font-size:20px;">GitLab Sync Settings</h2>
+        <!-- [ZeroLabs] 2026-08-27 - edited: centered heading (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) -->
+        <h2 style="margin:0 0 12px 0;font-size:20px;text-align:center;">GitLab Sync Settings</h2>
         <div style="display:flex;flex-direction:column;gap:10px;">
-          <button id="syncFromSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-8 2V5h2v6h1.17L12 13.17 9.83 11H11zm-6 8v2h14v-2H5z"/></svg>
-            Sync from Cloud to Device
-          </button>
-          <button id="syncToSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:8px;">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16h6v-6h4l-7-7-7 7h4v6zm-4 2h14v2H5v-2z"/></svg>
-            Sync from Device to Cloud
-          </button>
+          <!-- [ZeroLabs] 2026-08-27 - edited: one sync button instead of two directions -->
+          <!-- The old pair was misleading: cloud-to-device only opened a review
+               dialog, while device-to-cloud silently overwrote the snippet with no
+               confirmation at all. One button runs the same reconcile everything
+               else runs, and anything that would remove or overwrite defers.
+               The loader rides the circle's edge, which leaves the tanuki and the
+               label alone in the middle instead of fighting them for room. -->
+          <div style="display:flex;justify-content:center;padding:8px 0;">
+            <button id="manualSyncNow" title="Sync with your snippet" aria-label="Sync with your snippet" style="position:relative;width:128px;height:128px;max-width:100%;border-radius:50%;border:none;background:var(--md-sys-color-surface-container,#2a2a2a);box-shadow:var(--md-elevation-1);cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center;">
+              <span id="manualSyncRing" style="position:absolute;inset:0;border-radius:50%;border:4px solid transparent;box-sizing:border-box;pointer-events:none;"></span>
+              <svg width="92" height="92" viewBox="0 0 24 24" style="display:block;">
+                <path fill="#000000" d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
+              </svg>
+              <span id="manualSyncStatus" style="position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);font-size:13px;font-weight:700;color:#ffffff;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.8);">Syncing</span>
+            </button>
+          </div>
           <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
           <button id="snippetOptionsToggle" aria-expanded="false" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
-            <span>Snippet Options</span>
+            <span>Snippet Sync Options</span>
             <svg id="snippetOptionsChevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;transition:transform 0.2s ease;transform:rotate(-90deg);"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
           </button>
           <div id="snippetOptionsPanel" style="display:none;flex-direction:column;gap:10px;">
@@ -1845,8 +1814,27 @@ class App {
               <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
               <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
             </div>
+            <!-- [ZeroLabs] 2026-08-27 - added: automatic sync toggle -->
+            <div style="padding:8px 12px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
+              <label style="display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;">
+                <span style="font-size:13px;color:var(--md-sys-color-on-surface,#e0e0e0);">Background auto-sync</span>
+                <input type="checkbox" id="autoSyncToggle" style="flex-shrink:0;width:16px;height:16px;cursor:pointer;">
+              </label>
+              <div style="font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-top:6px;">
+                Checks for changes every 5 minutes and syncs automatically when nothing would be removed.
+                Anything that would delete a bookmark will defer for consent.
+              </div>
+            </div>
             <button id="createNewSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Create New Snippet with Current Bookmarks</button>
             <button id="selectExistingSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;">Select Existing Snippet</button>
+            <!-- [ZeroLabs] 2026-08-27 - added: forcing, always reachable -->
+            <!-- The sync button resolves everything it safely can, which means a
+                 divergence in renames or moves never surfaces a choice here, and a
+                 wholesale recovery has no route. These stay available whatever the
+                 current difference happens to look like. -->
+            <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
+            <button id="forceOverwriteSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Overwrite Snippet with Local</button>
+            <button id="forceOverwriteLocal" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Overwrite Local with Snippet</button>
             <button id="disconnectSnippet" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-error-container,#3b1a1a);color:var(--md-sys-color-on-error-container,#f9dedc);cursor:pointer;font-size:14px;">Disconnect & Remove Token</button>
           </div>
           <button id="closeSyncSettings" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">Close</button>
@@ -1910,16 +1898,131 @@ class App {
 
     if (snippetId) {
       dialog.querySelector('#closeSyncSettings').addEventListener('click', () => modal.remove());
-      dialog.querySelector('#syncFromSnippet').addEventListener('click', async () => {
-        modal.remove();
-        /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force manual cloud->browser pull */
-        await syncManager.syncFromRemote(true);
+
+      /* [ZeroLabs] 2026-08-27 - added: the one sync button, runs the reconcile */
+      // Statuses are single words because they sit inside the ring, and that
+      // space allows one line. The detail goes to a toast instead. Spinning draws
+      // one coloured arc; settling paints the whole ring in the outcome colour.
+      const manualSyncNowBtn = dialog.querySelector('#manualSyncNow');
+      if (manualSyncNowBtn) {
+        const ring = dialog.querySelector('#manualSyncRing');
+        const status = dialog.querySelector('#manualSyncStatus');
+        let running = false;
+
+        const setSyncState = (colour, spinning) => {
+          if (status) status.style.color = colour;
+          if (!ring) return;
+          if (spinning) {
+            ring.style.borderColor = 'transparent';
+            ring.style.borderTopColor = colour;
+            ring.style.animation = 'spin 1s linear infinite';
+          } else {
+            ring.style.animation = '';
+            ring.style.borderColor = colour;
+          }
+        };
+
+        const runManualSync = async () => {
+          if (running) return;
+          running = true;
+          setSyncState('#ffffff', true);
+          if (status) status.textContent = 'Syncing';
+
+          try {
+            const outcome = await syncManager.reconcileWithSnippet();
+
+            if (outcome.deferred) {
+              setSyncState('#ff9800', false);
+              if (status) status.textContent = 'Decide';
+              modal.remove();
+              await this.showHeldPushDialog();
+              return;
+            }
+
+            setSyncState('#4caf50', false);
+            if (status) status.textContent = outcome.changed ? 'Synced' : 'In Sync';
+            /* [ZeroLabs] 2026-08-27 - edited: silent when nothing changed */
+            // The ring already reads "In Sync", so a toast saying the same is
+            // just a second notification for a non-event.
+            if (outcome.changed) {
+              this.showToast(outcome.addedLocally > 0
+                ? `Synced. ${outcome.addedLocally} added here, snippet updated.`
+                : 'Synced. Snippet updated.', 'success');
+            }
+          } catch (error) {
+            console.error('[ManualSync] Failed:', error);
+            setSyncState('#f44336', false);
+            if (status) status.textContent = 'Error';
+            this.showToast(`Sync failed: ${error.message}`, 'error');
+          } finally {
+            running = false;
+          }
+        };
+
+        manualSyncNowBtn.addEventListener('click', runManualSync);
+        // Opening the dialog is itself a request to sync, so it starts straight
+        // away rather than making you press the button you just navigated to.
+        runManualSync();
+      }
+
+      /* [ZeroLabs] 2026-08-27 - added: the two forced overwrites */
+      // Both name what is about to be lost before doing it. The snippet one reads
+      // the remote first purely so the count is real rather than a vague warning.
+      dialog.querySelector('#forceOverwriteSnippet')?.addEventListener('click', async () => {
+        try {
+          const remoteData = await snippetAdapter.readBookmarks(snippetId);
+          const localTree = await syncManager.loadLocalBookmarks();
+          const remoteEntries = syncManager.collectSnippetEntries(remoteData);
+          const localEntries = syncManager.collectSnippetEntries(localTree);
+          let losing = 0;
+          remoteEntries.forEach((entry, url) => { if (!localEntries.has(url)) losing++; });
+
+          const proceed = confirm(losing > 0
+            ? `Warning: the snippet will be replaced with this device's bookmarks.\n\n${losing} item(s) currently in the snippet are not on this device and will be lost, on every device using it.\n\nContinue?`
+            : 'The snippet will be replaced with this device\'s bookmarks. Nothing in the snippet is missing here, so nothing will be lost.\n\nContinue?');
+          if (!proceed) return;
+
+          modal.remove();
+          const count = await syncManager.pushLocalToSnippet();
+          this.showToast(`Snippet overwritten with ${count} local bookmark${count === 1 ? '' : 's'}.`, 'success');
+        } catch (error) {
+          console.error('[ForceOverwrite] Snippet overwrite failed:', error);
+          this.showToast(`Error: ${error.message}`, 'error');
+        }
       });
-      dialog.querySelector('#syncToSnippet').addEventListener('click', async () => {
-        modal.remove();
-        /* [ZeroLabs] 2026-06-09 11:03 AM - edited: force manual browser->cloud push */
-        await syncManager.syncToRemote(true);
+
+      dialog.querySelector('#forceOverwriteLocal')?.addEventListener('click', async () => {
+        if (!confirm('Warning: every bookmark on this device will be replaced with the snippet\'s copy.\n\nAnything here that is not in the snippet will be lost.\n\nContinue?')) return;
+        try {
+          const remoteData = await snippetAdapter.readBookmarks(snippetId);
+          modal.remove();
+          const success = await syncManager.applyRemoteSync(remoteData);
+          if (success) {
+            await bookmarkManager.reload();
+            if (window.reloadBookmarkUI) await window.reloadBookmarkUI();
+            this.showToast('Local bookmarks replaced with the snippet.', 'success');
+          }
+        } catch (error) {
+          console.error('[ForceOverwrite] Local overwrite failed:', error);
+          this.showToast(`Error: ${error.message}`, 'error');
+        }
       });
+
+      /* [ZeroLabs] 2026-08-27 - added: bind the auto-sync toggle */
+      // Absent means on, so only an explicit false switches it off.
+      const autoSyncToggle = dialog.querySelector('#autoSyncToggle');
+      if (autoSyncToggle) {
+        syncManager.isAutoSyncEnabled().then(enabled => {
+          autoSyncToggle.checked = enabled;
+        });
+        autoSyncToggle.addEventListener('change', async () => {
+          await storageAdapter.set({ bmz_auto_sync_enabled: autoSyncToggle.checked });
+          this.showToast(autoSyncToggle.checked
+            ? 'Background auto-sync enabled'
+            : 'Background auto-sync disabled. Manual sync still works.', 'info');
+        });
+      }
+
       dialog.querySelector('#createNewSnippet').addEventListener('click', async () => {
         modal.remove();
         await this.showSnippetSetup();
@@ -2290,8 +2393,15 @@ class App {
         if (!hasSnippet) {
           await this.showSnippetSetup();
         } else {
-          await syncManager.syncToRemote();
-          this.showToast('Local bookmarks synced to GitLab successfully!', 'success');
+          /* [ZeroLabs] 2026-08-27 - edited: reconcile instead of overwriting the snippet */
+          // This blindly wrote this device's tree over a snippet it had never
+          // read. Anything already in it went with the push.
+          const outcome = await syncManager.reconcileWithSnippet();
+          if (outcome.deferred) {
+            await this.showHeldPushDialog();
+          } else {
+            this.showToast('Local bookmarks synced to GitLab successfully!', 'success');
+          }
         }
 
         const connectGitlabBtn = document.getElementById('connectGitlabBtn');
@@ -2309,42 +2419,10 @@ class App {
     };
   }
 
-  /**
-   * Load bookmarks from snippet or local storage
-   */
-  async loadBookmarks() {
-    try {
-      console.log('[App] Starting bookmark load...');
-
-      // First, try to sync from remote
-      const updated = await syncManager.syncFromRemote();
-      console.log('[App] Sync from remote completed, updated:', updated);
-
-      // Reload bookmark manager to get latest data
-      await bookmarkManager.reload();
-      console.log('[App] Bookmark manager reloaded');
-
-      // Re-render the UI to show updated bookmarks
-      if (window.renderBookmarks) {
-        window.renderBookmarks();
-        console.log('[App] UI re-rendered with updated bookmarks');
-      }
-
-      // Automatic scan disabled for sync/merge operations
-      // Users can manually trigger scans if needed
-    } catch (error) {
-      console.error('Failed to load bookmarks:', error);
-      // Try to reload with local data anyway
-      try {
-        await bookmarkManager.reload();
-        if (window.renderBookmarks) {
-          window.renderBookmarks();
-        }
-      } catch (reloadError) {
-        console.error('Failed to reload bookmarks:', reloadError);
-      }
-    }
-  }
+  /* [ZeroLabs] 2026-08-27 - removed: App.loadBookmarks (dead) */
+  // Nothing called it. It pulled with the old version-gated syncFromRemote and
+  // re-rendered, which is now what the reconcile plus the sync:localTreeChanged
+  // listener do, so leaving it would have been a second, wrong way in.
 
   /**
    * Load theme from storage
@@ -2581,6 +2659,21 @@ class App {
       }
     });
 
+    /* [ZeroLabs] 2026-08-27 - added: the reconcile writes the tree directly */
+    // It places bookmarks by mutating the stored tree rather than going through
+    // bookmarkManager.create, on purpose - firing created events for items that
+    // came from the snippet would record them as this device's additions. The
+    // cost is that the in-memory tree and the UI are then behind, so they are
+    // told here instead.
+    window.addEventListener('sync:localTreeChanged', async () => {
+      try {
+        await bookmarkManager.reload();
+        if (window.reloadBookmarkUI) await window.reloadBookmarkUI();
+      } catch (error) {
+        console.error('Failed to reload bookmarks after sync:', error);
+      }
+    });
+
     window.addEventListener('sync:syncError', (e) => {
       if (e.detail) {
         this.showToast(e.detail, 'error');
@@ -2714,12 +2807,20 @@ class App {
           window.renderBookmarks();
         }
 
-        // Force sync to remote after import (use forcePush=true to ensure sync happens)
-        console.log('[Import] Starting forced sync to remote after import...');
+        /* [ZeroLabs] 2026-08-27 - edited: reconcile instead of a blind push */
+        // replaceTree attributes every imported URL as this device's addition, so
+        // the reconcile pushes them without asking. Anything the snippet has that
+        // the import does not is added here rather than being wiped, which is what
+        // the old forced push did.
+        console.log('[Import] Reconciling with the snippet after import...');
         try {
-          await syncManager.manualSync(true);
-          console.log('[Import] Sync to remote completed successfully');
-          this.showToast('Bookmarks imported and synced successfully!', 'success');
+          const outcome = await syncManager.reconcileWithSnippet();
+          if (outcome.deferred) {
+            await this.showHeldPushDialog();
+          } else {
+            console.log('[Import] Sync to remote completed successfully');
+            this.showToast('Bookmarks imported and synced successfully!', 'success');
+          }
         } catch (syncError) {
           console.error('[Import] Sync to remote failed:', syncError);
           this.showToast(`Import succeeded but sync failed: ${syncError.message}`, 'warning');
@@ -3017,6 +3118,123 @@ class App {
 
   /* [ZeroLabs] 2026-06-20 11:01 AM - removed: orphaned mergeBookmarkTrees (per-sync merge) */
 
+  /* [ZeroLabs] 2026-08-27 - added: the consent dialog (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+  // A deferral has three possible shapes and they can occur together: bookmarks
+  // you deleted here that the snippet still holds, bookmarks the snippet no
+  // longer holds that are still here because another device deleted them, and
+  // renames or moves made elsewhere that would overwrite what is here. All three
+  // change something rather than only adding, which is the whole reason the sync
+  // stopped and asked.
+  async showHeldPushDialog() {
+    const state = await syncManager.getHeldState();
+    if (!state.held) return;
+
+    const { fromSnippet, fromDevice, overwrites } = state;
+    if (fromSnippet.length === 0 && fromDevice.length === 0 && overwrites.length === 0) return;
+
+    const esc = (s) => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10001;display:flex;align-items:center;justify-content:center;';
+
+    const dialog = document.createElement('div');
+    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:560px;width:90%;max-height:80%;overflow-y:auto;color:var(--md-sys-color-on-surface,#e0e0e0);';
+    dialog.className = 'bmz-dialog';
+
+    const renderList = (items) => {
+      let out = '';
+      items.slice(0, 50).forEach(item => {
+        out += `<div style="padding:8px;margin-bottom:4px;background:rgba(244,67,54,0.1);border-left:3px solid #f44336;border-radius:4px;">
+          <div style="font-weight:500;">${esc(item.title || 'Untitled')}</div>
+          <div style="font-size:11px;color:#888;margin-top:4px;">${esc(item.url || '')}</div>
+        </div>`;
+      });
+      if (items.length > 50) {
+        out += `<div style="font-size:12px;color:#aaa;padding:8px;">...and ${items.length - 50} more</div>`;
+      }
+      return out;
+    };
+
+    let body = '';
+    if (fromSnippet.length > 0) {
+      body += `<p style="margin:0 0 12px 0;font-size:14px;">
+        Remove ${fromSnippet.length} bookmark${fromSnippet.length === 1 ? '' : 's'} from your snippet to match this device.
+      </p>
+      <div style="margin-bottom:20px;">${renderList(fromSnippet)}</div>`;
+    }
+    if (fromDevice.length > 0) {
+      body += `<p style="margin:0 0 12px 0;font-size:14px;">
+        Remove ${fromDevice.length} bookmark${fromDevice.length === 1 ? '' : 's'} from this device to match the snippet.
+      </p>
+      <div style="margin-bottom:20px;">${renderList(fromDevice)}</div>`;
+    }
+
+    // Shown with both versions, because the choice is between two names rather
+    // than between keeping and losing something.
+    if (overwrites.length > 0) {
+      body += `<p style="margin:0 0 12px 0;font-size:14px;">
+        Rename or move ${overwrites.length} bookmark${overwrites.length === 1 ? '' : 's'} on this device to match the snippet.
+      </p>`;
+      let list = '';
+      overwrites.slice(0, 50).forEach(item => {
+        const renamed = item.title !== item.remoteTitle;
+        const relocated = item.localPath !== item.remotePath;
+        list += `<div style="padding:8px;margin-bottom:4px;background:rgba(255,152,0,0.1);border-left:3px solid #ff9800;border-radius:4px;">
+          <div style="font-weight:500;">${esc(item.title || 'Untitled')}</div>
+          ${renamed ? `<div style="font-size:12px;color:#aaa;">Name: ${esc(item.title)} → ${esc(item.remoteTitle)}</div>` : ''}
+          ${relocated ? `<div style="font-size:12px;color:#aaa;">Folder: ${esc(item.localPath)} → ${esc(item.remotePath)}</div>` : ''}
+          <div style="font-size:11px;color:#888;margin-top:4px;">${esc(item.url || '')}</div>
+        </div>`;
+      });
+      if (overwrites.length > 50) {
+        list += `<div style="font-size:12px;color:#aaa;padding:8px;">...and ${overwrites.length - 50} more</div>`;
+      }
+      body += `<div style="margin-bottom:20px;">${list}</div>`;
+    }
+
+    dialog.innerHTML = `
+      <h2 style="margin:0 0 12px 0;font-size:18px;color:#ff9800;text-align:center;">Sync changes to review</h2>
+      <p style="margin: 0 0 16px 0; font-size: 14px;">
+        Syncing would:
+      </p>
+      ${body}
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        <button id="heldPushConfirm" style="width:100%;padding:12px;border-radius:8px;border:none;background:#f59e0b;color:#1a1a1a;cursor:pointer;font-size:14px;font-weight:600;">
+          Approve
+        </button>
+        <button id="heldPushLater" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);cursor:pointer;font-size:14px;">
+          Cancel
+        </button>
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    dialog.querySelector('#heldPushConfirm').addEventListener('click', async () => {
+      modal.remove();
+      try {
+        // Applying the local side first is what makes the push carry the other
+        // device's deletion and the other device's rename.
+        if (fromDevice.length > 0 || overwrites.length > 0) {
+          await syncManager.applyHeldResolution({ fromDevice, overwrites });
+          await bookmarkManager.reload();
+          if (window.reloadBookmarkUI) await window.reloadBookmarkUI();
+        }
+
+        await syncManager.pushLocalToSnippet();
+        /* [ZeroLabs] 2026-08-27 - edited: one result, not the push's pair */
+        this.showToast('Sync approved and applied.', 'success');
+      } catch (error) {
+        console.error('[HeldPush] Approval failed:', error);
+        this.showToast(`Sync failed: ${error.message}`, 'error');
+      }
+    });
+    dialog.querySelector('#heldPushLater').addEventListener('click', () => modal.remove());
+  }
+
   /**
    * Show sync conflict dialog (for deletions - requires confirmation)
    */
@@ -3311,32 +3529,49 @@ class App {
       if (!hasSnippet) {
         // Show snippet setup modal (buttons should already work from initUI)
         await this.showSnippetSetup();
+        /* [ZeroLabs] 2026-08-27 - added: this path ends here, so reveal the page */
+        document.documentElement.classList.add('booted');
         return;
       }
 
-      // Sync from remote to ensure we have latest data
-      // Prevent duplicate sync operations
+      /* [ZeroLabs] 2026-08-27 - edited: reconcile on open instead of skipping (see also: Bookmark-Manager-Zero-Chrome/background.js) */
+      // This used to skip syncing entirely whenever local bookmarks already
+      // existed, which is almost always, so the site effectively never pulled.
+      // The reconcile is safe to run unconditionally: it adds what is missing on
+      // either side and defers rather than removing anything.
       if (!this._syncInProgress) {
         this._syncInProgress = true;
-        console.log('[App] Syncing bookmarks from remote...');
+        console.log('[App] Reconciling with snippet...');
         try {
-          // Check if we already have the latest data from checkSnippetSetup()
-          // We can check if local bookmarks are already loaded and match the remote
-          const localTree = bookmarkManager.getTree();
-          const hasLocalBookmarks = localTree && localTree.roots && Object.keys(localTree.roots).length > 0;
-
-          if (hasLocalBookmarks) {
-            console.log('[App] Already have bookmarks loaded, skipping sync');
-          } else {
-            await syncManager.syncFromRemote();
+          // An unresolved deferral outranks a fresh check: the two describe the
+          // same divergence from opposite ends and would stack on open.
+          const held = await syncManager.getHeldState();
+          if (held.held) {
+            await syncManager.setSnippetNeedsReconcile(true);
+            console.log('[App] A previous sync is waiting for consent');
+          } else if (await syncManager.isAutoSyncEnabled()) {
+            const outcome = await syncManager.reconcileWithSnippet();
             await bookmarkManager.reload();
+            if (outcome.deferred) {
+              console.log('[App] Reconcile deferred for consent');
+            }
           }
-          console.log('[App] Sync from remote complete');
+          console.log('[App] Reconcile complete');
         } catch (error) {
-          console.warn('[App] Sync from remote failed, will use cached data:', error);
+          console.warn('[App] Reconcile failed, will use cached data:', error);
         } finally {
           this._syncInProgress = false;
         }
+      }
+
+      /* [ZeroLabs] 2026-08-27 - added: keep checking while the page is open */
+      // Not in the Android share window. That is a transient floating window
+      // that pulls once, saves, and closes; a five-minute reconcile firing
+      // underneath it could pull bookmarks in and move the folder the picker is
+      // pointing at, or raise a deferral the window has no room to show. It runs
+      // its own pull in runSharePull instead. setSnippetId carries the same guard.
+      if (!window.__bmzShareMode) {
+        syncManager.startReconcilePoll();
       }
     } else {
       console.log('[App] Local mode - skipping remote sync');
@@ -3382,7 +3617,29 @@ class App {
       this._sidebarInitialized = true;
     }
 
+    /* [ZeroLabs] 2026-08-27 - added: reveal only once bookmarks are on screen */
+    // Marked here rather than at the top of this method. initSidebar awaits
+    // loadBookmarks and then renders, so anything earlier uncovered a main panel
+    // whose list was still empty - which draws its "No bookmarks found" state for
+    // a moment before the real bookmarks replace it. One flash traded for another.
+    document.documentElement.classList.add('booted');
+
     // blocklistService and scannerService are initialized on first use (lazy loading)
+
+    /* [ZeroLabs] 2026-08-27 - added: surface an outstanding deferral once the UI is up */
+    // A card at the top of the list rather than a dialog that opens by itself.
+    // setSnippetNeedsReconcile is what puts it there, so this only has to assert
+    // the state; it waits for the sidebar because the card is rendered by it.
+    // The share window is a small floating window with no bookmark list, and it
+    // presents the same divergence inline already.
+    if (!isLocalMode && !window.__bmzShareMode) {
+      try {
+        const held = await syncManager.getHeldState();
+        if (held.held) await syncManager.setSnippetNeedsReconcile(true);
+      } catch (error) {
+        console.error('[App] Could not check for a held sync:', error);
+      }
+    }
 
     /* [ZeroLabs] 2026-08-09 1:31 PM - added: open prefilled modal for share intent */
     if (this.shareIntent && !this._shareHandled && window.openShareBookmarkModal) {
@@ -3489,6 +3746,8 @@ class App {
    * Show error message
    */
   showError(title, error) {
+    /* [ZeroLabs] 2026-08-27 - added: a failure must not leave the loader up */
+    document.documentElement.classList.add('booted');
     const message = error?.message || error || 'Unknown error';
     this.showToast(`${title}: ${message}`, 'error');
     console.error(title, error);

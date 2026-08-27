@@ -994,6 +994,140 @@
       box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
     }
 
+    /* [ZeroLabs] 2026-08-27 - added: deferred sync notice card */
+    /* Built on .announcement-card so it inherits every theme's version of the
+       shape, and recoloured to the amber the sync button already uses for a
+       deferral, so the card and the button read as the same state. */
+    .announcement-card.sync-notice-card,
+    .enhanced-blue .announcement-card.sync-notice-card {
+      border-left-color: #f59e0b;
+    }
+    /* No badge and no separate title: one headline carries it. A kicker saying
+       sync had paused above a title saying sync was waiting was the same fact
+       twice, and the body's last sentence plus the Review button already say
+       that a decision is wanted. */
+
+    /* The headline is 36 characters and the text column is the viewport minus
+       106px, so it wraps below roughly 410px - the Fold's cover screen. Balance
+       evens the two lines instead of leaving "data" alone on the second.
+       Ignored by browsers that lack it, which just wrap normally. */
+    .sync-notice-card .announcement-card-title {
+      text-wrap: balance;
+    }
+    .sync-notice-card .announcement-setup-btn {
+      background: #f59e0b;
+      color: #1a1a1a;
+    }
+    .sync-notice-card .announcement-setup-btn:hover {
+      background: #d98a09;
+    }
+
+    /* Leading image: the toolbar sync button's waiting state, in its circle */
+    /* [ZeroLabs] 2026-08-27 - added: give the hand-rolled dialogs BMZ's elevation */
+    /* The sync dialogs are built in JS with inline styles and never picked up the
+       shadows .modal-content and .btn get from this stylesheet, so they sat flat
+       against the page while every other panel in BMZ lifted off it. Applied by
+       class so dialogs added later inherit it instead of having to remember. */
+
+    /* The lit top edge and hairline border belong to the enhanced and tinted
+       themes ONLY. blue-dark and dark - blue-dark is the default - carry no such
+       rule anywhere in BMZ; their look is deliberately flat, and a dialog that
+       invented a lit edge there would be the odd one out rather than consistent.
+       Driven by variables so each theme states its answer once, and a theme added
+       later stays flat until it says otherwise. */
+    :root {
+      --bmz-panel-hairline: transparent;
+      --bmz-lit-top: 0 0 0 0 transparent;
+      --bmz-lit-top-strong: 0 0 0 0 transparent;
+      --bmz-sunk-bottom: 0 0 0 0 transparent;
+      --bmz-pressed: 0 0 0 0 transparent;
+    }
+    .enhanced-blue,
+    .enhanced-dark,
+    .enhanced-gray {
+      --bmz-panel-hairline: rgba(255, 255, 255, 0.12);
+      --bmz-lit-top: inset 0 1px 0 rgba(255, 255, 255, 0.1);
+      --bmz-lit-top-strong: inset 0 1px 0 rgba(255, 255, 255, 0.18);
+      --bmz-sunk-bottom: inset 0 -2px 0 rgba(0, 0, 0, 0.12);
+      --bmz-pressed: inset 0 2px 4px rgba(0, 0, 0, 0.22);
+    }
+    /* The light themes need a far stronger highlight - a faint white line does
+       not read at all against a light surface. Same values .settings-menu uses. */
+    .enhanced-light,
+    .tinted {
+      --bmz-panel-hairline: rgba(0, 0, 0, 0.12);
+      --bmz-lit-top: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      --bmz-lit-top-strong: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+      --bmz-sunk-bottom: inset 0 -2px 0 rgba(0, 0, 0, 0.1);
+      --bmz-pressed: inset 0 2px 4px rgba(0, 0, 0, 0.18);
+    }
+
+    .bmz-dialog {
+      border: 0.5px solid var(--bmz-panel-hairline);
+      box-shadow: var(--md-elevation-3), var(--bmz-lit-top);
+    }
+
+    /* The card re-declares its amber edge, because the border shorthand above
+       would otherwise wipe the border-left that identifies it. */
+    body .announcement-card.sync-notice-card {
+      border: 0.5px solid var(--bmz-panel-hairline);
+      border-left: 4px solid #f59e0b;
+      box-shadow: var(--md-elevation-1), var(--bmz-lit-top);
+    }
+
+    /* Buttons get the lit top edge and shaded bottom that .toolbar button uses,
+       which is what makes them read as raised rather than painted on. Both
+       collapse to nothing on the flat themes. */
+    .bmz-dialog button,
+    body .announcement-card.sync-notice-card button {
+      box-shadow: var(--md-elevation-1), var(--bmz-lit-top-strong), var(--bmz-sunk-bottom);
+      transition: box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .bmz-dialog button:hover,
+    body .announcement-card.sync-notice-card button:hover {
+      box-shadow: var(--md-elevation-2), var(--bmz-lit-top-strong), var(--bmz-sunk-bottom);
+    }
+    .bmz-dialog button:active,
+    body .announcement-card.sync-notice-card button:active {
+      box-shadow: var(--md-elevation-1), var(--bmz-pressed);
+    }
+    .sync-notice-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .sync-notice-icon {
+      flex: 0 0 auto;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--md-sys-color-surface-container, #2a2a2a);
+      box-shadow: var(--md-elevation-1, 0 1px 2px 0 rgb(0 0 0 / 0.3));
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .sync-notice-icon svg {
+      width: 34px;
+      height: 34px;
+      display: block;
+    }
+    .sync-notice-arrows path {
+      fill: #f59e0b;
+    }
+    .sync-notice-summary {
+      font-size: 12px;
+      font-weight: 600;
+      color: #f59e0b;
+    }
+    /* min-width:0 so a long URL in the body wraps instead of stretching the row */
+    .sync-notice-text {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      min-width: 0;
+    }
+
     /* Bookmark Item Styles */
 /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access and recent sections (see also: Bookmark-Manager-Zero-Chrome/sidepanel.html) */
     .bmz-sections {
@@ -2788,6 +2922,14 @@
       fill: #4caf50;
     }
 
+    /* [ZeroLabs] 2026-08-27 - added: a sync is waiting for consent (see also: Bookmark-Manager-Zero-Chrome/sidepanel.html) */
+    /* The website has no toolbar badge, so this button carries the whole signal
+       that something was deferred and is still unresolved. */
+    #manualSyncBtn.sync-attention #syncArrows path {
+      fill: #f59e0b;
+      transition: fill 0.3s ease;
+    }
+
     /* [ZeroLabs] 2026-08-09 1:31 PM - added: recent folder chips + share status */
     .recent-folders-row {
       display: flex;
@@ -3013,31 +3155,69 @@
     }
   </style>
   <script>
-    // Synchronous check to prevent login screen flash on refresh
-    // Check immediately and set body class before rendering
+    /* [ZeroLabs] 2026-08-27 - edited: never guess, show a loader until the app knows */
+    // This used to read localStorage 'bmz_gitlab_token', which NOTHING has ever
+    // written - the token lives in IndexedDB. So for every GitLab user the check
+    // read null, concluded "not set up", and showed the setup screen on every
+    // load until app.js finished its async reads and took it away again.
+    //
+    // There is no synchronous way to know: the answer is in IndexedDB. So the
+    // page no longer guesses. #bootLoader covers the window until showMainApp or
+    // showLoginScreen says which one it is, and both then mark the page booted.
+    //
+    // The loader itself fades in after 150ms, so a load that resolves quickly
+    // shows nothing at all rather than a flash of dots.
     (function() {
-      try {
-        const hasToken = localStorage.getItem('bmz_gitlab_token');
-        const isLocalMode = localStorage.getItem('bmz_local_mode') === 'true';
-
-        // Only show login screen if user has neither a token nor is in local mode
-        if (!hasToken && !isLocalMode) {
-          // No token and not in local mode - we need to show login screen
-          // Add a class that will be checked when body renders
-          document.documentElement.classList.add('show-login');
-        }
-      } catch (e) {
-        // localStorage not available (Edge security, private browsing, etc.)
-        // Show login screen by default
-        console.warn('localStorage not available:', e);
-        document.documentElement.classList.add('show-login');
-      }
+      // Safety net: never leave the loader up forever if init throws before
+      // either screen is reached.
+      setTimeout(function() {
+        document.documentElement.classList.add('booted');
+      }, 15000);
     })();
   </script>
   <style>
     /* Hide login screen by default to prevent flash */
     #loginScreen {
       display: none;
+    }
+
+    /* [ZeroLabs] 2026-08-27 - added: boot loader */
+    /* Shown while the app reads IndexedDB to work out whether this is a
+       configured install or a first run. Both #loginScreen and #mainContent are
+       hidden until then, so without this the page is simply blank. */
+    #bootLoader {
+      position: fixed;
+      inset: 0;
+      z-index: 99998;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: var(--md-sys-color-surface, #1e1e1e);
+      opacity: 0;
+      animation: bootLoaderIn 0.2s ease 0.15s forwards;
+    }
+    html.booted #bootLoader {
+      display: none;
+    }
+    #bootLoader span {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--md-sys-color-primary, #818cf8);
+      animation: bootDot 1.2s ease-in-out infinite;
+    }
+    #bootLoader span:nth-child(2) { animation-delay: 0.15s; }
+    #bootLoader span:nth-child(3) { animation-delay: 0.30s; }
+    @keyframes bootDot {
+      0%, 80%, 100% { transform: scale(0.6); opacity: 0.35; }
+      40%           { transform: scale(1);   opacity: 1; }
+    }
+    @keyframes bootLoaderIn {
+      to { opacity: 1; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      #bootLoader span { animation: none; opacity: 0.7; }
     }
     /* Only show login screen if explicitly needed */
     html.show-login #loginScreen {
@@ -3142,6 +3322,8 @@
   </style>
 </head>
 <body class="enhanced-blue">
+  <!-- [ZeroLabs] 2026-08-27 - added: boot loader, removed once the app knows which screen to show -->
+  <div id="bootLoader" role="status" aria-label="Loading"><span></span><span></span><span></span></div>
   <!-- Edge Browser Warning Overlay -->
   <div id="edgeWarningOverlay">
     <div class="edge-warning-content">

@@ -11,6 +11,37 @@ class BookmarkManager {
   constructor() {
     this.tree = null;
     this.initialized = false;
+    /* [ZeroLabs] 2026-08-27 - added: real bookmark events (see also: Bookmark-Manager-Zero-Chrome/background.js) */
+    // The extensions decide what is safe to sync from what the browser told them
+    // the user did: an addition this device watched you make is yours to push, one
+    // it never saw came from elsewhere. The website had no such signal, because
+    // browser.bookmarks.onCreated and friends were empty stubs in the adapter.
+    // This is that signal.
+    this._listeners = { created: [], removed: [], changed: [], moved: [], replaced: [] };
+  }
+
+  /* [ZeroLabs] 2026-08-27 - added: subscribe to bookmark mutations */
+  // Mirrors browser.bookmarks.on*.addListener, which is what the adapter in
+  // sidebar-adapted.js now maps onto, so ported extension code works unchanged.
+  addListener(kind, fn) {
+    if (!this._listeners[kind]) this._listeners[kind] = [];
+    this._listeners[kind].push(fn);
+  }
+
+  // Also dispatched on window, so a module that cannot import this one without a
+  // cycle (sync-manager, which this file imports) can still listen.
+  _emit(kind, ...args) {
+    (this._listeners[kind] || []).forEach(fn => {
+      try {
+        fn(...args);
+      } catch (error) {
+        console.error(`[BookmarkManager] ${kind} listener failed:`, error);
+      }
+    });
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(`bmz:bookmarks:${kind}`, { detail: args }));
+    }
   }
 
   /**
@@ -195,6 +226,9 @@ class BookmarkManager {
 
     console.log(`Created ${type}:`, newNode);
 
+    /* [ZeroLabs] 2026-08-27 - added: tell sync this device made the addition */
+    this._emit('created', newNode.id, newNode);
+
     // If this is a bookmark (not a folder), trigger automatic scan
     /* [ZeroLabs] 2026-08-09 1:31 PM - edited: no auto-scan in share window */
     if (type === 'bookmark' && window.scannerService && !window.__bmzShareMode) {
@@ -246,6 +280,12 @@ class BookmarkManager {
     await this.saveChanges();
 
     console.log('Updated bookmark/folder:', node);
+
+    /* [ZeroLabs] 2026-08-27 - added: a rename made here is meant to travel */
+    // Same payload shape as chrome.bookmarks.onChanged: the fields as they now
+    // stand, which is all the recorder needs to key the edit by URL.
+    this._emit('changed', id, { title: node.title, url: node.url });
+
     return node;
   }
 
@@ -310,6 +350,13 @@ class BookmarkManager {
     await this.saveChanges();
 
     console.log(`Moved ${node.type} "${node.title}" to ${newParent.title}`);
+
+    /* [ZeroLabs] 2026-08-27 - added: a move made here is meant to travel */
+    // chrome.bookmarks.onMoved carries only parent ids, so the recorder looks the
+    // URL up. A folder move arrives as one event, and the bookmarks inside it are
+    // what the comparison actually sees change path.
+    this._emit('moved', id, { parentId, oldParentId: oldParent.id, index });
+
     return node;
   }
 
@@ -334,6 +381,12 @@ class BookmarkManager {
       throw new Error('Cannot delete root folders');
     }
 
+    /* [ZeroLabs] 2026-08-27 - added: snapshot the subtree before it is gone */
+    // Deleting a folder is one event covering everything inside it, and once the
+    // splice has happened those URLs are unrecoverable. The recorder walks
+    // node.children, so the snapshot has to be taken here and taken whole.
+    const snapshot = JSON.parse(JSON.stringify(node));
+
     // Remove from parent's children
     const index = parent.children.indexOf(node);
     if (index !== -1) {
@@ -347,6 +400,9 @@ class BookmarkManager {
     await this.saveChanges();
 
     console.log(`Removed ${node.type} "${node.title}"`);
+
+    this._emit('removed', id, { node: snapshot, parentId: parent.id });
+
     return true;
   }
 
@@ -504,13 +560,18 @@ class BookmarkManager {
    * Replace entire bookmark tree
    * Used for imports
    */
-  async replaceTree(newTree) {
+  /* [ZeroLabs] 2026-08-27 - edited: say whether the replacement is the user's doing */
+  // An import is a pile of additions this device made, so they push. Taking the
+  // snippet's copy wholesale is the opposite: nothing in the result is this
+  // device's change, and attributing it would push it straight back out.
+  async replaceTree(newTree, { attribute = true } = {}) {
     try {
       // Validate tree structure
       if (!newTree.roots) {
         throw new Error('Invalid bookmark tree: missing roots');
       }
 
+      const oldTree = this.tree;
       this.tree = newTree;
       this.tree.lastModified = Date.now();
 
@@ -518,6 +579,9 @@ class BookmarkManager {
       await this.saveChanges();
 
       console.log('Bookmark tree replaced successfully');
+
+      this._emit('replaced', { oldTree, newTree: this.tree, attribute });
+
       return this.tree;
     } catch (error) {
       console.error('Failed to replace bookmark tree:', error);
@@ -541,9 +605,15 @@ class BookmarkManager {
    */
   async clear() {
     try {
+      const oldTree = this.tree;
       this.tree = syncManager.getEmptyBookmarkTree();
       await this.saveChanges();
       console.log('All bookmarks cleared');
+      /* [ZeroLabs] 2026-08-27 - added: clearing is never this device's edit */
+      // Its one caller empties the tree so the snippet can be pulled in over it.
+      // Attributing that would record every bookmark as deleted here, and the
+      // next reconcile would offer to delete them from the snippet too.
+      this._emit('replaced', { oldTree, newTree: this.tree, attribute: false });
       return this.tree;
     } catch (error) {
       console.error('Failed to clear bookmarks:', error);

@@ -65,8 +65,8 @@ import {
 // Create a browser object that maps extension APIs to our web equivalents
 const browser = {
   runtime: {
-    /* [ZeroLabs] 2026-08-19 7:12 PM - edited: bump version to 2.0 */
-    getManifest: () => ({ version: '2.0' }),
+    /* [ZeroLabs] 2026-08-27 11:52 AM - edited: bump version to 2.1 */
+    getManifest: () => ({ version: '2.1' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -111,10 +111,16 @@ const browser = {
       const searchString = typeof query === 'string' ? query : (query.query || query.url || '');
       return Promise.resolve(bookmarkManager.search(searchString));
     },
-    onCreated: { addListener: () => {} },
-    onRemoved: { addListener: () => {} },
-    onChanged: { addListener: () => {} },
-    onMoved: { addListener: () => {} }
+    /* [ZeroLabs] 2026-08-27 - edited: real events instead of stubs (see also: Bookmark-Manager-Zero-Chrome/background.js) */
+    // These were no-ops, which is why the website could never tell an addition
+    // it made from one another device deleted, and so could never sync anything
+    // safely on its own. bookmarkManager now emits on every mutation with the
+    // same payload shapes chrome.bookmarks uses, so anything ported from the
+    // extensions works here unchanged.
+    onCreated: { addListener: (fn) => bookmarkManager.addListener('created', fn) },
+    onRemoved: { addListener: (fn) => bookmarkManager.addListener('removed', fn) },
+    onChanged: { addListener: (fn) => bookmarkManager.addListener('changed', fn) },
+    onMoved: { addListener: (fn) => bookmarkManager.addListener('moved', fn) }
   },
   storage: {
     local: storageAdapter
@@ -522,6 +528,17 @@ let recentOpens = [];            // [{ url, openedAt }] - device local, never sy
 // The two sections share one row and behave as an accordion: at most one open.
 let activeSection = 'quickAccess'; // 'quickAccess' | 'recent' | null (both closed)
 
+/* [ZeroLabs] 2026-08-27 - added: the deferred-sync notice card */
+// A sync that stops and waits needs to say so without hijacking the page. The
+// amber sync arrows are the standing signal but are easy to miss, and a modal
+// that opens on its own lands on top of whatever you were doing. This card sits
+// at the top of the list instead: visible, dismissable, and one click from the
+// dialog that resolves it. It also works in the Android WebView, which a real
+// browser notification does not.
+let syncNoticeVisible = false;
+let syncNoticeDismissed = false;
+let syncNoticeCounts = { fromSnippet: 0, fromDevice: 0, overwrites: 0 };
+
 // Normalize a URL for identity comparison. Scheme and host are case-insensitive,
 // a lone trailing slash is noise, everything else is significant.
 function normalizeUrlKey(url) {
@@ -597,6 +614,49 @@ function saveQuickAccess() {
   });
 }
 
+/* [ZeroLabs] 2026-08-27 - added: pins reach the snippet on their own (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+// saveQuickAccess only ever wrote to local storage. Pins reached GitLab solely
+// as a passenger on a bookmarks.json push, so pinning something and changing
+// nothing else never synced at all - the exact failure the extensions already
+// fixed by giving pins their own write.
+//
+// bmz-meta.json is written ALONE. It is a separate file inside the snippet
+// precisely so a client that predates Quick Access cannot blank it: GitLab only
+// rewrites the files named in the request.
+const QUICK_ACCESS_PUSH_DELAY_MS = 5000;
+let quickAccessPushTimer = null;
+
+function scheduleQuickAccessPush() {
+  // Debounced, because reordering pins by dragging fires this on every drop
+  clearTimeout(quickAccessPushTimer);
+  quickAccessPushTimer = setTimeout(() => {
+    pushQuickAccessMeta().catch(error => {
+      console.error('[QuickAccess] Pin push failed:', error);
+    });
+  }, QUICK_ACCESS_PUSH_DELAY_MS);
+}
+
+async function pushQuickAccessMeta() {
+  const snippetId = syncManager.getRemoteId();
+  if (!snippetId || !navigator.onLine) return;
+
+  // Never write pins for a snippet whose meta has not been read, or a snippet
+  // switch followed by a fast push would overwrite the new snippet's pins with
+  // the previous one's cache. buildPayloadFor enforces the same rule.
+  if (!quickAccessMetaLoaded || quickAccessSnippetTag !== String(snippetId)) {
+    await window.bmzQuickAccessMeta.loadForSnippet(snippetId);
+  }
+
+  const payload = window.bmzQuickAccessMeta.buildPayloadFor(snippetId);
+  if (!payload) {
+    console.warn('[QuickAccess] Meta not loaded for this snippet; pin push skipped');
+    return;
+  }
+
+  await snippetAdapter.updateQuickAccessMeta(snippetId, payload);
+  console.log('[QuickAccess] Pins pushed');
+}
+
 function loadRecentOpens() {
   const stored = readJsonSetting(RECENT_OPENS_KEY, []);
   recentOpens = Array.isArray(stored) ? stored : [];
@@ -638,6 +698,7 @@ function pinBookmark(bookmark) {
   quickAccessTombstones = quickAccessTombstones.filter(t => normalizeUrlKey(t.url) !== key);
 
   saveQuickAccess();
+  scheduleQuickAccessPush();
   markQuickAccessChanged();
   renderBookmarks();
 }
@@ -654,6 +715,7 @@ function unpinUrl(url) {
   quickAccessTombstones.push({ url, removedAt: Date.now() });
 
   saveQuickAccess();
+  scheduleQuickAccessPush();
   markQuickAccessChanged();
   renderBookmarks();
 }
@@ -670,6 +732,7 @@ function reorderQuickAccess(fromKey, toKey, dropBefore) {
   quickAccessPins.splice(insertAt, 0, moved);
 
   saveQuickAccess();
+  scheduleQuickAccessPush();
   markQuickAccessChanged();
   renderBookmarks();
 }
@@ -826,6 +889,8 @@ window.bmzQuickAccessMeta = {
     quickAccessMetaLoaded = true;
     quickAccessMetaExists = Boolean(remote.exists);
     saveQuickAccess();
+    // Deliberately NOT scheduling a push: this is the PULL path, and pushing
+    // here would send straight back what was just read on every sync.
     renderBookmarks();
   }
 };
@@ -2248,6 +2313,11 @@ function renderBookmarks() {
     bookmarkList.classList.remove('grid-view', 'grid-2', 'grid-3', 'grid-4', 'grid-5', 'grid-6');
   }
 
+  /* [ZeroLabs] 2026-08-27 - added: deferred sync notice, above everything else */
+  // Placed ahead of Quick Access so it is the first thing in the list, since it
+  // is the only thing here that is waiting on a decision.
+  renderSyncNoticeCard(bookmarkList);
+
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access and recent sections */
   // Hidden while searching or filtering: the tree is already showing matches
   // from everywhere, so mirrored rows would just duplicate the results.
@@ -2482,6 +2552,99 @@ function buildRecentBody(resolved) {
 
   return body;
 }
+
+/* [ZeroLabs] 2026-08-27 - added: the deferred-sync notice card */
+// Rendered from a flag rather than by reading storage, because renderBookmarks
+// is synchronous and runs constantly. syncManager announces the change instead,
+// and only when it actually changes.
+/* [ZeroLabs] 2026-08-27 - added: name the numbers on the card */
+// The card used to say only "found differences", which told you nothing about
+// whether this was worth opening now or after dinner. Added as its own line
+// rather than folded into the sentence above, so the agreed wording is untouched.
+function syncNoticeSummary(counts) {
+  const n = (c, one, many) => `${c} ${c === 1 ? one : many}`;
+  const parts = [];
+  if (counts.fromSnippet > 0) parts.push(n(counts.fromSnippet, 'bookmark', 'bookmarks') + ' to remove from your Snippet');
+  if (counts.fromDevice > 0) parts.push(n(counts.fromDevice, 'bookmark', 'bookmarks') + ' to remove from this device');
+  if (counts.overwrites > 0) parts.push(n(counts.overwrites, 'bookmark', 'bookmarks') + ' to rename or move');
+  return parts.join('  ·  ');
+}
+
+function renderSyncNoticeCard(container) {
+  if (!syncNoticeVisible || syncNoticeDismissed) return;
+
+  const card = document.createElement('div');
+  card.className = 'announcement-card sync-notice-card';
+  // The leading image is the header sync button in its waiting state: the black
+  // tanuki with amber arrows, in the same circle. The card and the button in the
+  // toolbar are then visibly the same signal rather than two separate warnings.
+  // Classes, not ids: #syncArrows already belongs to the toolbar button.
+  card.innerHTML = `
+    <div class="sync-notice-row">
+      <div class="sync-notice-icon">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path fill="#000000" d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
+          <g class="sync-notice-arrows" transform="translate(12, 16) scale(0.56) translate(-12, -12)">
+            <path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/>
+          </g>
+        </svg>
+      </div>
+      <div class="sync-notice-text">
+        <div class="announcement-card-title">Sync was paused to protect your data</div>
+        <div class="announcement-card-body">
+          BMZ found differences between your Snippet and your local bookmarks that need
+          your approval. Please review the changes to resume syncing.
+        </div>
+        <div class="sync-notice-summary">${syncNoticeSummary(syncNoticeCounts)}</div>
+      </div>
+    </div>
+    <div class="announcement-card-actions">
+      <button class="announcement-setup-btn" id="syncNoticeReview">Review changes</button>
+      <button class="announcement-dismiss-btn" id="syncNoticeDismiss">Not now</button>
+    </div>
+  `;
+  container.appendChild(card);
+
+  // Deferred like the other cards here: the element is in the DOM but the rest
+  // of the render is still running.
+  setTimeout(() => {
+    document.getElementById('syncNoticeReview')?.addEventListener('click', () => {
+      window.app?.showHeldPushDialog();
+    });
+    // Dismissal lasts until the situation changes. The amber sync arrows stay on
+    // whatever happens here, so the signal is never fully silenced.
+    document.getElementById('syncNoticeDismiss')?.addEventListener('click', () => {
+      syncNoticeDismissed = true;
+      renderBookmarks();
+    });
+  }, 0);
+}
+
+/* [ZeroLabs] 2026-08-27 - added: follow the deferral state */
+// Fires only on a genuine change, so a poll that re-reaches the same deferral
+// every five minutes does not undo a dismissal.
+window.addEventListener('sync:needsReconcile', async (e) => {
+  const needs = !!(e.detail && e.detail.needs);
+  if (needs === syncNoticeVisible) return;
+  syncNoticeVisible = needs;
+  if (needs) {
+    // A new deferral is worth showing again even if the last one was dismissed
+    syncNoticeDismissed = false;
+    /* [ZeroLabs] 2026-08-27 - added: read the counts for the summary line */
+    try {
+      const held = await syncManager.getHeldState();
+      syncNoticeCounts = {
+        fromSnippet: held.fromSnippet.length,
+        fromDevice: held.fromDevice.length,
+        overwrites: held.overwrites.length
+      };
+    } catch (error) {
+      // The card still stands on its own without the numbers
+      syncNoticeCounts = { fromSnippet: 0, fromDevice: 0, overwrites: 0 };
+    }
+  }
+  renderBookmarks();
+});
 
 // One row split in two, with the open section's contents below it. If a display
 // option hides one section, the other takes the full row rather than half.
@@ -5793,25 +5956,29 @@ async function runSharePull() {
     throw new Error('This device is offline.');
   }
 
-  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: distinguish the three false returns */
-  // syncFromRemote returns false (it does NOT throw) in three different
-  // situations, and they mean very different things:
-  //   1. a real deletion conflict, which emits syncConflict carrying the diff
-  //   2. versions match but content differs, which emits syncNudge (text only)
-  //   3. local is already up to date, which emits nothing
-  // Case 3 is the normal path, so the boolean alone cannot be treated as a
-  // problem. Only the captured events distinguish 1 and 2 from it.
-  const pulled = await syncManager.syncFromRemote(false, true);
+  /* [ZeroLabs] 2026-08-27 - edited: reconcile instead of the version-gated pull (see also: Bookmark-Manager-Zero-Chrome/background.js) */
+  // The old syncFromRemote returned false in three different situations that
+  // meant very different things, and the share flow had to read captured events
+  // to tell them apart. The reconcile answers directly: it adds what is missing
+  // on either side and returns deferred only when something would be removed or
+  // overwritten, which is exactly the case this window has to put to the user.
+  // push: false - stage 3 pushes once the bookmark has been saved, so publishing
+  // here as well would write to GitLab twice for one share.
+  const outcome = await syncManager.reconcileWithSnippet({ push: false });
 
-  if (pulled === false && shareFlow.conflictDiff) {
-    return { conflict: true, diff: shareFlow.conflictDiff, remoteData: shareFlow.conflictRemote };
-  }
-
-  if (pulled === false && shareFlow.nudgeMessage) {
-    // Cloud and device differ with no deletions to apply. Local is still stale,
-    // so saving would force-push over the cloud's changes; warn, but there is
-    // no diff object here to list individual bookmarks from.
-    return { diverged: true, message: shareFlow.nudgeMessage };
+  if (outcome.deferred) {
+    // Handed over as-is: the share window presents the same three categories the
+    // consent dialog does, so there is nothing to reshape.
+    shareFlow.conflictDiff = outcome;
+    try {
+      const localTree = await syncManager.loadLocalBookmarks();
+      const remoteTree = await snippetAdapter.readBookmarks(syncManager.getRemoteId());
+      shareFlow.localCount = syncManager.countBookmarksInTree(localTree);
+      shareFlow.remoteCount = syncManager.countBookmarksInTree(remoteTree);
+    } catch (e) {
+      // Totals are decoration; the deferral still has to be shown without them
+    }
+    return { conflict: true, diff: outcome };
   }
 
   await bookmarkManager.reload();
@@ -5841,126 +6008,68 @@ async function runSharePull() {
   return { skipped: false };
 }
 
-/* [ZeroLabs] 2026-08-19 6:01 PM - added: resolve a deletion conflict inside the share window */
-// Present the conflict with the actual titles that would be lost, then offer
-// both directions. Previously this state was invisible to the share flow, so
-// saving force-pushed a stale local tree and undid the cloud's deletions.
-/* [ZeroLabs] 2026-08-19 7:12 PM - added: totals sentence */
-// Says how big each side actually is, which the category counts alone never
-// showed. Returns '' when the counts are unavailable so nothing half-formed
-// can render.
-function shareTotalsSentence() {
-  const local = shareFlow.localCount;
-  const remote = shareFlow.remoteCount;
-  if (typeof local !== 'number' || typeof remote !== 'number') return '';
+/* [ZeroLabs] 2026-08-27 - removed: shareTotalsSentence (dead) */
+// It appended "Cloud has 340 bookmarks, this device has 342" to the old share
+// conflict wording. The window now states the same operations the consent dialog
+// states, and that dialog does not show totals either - the point of this rewrite
+// was that both surfaces say the same thing.
 
-  const noun = (n) => (n === 1 ? 'bookmark' : 'bookmarks');
-  let comparison;
-  if (remote > local) {
-    comparison = `The cloud has ${remote - local} more.`;
-  } else if (local > remote) {
-    comparison = `This device has ${local - remote} more.`;
-  } else {
-    // Equal totals still differ in content, so say so rather than imply a match
-    comparison = 'Same total, but the contents differ.';
+/* [ZeroLabs] 2026-08-27 - removed: showShareDiverged (dead) */
+// It rendered the 'versions match but content differs' state, which came from
+// syncFromRemote's syncNudge event. The share window runs the reconcile now, and
+// that reports a real deferral with its categories instead - there is no longer a
+// vaguer middle state for this to describe.
+
+/* [ZeroLabs] 2026-08-27 - edited: the share window follows the same policy as the app */
+// This used to offer "Sync from Cloud to Device" and "Sync from Device to Cloud",
+// the two blunt directional overwrites the main app dropped: each one destroys
+// whatever the losing side holds alone, which is exactly what the deferral model
+// exists to avoid. The share window now says what the main dialog says, in the
+// same words, and offers the same Approve - apply these specific changes, then
+// carry on and save.
+//
+// It is a small floating window, so this renders into the inline status panel
+// rather than a modal, and the list is capped hard.
+function showShareConflict(deferral) {
+  const fromSnippet = (deferral && deferral.removesFromSnippet) || [];
+  const fromDevice = (deferral && deferral.removesFromDevice) || [];
+  const overwrites = (deferral && deferral.overwritesOnDevice) || [];
+
+  const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+  // Same three operation lines the consent dialog uses, same order, same wording
+  const lines = [];
+  if (fromSnippet.length) {
+    lines.push(`Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your Snippet to match this device.`);
+  }
+  if (fromDevice.length) {
+    lines.push(`Remove ${count(fromDevice.length, 'bookmark', 'bookmarks')} from this device to match the Snippet.`);
+  }
+  if (overwrites.length) {
+    lines.push(`Rename or move ${count(overwrites.length, 'bookmark', 'bookmarks')} on this device to match the Snippet.`);
   }
 
-  return ` Cloud has ${remote} ${noun(remote)}, this device has ${local} ${noun(local)}. ${comparison}`;
-}
-
-/* [ZeroLabs] 2026-08-19 7:12 PM - added: milder state for a no-deletion divergence */
-// Reached when versions match but content differs. There is no diff to itemise,
-// so this states the difference and offers the same two directions.
-function showShareDiverged(message) {
-  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: own wording plus totals */
-  // Built here rather than reusing the stock nudge text, whose closing line
-  // told the user to open GitLab sync, which is exactly where they already are.
-  const diff = shareFlow.nudgeDiff;
-  const parts = [];
-  if (diff) {
-    if (diff.added.length) parts.push(`${diff.added.length} to pull`);
-    if (diff.removed.length) parts.push(`${diff.removed.length} only here`);
-    if (diff.moved.length) parts.push(`${diff.moved.length} moved`);
-    if (diff.modified.length) parts.push(`${diff.modified.length} changed`);
-  }
-  const summary = parts.length ? ` (${parts.join(', ')})` : '';
-  const totals = shareTotalsSentence();
-
-  const reason = (summary || totals)
-    ? `The cloud and this device are out of step${summary}.${totals} Saving now would push this device's list over the cloud copy.`
-    : (message || 'This device and the cloud are out of step. Saving now would push this device\'s list over the cloud copy.');
-
-  setShareStatus(
-    'error',
-    'Your bookmarks differ from the cloud',
-    reason,
-    [
-      { label: 'Sync from Cloud to Device', primary: true, onClick: () => resolveShareConflict('pull') },
-      { label: 'Sync from Device to Cloud', onClick: () => resolveShareConflict('push') },
-      {
-        label: 'Save on this device only',
-        onClick: () => {
-          const titleInput = document.getElementById('newBookmarkTitle');
-          const urlInput = document.getElementById('newBookmarkUrl');
-          const folderSelect = document.getElementById('newBookmarkFolder');
-          saveSharedBookmarkLocalOnly(
-            titleInput ? titleInput.value : '',
-            urlInput ? urlInput.value : '',
-            folderSelect ? folderSelect.value : null
-          );
-        }
-      }
-    ]
-  );
-  setShareSaveEnabled(false);
-}
-
-function showShareConflict(diff) {
-  const removed = (diff && diff.removed) || [];
-  const added = (diff && diff.added) || [];
-  const moved = (diff && diff.moved) || [];
-  const modified = (diff && diff.modified) || [];
-
-  const parts = [];
-  if (added.length) parts.push(`${added.length} added`);
-  if (removed.length) parts.push(`${removed.length} removed`);
-  if (moved.length) parts.push(`${moved.length} moved`);
-  if (modified.length) parts.push(`${modified.length} changed`);
-
-  const noun = removed.length === 1 ? 'bookmark' : 'bookmarks';
-  /* [ZeroLabs] 2026-08-19 7:12 PM - edited: never render an empty summary */
-  // parts is empty when this is called without a diff, which used to print a
-  // bare "()" and claim a difference that had not been established.
-  const summary = parts.length ? ` (${parts.join(', ')})` : '';
-  const totals = shareTotalsSentence();
-  const reason = removed.length
-    ? `The cloud has changes this device has not applied${summary}.${totals} Syncing from the cloud will delete ${removed.length} ${noun} from this device:`
-    : `The cloud has changes this device has not applied${summary}.${totals}`;
-
-  // Cap the list so the floating share window stays usable on a phone
-  const MAX_LISTED = 12;
-  const listed = removed.slice(0, MAX_LISTED).map(item => {
+  // Cap the list so the window stays usable on a phone. Renames are listed too -
+  // listing only removals meant a rename-only deferral named nothing at all.
+  const MAX_LISTED = 8;
+  const listed = [];
+  const push = (item, suffix) => {
     const title = item.title || item.url || 'Untitled';
-    return item.path ? `${title}  (${item.path})` : title;
-  });
-  if (removed.length > MAX_LISTED) {
-    listed.push(`and ${removed.length - MAX_LISTED} more`);
-  }
+    listed.push(item.path ? `${title}  (${item.path})${suffix || ''}` : `${title}${suffix || ''}`);
+  };
+  fromSnippet.forEach(i => listed.length < MAX_LISTED && push(i));
+  fromDevice.forEach(i => listed.length < MAX_LISTED && push(i));
+  overwrites.forEach(i => listed.length < MAX_LISTED && push(
+    i, i.remoteTitle && i.remoteTitle !== i.title ? `  → ${i.remoteTitle}` : ''));
+  const total = fromSnippet.length + fromDevice.length + overwrites.length;
+  if (total > listed.length) listed.push(`and ${total - listed.length} more`);
 
   setShareStatus(
     'error',
-    'Your bookmarks differ from the cloud',
-    reason,
+    'Sync changes to review',
+    'Syncing would:  ' + lines.join('  '),
     [
-      {
-        label: 'Sync from Cloud to Device',
-        primary: true,
-        onClick: () => resolveShareConflict('pull')
-      },
-      {
-        label: 'Sync from Device to Cloud',
-        onClick: () => resolveShareConflict('push')
-      },
+      { label: 'Approve', primary: true, onClick: () => approveShareSync(deferral) },
       {
         label: 'Save on this device only',
         onClick: () => {
@@ -5981,43 +6090,26 @@ function showShareConflict(diff) {
   setShareSaveEnabled(false);
 }
 
-// Apply the user's choice, then hand control back to the form rather than
-// saving automatically: a cloud pull can move or delete the folder that was
-// selected, and can change whether this URL is already a duplicate.
-async function resolveShareConflict(direction) {
-  const label = direction === 'pull' ? 'Applying cloud changes...' : 'Overwriting cloud with this device...';
-  setShareStatus('info', label, '');
+// Apply what was approved, then hand control back to the form rather than saving
+// automatically: applying can move or delete the folder that was selected, and
+// can change whether this URL is already a duplicate.
+/* [ZeroLabs] 2026-08-27 - edited: one Approve instead of two directional overwrites */
+async function approveShareSync(deferral) {
+  setShareStatus('info', 'Applying changes...', '');
   setShareSaveEnabled(false);
 
   try {
-    if (direction === 'pull') {
-      if (shareFlow.conflictRemote) {
-        // applyRemoteSync, not syncFromRemote: force does NOT bypass the
-        // deletion guard, so re-pulling would hit the same conflict again. This
-        // is the call the full app's "Use Snippet" button makes once the user
-        // has decided, and it writes the remote tree including its deletions.
-        const applied = await syncManager.applyRemoteSync(shareFlow.conflictRemote);
-        if (!applied) throw new Error('GitLab did not confirm the update.');
-      } else {
-        /* [ZeroLabs] 2026-08-19 7:12 PM - added: forced pull for the no-diff divergence */
-        // Versions matched, so only a forced pull enters the apply branch. If
-        // that turns out to involve deletions, the guard fires and hands back a
-        // real diff, which is worth showing before anything is applied.
-        const applied = await syncManager.syncFromRemote(true, true);
-        if (applied === false && shareFlow.conflictDiff) {
-          showShareConflict(shareFlow.conflictDiff);
-          return;
-        }
-      }
-      await bookmarkManager.reload();
-      await loadBookmarks();
-    } else {
-      // force=true means browser wins, keeping the bookmarks the cloud deleted
-      await syncManager.syncToRemote(true);
-    }
+    // Exactly what the main app's Approve does: apply the local side, then push,
+    // which is what carries a deletion made here out to the Snippet.
+    await syncManager.applyHeldResolution({
+      fromDevice: (deferral && deferral.removesFromDevice) || [],
+      overwrites: (deferral && deferral.overwritesOnDevice) || []
+    });
+    await bookmarkManager.reload();
+    await loadBookmarks();
+    await syncManager.pushLocalToSnippet();
 
     shareFlow.conflictDiff = null;
-    shareFlow.conflictRemote = null;
     shareFlow.pullError = null;
     shareFlow.pullPromise = Promise.resolve({ skipped: false });
 
@@ -6041,21 +6133,17 @@ async function resolveShareConflict(direction) {
     const urlInput = document.getElementById('newBookmarkUrl');
     if (urlInput) await updateShareDuplicateNotice(urlInput.value);
 
-    setShareStatus(
-      'success',
-      direction === 'pull' ? 'Cloud changes applied' : 'Cloud updated from this device',
-      'Check the folder below, then save.'
-    );
+    setShareStatus('success', 'Changes applied', 'Check the folder below, then save.');
     setShareSaveEnabled(true);
   } catch (error) {
-    console.error('[Share] Conflict resolution failed:', error);
+    console.error('[Share] Could not apply the approved changes:', error);
     setShareStatus(
       'error',
       'Could not finish that sync',
       describeSyncError(error),
       [
-        { label: 'Try again', primary: true, onClick: () => resolveShareConflict(direction) },
-        { label: 'Back', onClick: () => showShareConflict(shareFlow.conflictDiff) }
+        { label: 'Try again', primary: true, onClick: () => approveShareSync(deferral) },
+        { label: 'Back', onClick: () => showShareConflict(deferral) }
       ]
     );
     setShareSaveEnabled(false);
@@ -6086,10 +6174,6 @@ function startSharePull() {
       /* [ZeroLabs] 2026-08-19 6:01 PM - added: surface a conflict instead of clearing */
       if (result && result.conflict) {
         showShareConflict(result.diff);
-        return result;
-      }
-      if (result && result.diverged) {
-        showShareDiverged(result.message);
         return result;
       }
       clearShareStatus();
@@ -6166,13 +6250,11 @@ async function runSharePush() {
     throw new Error('This device is offline.');
   }
 
-  await syncManager.syncToRemote(true);
-
-  // syncToRemote can return early without throwing, so confirm it actually landed
-  const stillPending = await syncManager.hasPendingChanges();
-  if (stillPending) {
-    throw new Error('GitLab did not confirm the update.');
-  }
+  /* [ZeroLabs] 2026-08-27 - edited: pushLocalToSnippet, which throws on failure */
+  // syncToRemote could return early without throwing, which is why the pending
+  // flag had to be re-checked afterwards. This one either writes or raises, and
+  // a straight push is still correct here because stage 1 just reconciled.
+  await syncManager.pushLocalToSnippet();
 
   return { skipped: false };
 }
@@ -6249,11 +6331,6 @@ async function saveSharedBookmark(title, url, parentId) {
     // undoing the deletions that exist on the cloud.
     if (pullResult && pullResult.conflict) {
       showShareConflict(pullResult.diff);
-      return;
-    }
-
-    if (pullResult && pullResult.diverged) {
-      showShareDiverged(pullResult.message);
       return;
     }
 
