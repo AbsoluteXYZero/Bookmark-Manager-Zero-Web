@@ -534,13 +534,29 @@ class SyncManager {
         this.emitEvent('localTreeChanged');
       }
 
+      /* [ZeroLabs] 2026-08-27 - added: the safe additions, for the dialog to list */
+      // Additions never need consent and are already applied by this point, but a
+      // dialog appearing while bookmarks quietly arrive should account for them.
+      // Approve also pushes, so this device's own additions travel with it.
+      const addedHereItems = toAddLocally.slice(0, 200).map(e => ({
+        url: e.url, title: e.title, path: pathOf(e)
+      }));
+      const pendingPushItems = [];
+      localEntries.forEach((entry, url) => {
+        if (!remoteEntries.has(url) && createdHere.has(url)) {
+          pendingPushItems.push({ url, title: entry.title, path: pathOf(entry) });
+        }
+      });
+
       // Outcome 4: anything that removes or overwrites on either side waits.
       if (removesFromSnippet.length > 0 || removesFromDevice.length > 0 || overwritesOnDevice.length > 0) {
         await storageAdapter.set({
           snippet_push_held: true,
           snippet_push_held_items: removesFromSnippet.slice(0, 200),
           snippet_pull_held_items: removesFromDevice.slice(0, 200),
-          snippet_overwrite_held_items: overwritesOnDevice.slice(0, 200)
+          snippet_overwrite_held_items: overwritesOnDevice.slice(0, 200),
+          snippet_added_here_items: addedHereItems,
+          snippet_pending_push_items: pendingPushItems.slice(0, 200),
         });
         await this.setSnippetNeedsReconcile(true);
         console.warn('[Reconcile] Deferred for consent', {
@@ -554,7 +570,12 @@ class SyncManager {
           consent: true,
           removesFromSnippet,
           removesFromDevice,
-          overwritesOnDevice
+          overwritesOnDevice,
+          /* [ZeroLabs] 2026-08-27 - added: callers that render their own UI need these */
+          // The consent dialogs read them back out of storage, but the share
+          // window presents the deferral from this return value.
+          addedHere: addedHereItems,
+          pendingPush: pendingPushItems
         };
       }
 
@@ -633,13 +654,18 @@ class SyncManager {
       'snippet_push_held',
       'snippet_push_held_items',
       'snippet_pull_held_items',
-      'snippet_overwrite_held_items'
+      'snippet_overwrite_held_items',
+      'snippet_added_here_items',
+      'snippet_pending_push_items'
     ]);
     return {
       held: !!stored.snippet_push_held,
       fromSnippet: stored.snippet_push_held_items || [],
       fromDevice: stored.snippet_pull_held_items || [],
-      overwrites: stored.snippet_overwrite_held_items || []
+      overwrites: stored.snippet_overwrite_held_items || [],
+      /* [ZeroLabs] 2026-08-27 - added: the safe additions, for the dialogs to report */
+      addedHere: stored.snippet_added_here_items || [],
+      pendingPush: stored.snippet_pending_push_items || []
     };
   }
 

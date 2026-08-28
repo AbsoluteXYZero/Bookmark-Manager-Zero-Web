@@ -6037,8 +6037,19 @@ function showShareConflict(deferral) {
 
   const count = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
+  /* [ZeroLabs] 2026-08-27 - added: account for the safe additions here too */
+  // The full app's dialog reports these behind a chevron. This window has no room
+  // for a collapsible, so they go in the sentence - but they still have to be
+  // reported, because bookmarks quietly arriving while the panel asks about
+  // something else is even less explicable on a phone.
+  const addedHere = (deferral && deferral.addedHere) || [];
+  const pendingPush = (deferral && deferral.pendingPush) || [];
+
   // Same three operation lines the consent dialog uses, same order, same wording
   const lines = [];
+  if (pendingPush.length) {
+    lines.push(`Add ${count(pendingPush.length, 'bookmark', 'bookmarks')} from this device to your Snippet.`);
+  }
   if (fromSnippet.length) {
     lines.push(`Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your Snippet to match this device.`);
   }
@@ -6064,10 +6075,14 @@ function showShareConflict(deferral) {
   const total = fromSnippet.length + fromDevice.length + overwrites.length;
   if (total > listed.length) listed.push(`and ${total - listed.length} more`);
 
+  const already = addedHere.length
+    ? `Already added ${count(addedHere.length, 'bookmark', 'bookmarks')} to this device.  `
+    : '';
+
   setShareStatus(
     'error',
     'Sync changes to review',
-    'Syncing would:  ' + lines.join('  '),
+    already + 'Syncing would:  ' + lines.join('  '),
     [
       { label: 'Approve', primary: true, onClick: () => approveShareSync(deferral) },
       {

@@ -3129,7 +3129,34 @@ class App {
     const state = await syncManager.getHeldState();
     if (!state.held) return;
 
-    const { fromSnippet, fromDevice, overwrites } = state;
+    const { fromSnippet, fromDevice, overwrites, addedHere, pendingPush } = state;
+    /* [ZeroLabs] 2026-08-27 - added: account for the safe additions as well */
+    // Already applied by the time this opens - but bookmarks appearing while a
+    // modal asks about something else is unexplained unless the modal says so.
+    const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+    /* [ZeroLabs] 2026-08-27 - added: a count you cannot inspect is half an answer */
+    // Stated rather than asked about, so collapsed by default - but the bookmarks
+    // are nameable and the user should be able to see which ones.
+    let noteId = 0;
+    const collapsibleNote = (sentence, items, colour) => {
+      const id = `syncNote${noteId++}`;
+      const rows = items.slice(0, 50).map(item => `
+        <div style="padding:4px 8px;font-size:12px;color:#aaa;">
+          ${esc(item.title || item.url || 'Untitled')}
+          ${item.path ? `<span style="color:#777;"> — ${esc(item.path)}</span>` : ''}
+        </div>`).join('');
+      const more = items.length > 50
+        ? `<div style="padding:4px 8px;font-size:12px;color:#777;">...and ${items.length - 50} more</div>` : '';
+      return `
+        <div style="margin:0 0 12px 0;">
+          <button type="button" id="${id}Toggle" aria-expanded="false" style="display:flex;align-items:center;gap:6px;width:100%;padding:0;background:none;border:none;color:${colour};font-size:14px;text-align:left;cursor:pointer;font-family:inherit;">
+            <span>${sentence}</span>
+            <svg id="${id}Chevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;margin-right:auto;transition:transform 0.2s ease;transform:rotate(-90deg);"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
+          </button>
+          <div id="${id}List" style="display:none;margin-top:6px;border-left:2px solid ${colour};padding-left:6px;">${rows}${more}</div>
+        </div>`;
+    };
     if (fromSnippet.length === 0 && fromDevice.length === 0 && overwrites.length === 0) return;
 
     const esc = (s) => String(s == null ? '' : s)
@@ -3158,6 +3185,17 @@ class App {
     };
 
     let body = '';
+    if (addedHere.length > 0) {
+      body += collapsibleNote(
+        `Already added ${plural(addedHere.length, 'bookmark', 'bookmarks')} to this device.`,
+        addedHere, '#4caf50');
+    }
+    // Approve pushes, so this device's own additions travel as part of it
+    if (pendingPush.length > 0) {
+      body += collapsibleNote(
+        `Add ${plural(pendingPush.length, 'bookmark', 'bookmarks')} from this device to your Snippet.`,
+        pendingPush, 'var(--md-sys-color-on-surface, #e0e0e0)');
+    }
     if (fromSnippet.length > 0) {
       body += `<p style="margin:0 0 12px 0;font-size:14px;">
         Remove ${fromSnippet.length} bookmark${fromSnippet.length === 1 ? '' : 's'} from your snippet to match this device.
@@ -3212,6 +3250,20 @@ class App {
 
     modal.appendChild(dialog);
     document.body.appendChild(modal);
+
+    /* [ZeroLabs] 2026-08-27 - added: expand the collapsed notes */
+    dialog.querySelectorAll('[id$="Toggle"]').forEach(toggle => {
+      const base = toggle.id.replace(/Toggle$/, '');
+      const list = dialog.querySelector(`#${base}List`);
+      const chevron = dialog.querySelector(`#${base}Chevron`);
+      if (!list) return;
+      toggle.addEventListener('click', () => {
+        const open = list.style.display !== 'none';
+        list.style.display = open ? 'none' : 'block';
+        toggle.setAttribute('aria-expanded', String(!open));
+        if (chevron) chevron.style.transform = open ? 'rotate(-90deg)' : 'rotate(0deg)';
+      });
+    });
 
     dialog.querySelector('#heldPushConfirm').addEventListener('click', async () => {
       modal.remove();
