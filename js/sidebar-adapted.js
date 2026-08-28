@@ -6274,6 +6274,13 @@ function startSharePull() {
 // Open the add-bookmark modal prefilled from an Android share intent
 async function openShareBookmarkModal(url, title) {
   window.__bmzShareMode = true;
+  /* [ZeroLabs] 2026-08-28 - added: set the class here too, not only the flag */
+  // app.js adds share-mode when it parses the intent, but this function only set
+  // the JS flag. Anything that reaches the share modal without going through that
+  // parse got the flag without the class, and the class is what the stylesheet
+  // keys off - so the tree picker stayed hidden and the native select showed
+  // through, which Android renders as a full-screen list rather than a dropdown.
+  document.documentElement.classList.add('share-mode');
 
   await openAddBookmarkModal();
 
