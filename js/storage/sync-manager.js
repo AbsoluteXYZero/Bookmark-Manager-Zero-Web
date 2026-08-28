@@ -678,8 +678,13 @@ class SyncManager {
     if (!tree || !tree.roots) return { removed: 0, applied: 0 };
 
     const byUrl = new Map();
+    /* [ZeroLabs] 2026-08-28 - added: parent chain, for pruning folders left empty */
+    // index() already knows each node's immediate parent, but pruning has to walk
+    // upward an unknown number of levels, so the link is kept for every node.
+    const parentOf = new Map();
     const index = (node, parent, rootKey, segments) => {
       if (!node) return;
+      parentOf.set(node, parent);
       if (node.url) {
         byUrl.set(node.url, { node, parent, rootKey, segments });
         return;
@@ -704,6 +709,37 @@ class SyncManager {
       ));
     });
 
+    /* [ZeroLabs] 2026-08-28 - added: folders emptied by an approved removal */
+    // A folder deleted on another device reaches this one as the removal of the
+    // bookmarks that were inside it - the snippet has no record of the folder
+    // itself, because collectSnippetEntries is keyed by URL and folders survive
+    // only as path segments on the bookmarks they hold. So the bookmarks went and
+    // the folder stayed behind, empty, on every other device.
+    //
+    // Only folders emptied BY this operation are pruned, and only while they are
+    // strictly empty. An empty folder made here on purpose is untouched: the
+    // snippet never knew about it, so a sync has nothing to say about it. Same
+    // reason a folder still holding an empty subfolder survives - that subfolder
+    // is local-only content, and taking it out with its parent would destroy
+    // something the snippet never carried.
+    const rootNodes = new Set(Object.values(tree.roots).filter(Boolean));
+    const vacated = new Set();
+
+    const pruneEmptyAncestors = async (start) => {
+      let node = start;
+      while (node && !rootNodes.has(node)) {
+        if (!Array.isArray(node.children) || node.children.length > 0) return;
+        const parent = parentOf.get(node);
+        if (!parent || !Array.isArray(parent.children)) return;
+        const at = parent.children.indexOf(node);
+        if (at === -1) return;
+        parent.children.splice(at, 1);
+        await addChangelogEntry('delete', 'folder',
+          node.title || node.name || 'Unnamed Folder', null, { fullData: node });
+        node = parent;
+      }
+    };
+
     let removed = 0;
     for (const item of fromDevice) {
       const hit = byUrl.get(item.url);
@@ -711,6 +747,7 @@ class SyncManager {
       const at = hit.parent.children.indexOf(hit.node);
       if (at !== -1) {
         hit.parent.children.splice(at, 1);
+        vacated.add(hit.parent);
         removed++;
         // Logged so an approved deletion stays as undoable as any other
         await addChangelogEntry('delete', 'bookmark', hit.node.title || 'Untitled',
@@ -760,7 +797,11 @@ class SyncManager {
             parent = next;
           }
           const at = hit.parent.children.indexOf(hit.node);
-          if (at !== -1) hit.parent.children.splice(at, 1);
+          if (at !== -1) {
+            hit.parent.children.splice(at, 1);
+            // An approved move empties a folder just as a removal does
+            vacated.add(hit.parent);
+          }
           parent.children.push(hit.node);
           await addChangelogEntry('move', 'bookmark', item.remoteTitle || oldTitle, item.url || null, {
             fromFolder: item.localPath,
@@ -770,6 +811,13 @@ class SyncManager {
       }
 
       applied++;
+    }
+
+    /* [ZeroLabs] 2026-08-28 - added: run the prune once everything has moved */
+    // Deferred to here rather than done inline, because a folder emptied by a
+    // removal can be refilled by a move later in the same resolution.
+    for (const folder of vacated) {
+      await pruneEmptyAncestors(folder);
     }
 
     tree.lastModified = Date.now();
