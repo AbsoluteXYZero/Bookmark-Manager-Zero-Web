@@ -6094,40 +6094,48 @@ function showShareConflict(deferral) {
   const addedHere = (deferral && deferral.addedHere) || [];
   const pendingPush = (deferral && deferral.pendingPush) || [];
 
-  // Same three operation lines the consent dialog uses, same order, same wording
-  const lines = [];
+  // Same three operation lines the consent dialog uses, same order, same wording -
+  // but each one carries ITS OWN items. A single pooled list underneath left you
+  // unable to tell which bookmark belonged to which operation the moment either
+  // group held more than one.
+  const MAX_PER_GROUP = 5;
+  const describe = (item, showRename) => {
+    const title = item.title || item.url || 'Untitled';
+    const path = item.path ? `  (${item.path})` : '';
+    const renamed = showRename && item.remoteTitle && item.remoteTitle !== item.title
+      ? `  \u2192 ${item.remoteTitle}` : '';
+    return `    ${title}${path}${renamed}`;
+  };
+  const block = (sentence, items, showRename) => {
+    const shown = items.slice(0, MAX_PER_GROUP).map(i => describe(i, showRename));
+    if (items.length > MAX_PER_GROUP) {
+      shown.push(`    and ${items.length - MAX_PER_GROUP} more`);
+    }
+    return [`\u2022 ${sentence}`].concat(shown).join('\n');
+  };
+
+  const blocks = [];
   if (pendingPush.length) {
-    lines.push(`Add ${count(pendingPush.length, 'bookmark', 'bookmarks')} from this device to your Snippet.`);
+    blocks.push(block(
+      `Add ${count(pendingPush.length, 'bookmark', 'bookmarks')} from this device to your Snippet.`,
+      pendingPush, false));
   }
   if (fromSnippet.length) {
-    lines.push(`Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your Snippet to match this device.`);
+    blocks.push(block(
+      `Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your Snippet to match this device.`,
+      fromSnippet, false));
   }
   if (fromDevice.length) {
-    lines.push(`Remove ${count(fromDevice.length, 'bookmark', 'bookmarks')} from this device to match the Snippet.`);
+    blocks.push(block(
+      `Remove ${count(fromDevice.length, 'bookmark', 'bookmarks')} from this device to match the Snippet.`,
+      fromDevice, false));
   }
   if (overwrites.length) {
-    lines.push(`Rename or move ${count(overwrites.length, 'bookmark', 'bookmarks')} on this device to match the Snippet.`);
+    blocks.push(block(
+      `Rename or move ${count(overwrites.length, 'bookmark', 'bookmarks')} on this device to match the Snippet.`,
+      overwrites, true));
   }
 
-  // Cap the list so the window stays usable on a phone. Renames are listed too -
-  // listing only removals meant a rename-only deferral named nothing at all.
-  const MAX_LISTED = 8;
-  const listed = [];
-  const push = (item, suffix) => {
-    const title = item.title || item.url || 'Untitled';
-    listed.push(item.path ? `${title}  (${item.path})${suffix || ''}` : `${title}${suffix || ''}`);
-  };
-  fromSnippet.forEach(i => listed.length < MAX_LISTED && push(i));
-  fromDevice.forEach(i => listed.length < MAX_LISTED && push(i));
-  overwrites.forEach(i => listed.length < MAX_LISTED && push(
-    i, i.remoteTitle && i.remoteTitle !== i.title ? `  → ${i.remoteTitle}` : ''));
-  const total = fromSnippet.length + fromDevice.length + overwrites.length;
-  if (total > listed.length) listed.push(`and ${total - listed.length} more`);
-
-  /* [ZeroLabs] 2026-08-27 - edited: real line breaks, not runs of spaces */
-  // The panel renders this with textContent and the stylesheet now sets
-  // white-space: pre-line, so newlines survive. Spaces did not - HTML collapsed
-  // them and every line ran together.
   const already = addedHere.length
     ? `Already added ${count(addedHere.length, 'bookmark', 'bookmarks')} to this device.\n\n`
     : '';
@@ -6135,7 +6143,7 @@ function showShareConflict(deferral) {
   setShareStatus(
     'error',
     'Sync changes to review',
-    already + 'Syncing would:\n' + lines.map(l => '\u2022 ' + l).join('\n'),
+    already + 'Syncing would:\n' + blocks.join('\n\n'),
     [
       { label: 'Approve', primary: true, onClick: () => approveShareSync(deferral) },
       {
@@ -6151,8 +6159,9 @@ function showShareConflict(deferral) {
           );
         }
       }
-    ],
-    listed
+    ]
+    // No details list: each operation now carries its own items inline, so a
+    // second pooled list underneath would repeat them without their grouping.
   );
 
   setShareSaveEnabled(false);
