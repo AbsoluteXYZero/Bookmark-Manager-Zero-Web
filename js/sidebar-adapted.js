@@ -231,24 +231,31 @@ async function dismissSetupCard() {
 // ============================================================================
 // SUPABASE SYNC ANNOUNCEMENT CARD
 // ============================================================================
-let hasSeenSupabaseAnnouncement = true;
+/* [ZeroLabs] 2026-08-27 - edited: repurposed from the Supabase announcement */
+// One reusable "what's new" card rather than a new one per release. The storage
+// key carries the DATE, so writing the next announcement means changing the key
+// with it and the card reappears for everyone - including people who dismissed
+// the last one. A date also avoids a version number, which differs between the
+// extensions and the website anyway.
+const LATEST_CARD_KEY = 'bmz_latest_card_20260827';
+let hasSeenLatestCard = true;
 
-async function loadSupabaseAnnouncementFlag() {
+async function loadLatestCardFlag() {
   try {
-    const result = await safeStorage.get('bmz_supabase_announced');
-    hasSeenSupabaseAnnouncement = result.bmz_supabase_announced || false;
+    const result = await safeStorage.get(LATEST_CARD_KEY);
+    hasSeenLatestCard = result[LATEST_CARD_KEY] || false;
   } catch (error) {
-    hasSeenSupabaseAnnouncement = false;
+    hasSeenLatestCard = false;
   }
 }
 
-async function dismissSupabaseAnnouncement() {
-  hasSeenSupabaseAnnouncement = true;
+async function dismissLatestCard() {
+  hasSeenLatestCard = true;
   try {
-    await safeStorage.set({ bmz_supabase_announced: true });
+    await safeStorage.set({ [LATEST_CARD_KEY]: true });
     renderBookmarks();
   } catch (error) {
-    console.error('Error saving supabase announcement flag:', error);
+    console.error('Error saving latest card flag:', error);
   }
 }
 
@@ -1110,7 +1117,7 @@ async function init() {
   loadCheckingSettings();
   loadScanConcurrency();
   await loadSetupCardFlag();
-  await loadSupabaseAnnouncementFlag();
+  await loadLatestCardFlag();
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: load quick access and recent state */
   // loadDisplayOptions also calls these, but it runs later in initUI and the
   // first render happens before then.
@@ -2262,47 +2269,38 @@ function renderBookmarks() {
     }, 0);
   }
 
-  // Show Supabase sync announcement card if user hasn't seen it
-  if (!hasSeenSupabaseAnnouncement) {
+  /* [ZeroLabs] 2026-08-27 - edited: one reusable what's-new card */
+  // "while BMZ is open" rather than the extensions' "even with BMZ closed":
+  // a web page has no background worker, so this is the honest version.
+  if (!hasSeenLatestCard) {
     const announcementCard = document.createElement('div');
     announcementCard.className = 'announcement-card';
     announcementCard.innerHTML = `
-      <div class="announcement-card-badge">✦ New Feature</div>
-      <div class="announcement-card-title">Cross-Device Sync</div>
+      <div class="announcement-card-title">What's New as of Aug 27, 2026</div>
       <div class="announcement-card-body">
-        GitLab requires all Personal Access Tokens to expire — maximum one year. If you use
-        GitLab snippet sync, that meant manually replacing your token in BMZ each time it
-        expires.<br><br>
-        With Cross-Device Sync, you can sign in with GitLab and BMZ will securely store your
-        token in the cloud — so it's available on all your devices, browsers, or apps you use
-        BMZ on. No more re-entering your token.
+        Sync now runs robustly in the background while BMZ is open.
+        <br><br>
+        Every sync is now a proper merge. BMZ compares your local bookmarks against your
+        Snippet, quietly adds whatever is missing from either, and stops the moment something
+        would be removed, renamed or otherwise overwritten to ask your permission before any
+        action takes place. A card appears at the top of your bookmark list and the sync button
+        turns amber. Nothing is lost or changed while it waits.
+        <br><br>
+        Sync settings have been rebuilt and streamlined around a single button that shows you
+        what it's doing, and a switch to turn automatic syncing off (on is the default).
+        <br><br>
+        Deletion is now undoable everywhere — including bulk deletions and whole folders.
+        Restoring a folder from the changelog brings its contents back too.
+        <br><br>
+        BMZ now warns you before saving a bookmark that isn't a valid link.
       </div>
       <div class="announcement-card-actions">
-        <button class="announcement-setup-btn" id="announcementSetupBtn">Set Up Sync</button>
-        <button class="announcement-dismiss-btn" id="announcementDismissBtn">Maybe Later</button>
+        <button class="announcement-card-dismiss-btn" id="latestCardDismissBtn">Got it</button>
       </div>
     `;
     bookmarkList.appendChild(announcementCard);
     setTimeout(() => {
-      document.getElementById('announcementSetupBtn')?.addEventListener('click', async () => {
-        await dismissSupabaseAnnouncement();
-        if (window.app?.isAuthenticated) {
-          // Already connected with GitLab — go straight to sync settings to enable Supabase
-          window.app.showGitLabSyncSettingsDialog();
-        } else {
-          // Not connected — show login screen, clearing bookmarks from the list first
-          const bl = document.getElementById('bookmarkList');
-          if (bl) {
-            Array.from(bl.children).forEach(child => {
-              if (child.id !== 'loginScreen') child.remove();
-            });
-          }
-          window.scrollTo(0, 0);
-          window.app?.showLoginScreen();
-          setTimeout(() => document.getElementById('gitlabModeBtn')?.click(), 50);
-        }
-      });
-      document.getElementById('announcementDismissBtn')?.addEventListener('click', dismissSupabaseAnnouncement);
+      document.getElementById('latestCardDismissBtn')?.addEventListener('click', dismissLatestCard);
     }, 0);
   }
 
@@ -4360,7 +4358,7 @@ async function handleFolderAction(action, folder) {
       // SAFETY: Enhanced confirmation showing number of items to be deleted
       const itemCount = await countFolderItems(folder.id);
       const warningMessage = itemCount > 0
-        ? `⚠ Delete folder "${folder.title}" and ALL ${itemCount} item(s) inside?\n\nThis action cannot be undone!`
+        ? `⚠ Delete folder "${folder.title}" and ALL ${itemCount} item(s) inside?\n\nYou can undo this from the toast or the changelog.`
         : `Delete empty folder "${folder.title}"?`;
 
       if (confirm(warningMessage)) {
@@ -4523,6 +4521,9 @@ async function deleteFolder(id) {
 
     await loadBookmarks();
     renderBookmarks();
+
+    /* [ZeroLabs] 2026-08-27 - added: ask about this deletion now */
+    window.syncAfterLocalDeletion?.();
   } catch (error) {
     console.error('Error deleting folder:', error);
     alert('Failed to delete folder');
@@ -4581,6 +4582,39 @@ function hideUndoToast() {
 }
 
 // Undo the last deletion
+/* [ZeroLabs] 2026-08-27 - added: restore one deleted item (shared by single and bulk undo) */
+async function restoreDeletedItem(type, data) {
+  /* [ZeroLabs] 2026-08-27 - added: the recorded index may no longer exist */
+  // Deleting items at index 3, 5 and 7 leaves the folder with two children, so
+  // restoring index 7 is out of range. Clamping puts it as close to where it was
+  // as the folder now allows.
+  //
+  // A missing parent means an ancestor folder was deleted in the same batch and
+  // has already been restored WITH this item inside it - creating it again would
+  // duplicate it, so it is skipped.
+  const parent = bookmarkManager.getFolder(data.parentId);
+  if (!parent) {
+    console.warn('[Undo] Parent no longer exists, already restored with it:', data.title);
+    return;
+  }
+  const siblings = parent.children || [];
+  const index = Math.min(
+    typeof data.index === 'number' ? data.index : siblings.length,
+    siblings.length
+  );
+
+  if (type === 'bookmark') {
+    await bookmarkManager.create({
+      title: data.title,
+      url: data.url,
+      parentId: data.parentId,
+      index
+    });
+  } else if (type === 'folder') {
+    await restoreFolderRecursive(data, data.parentId, index);
+  }
+}
+
 async function performUndo() {
   if (!undoData) return;
 
@@ -4613,17 +4647,16 @@ async function performUndo() {
       console.log(`Undo successful (preview): ${type} restored`);
     } else {
       // Real extension mode
-      if (type === 'bookmark') {
-        // Restore bookmark
-        await bookmarkManager.create({
-          title: data.title,
-          url: data.url,
-          parentId: data.parentId,
-          index: data.index
-        });
-      } else if (type === 'folder') {
-        // Restore folder and its contents recursively
-        await restoreFolderRecursive(data, data.parentId, data.index);
+      /* [ZeroLabs] 2026-08-27 - edited: one item or many, same restore */
+      if (type === 'bulk') {
+        /* [ZeroLabs] 2026-08-27 - added: ascending index, or the order comes back scrambled */
+        const ordered = [...(data || [])].sort(
+          (a, b) => (a.data.index || 0) - (b.data.index || 0));
+        for (const entry of ordered) {
+          await restoreDeletedItem(entry.type, entry.data);
+        }
+      } else {
+        await restoreDeletedItem(type, data);
       }
 
       // Reload and hide toast
@@ -5281,9 +5314,22 @@ async function saveEditModal() {
 
   if (!isFolder) {
     let url = editUrl.value.trim();
-    // Add https:// if no protocol is specified
-    if (url && !url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:/)) {
-      url = 'https://' + url;
+    /* [ZeroLabs] 2026-08-27 - edited: same warning the add dialog gives */
+    // Editing could break a working bookmark exactly the way adding could - a
+    // pasted address with a stray space saved and synced with no warning, then
+    // rejected by every stricter client. No swap offered here: the bookmark
+    // already has a title, so a mixed-up pair is not the likely cause.
+    if (url) {
+      const check = classifyBookmarkUrl(url);
+      if (check.problem) {
+        const choice = await showUrlWarningDialog({
+          typed: check.typed,
+          problem: check.problem,
+          canSwap: false
+        });
+        if (choice !== 'save') return;
+      }
+      url = check.url;
     }
     updates.url = url;
   }
@@ -5368,6 +5414,9 @@ async function deleteBookmark(id, bookmarkData = null) {
 
     await loadBookmarks();
     renderBookmarks();
+
+    /* [ZeroLabs] 2026-08-27 - added: ask about this deletion now */
+    window.syncAfterLocalDeletion?.();
   } catch (error) {
     console.error('Error deleting bookmark:', error);
     alert('Failed to delete bookmark');
@@ -6436,6 +6485,120 @@ async function createSharedBookmark(title, url, parentId) {
   return folderPath;
 }
 
+/* [ZeroLabs] 2026-08-27 - added: a deletion asks now, not whenever you next open BMZ (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+// Deleting defers for consent, and that consent used to wait for the 30s
+// debounce and then sit as an amber card - so the deletion simply did not reach
+// the snippet until BMZ was next opened, possibly days later. This runs the same
+// reconcile in the foreground, so the modal appears while you are still looking
+// at what you deleted and the change can go straight out.
+//
+// Delayed past the 5s undo window: the modal must not land on top of the undo
+// toast, and undoing makes the whole question moot. The timer is shared, so
+// deleting several in a row asks once rather than once per bookmark.
+let localDeleteSyncTimer = null;
+function syncAfterLocalDeletion() {
+  clearTimeout(localDeleteSyncTimer);
+  localDeleteSyncTimer = setTimeout(async () => {
+    if (!syncManager.getRemoteId() || !navigator.onLine) return;
+    try {
+      const outcome = await syncManager.reconcileWithSnippet();
+      if (outcome && outcome.deferred) {
+        await window.app?.showHeldPushDialog();
+      }
+    } catch (error) {
+      console.error('[Sync] Post-delete sync failed:', error);
+    }
+  }, 6000);
+}
+window.syncAfterLocalDeletion = syncAfterLocalDeletion;
+
+/* [ZeroLabs] 2026-08-27 - added: warn on a doubtful address, never block it */
+// A bookmark saved with a malformed address does not just fail here - it syncs,
+// and then every stricter client rejects it. Firefox refuses to create it at all
+// and raises the unplaceable-items dialog on every sync until it is deleted.
+//
+// But this only ever WARNS. Nonsense is the user's to save if they want it.
+function classifyBookmarkUrl(typed) {
+  const raw = (typed || '').trim();
+  let url = raw;
+  let weAddedScheme = false;
+
+  const hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(url);
+  // "localhost:3000" and "myserver:8080" match the scheme pattern but are really
+  // host:port. Without this they were stored as scheme "localhost:" and broke.
+  const isHostPort = /^[a-zA-Z][a-zA-Z0-9+.-]*:\d/.test(url);
+  if (!hasScheme || isHostPort) {
+    url = 'https://' + url;
+    weAddedScheme = true;
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    // Nothing can store this - the dot check below cannot even run, since there
+    // is no parsed host to inspect.
+    return { url, typed: raw, problem: 'invalid' };
+  }
+
+  // Only suspicious when WE supplied the scheme. A scheme the user typed
+  // themselves - about:, chrome://, file:// - was meant, and those legitimately
+  // have no dot. An absent host is schemeless by design, not dotless.
+  const host = parsed.hostname;
+  if (weAddedScheme && host && !host.includes('.') && host !== 'localhost' && !host.startsWith('[')) {
+    return { url, typed: raw, problem: 'nodot' };
+  }
+
+  return { url, typed: raw, problem: null };
+}
+
+// Resolves to 'save', 'swap' or 'edit'.
+function showUrlWarningDialog({ typed, problem, canSwap }) {
+  return new Promise((resolve) => {
+    const modal = document.createElement('div');
+    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10003;display:flex;align-items:center;justify-content:center;';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'bmz-dialog';
+    dialog.style.cssText = 'background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:440px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);';
+
+    const esc = (t) => String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+    // A space almost always means the two fields were swapped, so that one asks
+    // outright. A dotless host is usually a typo, where swapping would rarely
+    // be the right answer, so it only suggests editing.
+    const reason = problem === 'invalid'
+      ? `"${esc(typed)}" isn't a valid link. Did you mix up the address and the title?`
+      : `"${esc(typed)}" has no domain ending like .com. If that wasn't intended, change it before saving.`;
+
+    const btn = (id, label, primary) => `
+      <button id="${id}" style="width:100%;padding:12px;border-radius:8px;border:none;cursor:pointer;font-size:14px;${primary
+        ? 'background:#f59e0b;color:#1a1a1a;font-weight:600;'
+        : 'background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);'}">${label}</button>`;
+
+    dialog.innerHTML = `
+      <h2 style="margin:0 0 12px 0;font-size:18px;color:#f59e0b;text-align:center;">That doesn't look like a web address</h2>
+      <p style="margin:0 0 20px 0;font-size:14px;">${reason}</p>
+      <div style="display:flex;flex-direction:column;gap:12px;">
+        ${canSwap ? btn('urlWarnSwap', 'Swap them for me', true) : ''}
+        ${btn('urlWarnSave', 'Save it anyway', !canSwap)}
+        ${btn('urlWarnEdit', 'Go back and edit', false)}
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    const done = (choice) => { modal.remove(); resolve(choice); };
+    dialog.querySelector('#urlWarnSwap')?.addEventListener('click', () => done('swap'));
+    dialog.querySelector('#urlWarnSave').addEventListener('click', () => done('save'));
+    dialog.querySelector('#urlWarnEdit').addEventListener('click', () => done('edit'));
+    modal.addEventListener('click', (e) => { if (e.target === modal) done('edit'); });
+  });
+}
+
 // Save new bookmark
 async function saveNewBookmark() {
   const title = document.getElementById('newBookmarkTitle').value;
@@ -6447,17 +6610,30 @@ async function saveNewBookmark() {
     return;
   }
 
-  // Add https:// if no protocol is specified
-  if (!url.match(/^[a-zA-Z][a-zA-Z0-9+.-]*:/)) {
-    url = 'https://' + url;
+  /* [ZeroLabs] 2026-08-27 - edited: warn and offer a fix, instead of refusing */
+  // This used to alert and return, which blocked the save outright. Nonsense is
+  // the user's to keep if they want it; what matters is that they are told, and
+  // offered the swap that is usually the actual fix.
+  const check = classifyBookmarkUrl(url);
+  if (check.problem) {
+    const titleEl = document.getElementById('newBookmarkTitle');
+    const choice = await showUrlWarningDialog({
+      typed: check.typed,
+      problem: check.problem,
+      // Swapping into an empty title would hand back a blank address, which is
+      // worse than what they started with.
+      canSwap: !!(titleEl && titleEl.value.trim())
+    });
+    if (choice === 'edit') return;
+    if (choice === 'swap') {
+      const oldTitle = titleEl.value;
+      titleEl.value = check.typed;
+      document.getElementById('newBookmarkUrl').value = oldTitle;
+      // Re-run, so a swap that is still wrong asks again rather than saving quietly
+      return saveNewBookmark();
+    }
   }
-
-  try {
-    new URL(url);
-  } catch (e) {
-    alert('The URL is not valid. Please check the format and try again.');
-    return;
-  }
+  url = check.url;
 
   // Check if trying to create bookmark at root level
   if (!parentId) {
@@ -7355,7 +7531,7 @@ async function deleteSelectedDuplicates() {
     return;
   }
 
-  const confirmed = confirm(`⚠ Delete ${checkboxes.length} selected bookmark(s)?\n\nThis action cannot be undone!`);
+  const confirmed = confirm(`⚠ Delete ${checkboxes.length} selected bookmark(s)?\n\nYou can undo this from the toast or the changelog.`);
   if (!confirmed) return;
 
   // Check if user is deleting ALL copies of any URL
@@ -7385,11 +7561,26 @@ async function deleteSelectedDuplicates() {
   try {
     let successCount = 0;
     let failCount = 0;
+    const deleted = [];
 
     for (const checkbox of checkboxes) {
       const bookmarkId = checkbox.dataset.bookmarkId;
       try {
+        /* [ZeroLabs] 2026-08-27 - added: record before removing, with its parent */
+        const node = bookmarkManager.getBookmark(bookmarkId);
+        const dupParent = node ? findParentById(bookmarkTree, bookmarkId) : null;
+        const fullData = node ? JSON.parse(JSON.stringify(node)) : null;
+        if (fullData) {
+          fullData.parentId = dupParent ? dupParent.id : undefined;
+          fullData.index = dupParent && dupParent.children
+            ? dupParent.children.findIndex(c => c.id === bookmarkId)
+            : undefined;
+        }
         await bookmarkManager.remove(bookmarkId);
+        if (fullData) {
+          await addChangelogEntry('delete', 'bookmark', fullData.title || 'Untitled', fullData.url || null, { fullData });
+          deleted.push({ type: 'bookmark', data: fullData });
+        }
         successCount++;
       } catch (error) {
         console.error(`Failed to delete bookmark ${bookmarkId}:`, error);
@@ -7404,8 +7595,16 @@ async function deleteSelectedDuplicates() {
     // Close modal and show result
     closeDuplicatesModal();
 
+    /* [ZeroLabs] 2026-08-27 - added: ask about these deletions now */
+    window.syncAfterLocalDeletion?.();
+
     if (failCount === 0) {
-      alert(`✓ Successfully deleted ${successCount} bookmark(s)!`);
+      /* [ZeroLabs] 2026-08-27 - edited: an undo toast instead of a blocking alert */
+      showUndoToast({
+        type: 'bulk',
+        data: deleted,
+        message: `${successCount} duplicate${successCount === 1 ? '' : 's'} deleted`
+      });
     } else {
       alert(`⚠ Deleted ${successCount} bookmark(s).\n${failCount} failed to delete.`);
     }
@@ -7723,26 +7922,53 @@ async function restoreChangelogEntry(entryId) {
       const fullData = entry.details.fullData;
 
       try {
-        if (entry.itemType === 'folder') {
-          // Recreate the folder with all its children
-          await bookmarkManager.create({
-            title: fullData.title,
-            parentId: fullData.parentId,
-            index: fullData.index
-          });
-
-          alert(`Folder "${fullData.title}" has been restored.\n\nNote: Child items were not restored. You may need to restore them individually from the changelog.`);
-        } else {
-          // Recreate the bookmark
-          await bookmarkManager.create({
-            title: fullData.title,
-            url: fullData.url,
-            parentId: fullData.parentId,
-            index: fullData.index
-          });
-
-          alert(`Bookmark "${fullData.title}" has been restored successfully!`);
+        /* [ZeroLabs] 2026-08-27 - edited: use the shared restore, and survive a missing parent */
+        // Two problems here. The folder branch created an EMPTY folder and told
+        // the user its contents were lost - but fullData holds the whole subtree,
+        // and restoreDeletedItem rebuilds it, which is what the undo toast has
+        // always done. And a missing parentId - an entry logged before the bulk
+        // paths captured one, or a parent folder since deleted - threw "Parent
+        // folder not found: undefined" instead of putting the item somewhere.
+        // Two different reasons to relocate, and they deserve different wording:
+        // an entry logged before the bulk paths recorded a parent knows nothing
+        // about where it was, which is not the same as its folder being gone.
+        let targetParentId = fullData.parentId;
+        let relocated = null;
+        if (!targetParentId) {
+          relocated = 'unknown';
+        } else if (!bookmarkManager.getFolder(targetParentId)) {
+          relocated = 'missing';
         }
+        if (relocated) {
+          const roots = (bookmarkManager.getTree() || {}).roots || {};
+          const fallback = roots.other || roots.bookmark_bar || Object.values(roots)[0];
+          targetParentId = fallback ? fallback.id : undefined;
+          if (!fallback) relocated = null;
+        }
+
+        if (!targetParentId) {
+          alert('Could not restore: there is nowhere to put it.');
+          return;
+        }
+
+        const where = relocated
+          ? (relocated === 'unknown'
+              ? `
+
+BMZ did not record where this was, so it was restored to "${bookmarkManager.getFolder(targetParentId).title}".`
+              : `
+
+Its original folder no longer exists, so it was restored to "${bookmarkManager.getFolder(targetParentId).title}".`)
+          : '';
+
+        await restoreDeletedItem(
+          entry.itemType === 'folder' ? 'folder' : 'bookmark',
+          { ...fullData, parentId: targetParentId }
+        );
+
+        alert(entry.itemType === 'folder'
+          ? `Folder "${fullData.title}" and its contents have been restored.${where}`
+          : `Bookmark "${fullData.title}" has been restored successfully!${where}`);
 
         // Refresh UI
         await loadBookmarks();
@@ -8213,14 +8439,45 @@ async function bulkDeleteItems() {
     return;
   }
 
-  if (!confirm(`⚠️ WARNING: This will permanently delete ${selectedItems.size} selected item(s) and all their contents.\n\nThis action cannot be undone. Are you sure?`)) {
+  if (!confirm(`⚠️ This will delete ${selectedItems.size} selected item(s) and all their contents.\n\nYou can undo this from the toast or the changelog. Are you sure?`)) {
     return;
   }
 
   try {
-    // Delete each selected item
-    for (const itemId of selectedItems) {
+    /* [ZeroLabs] 2026-08-27 - added: record before removing, like every other delete */
+    // Bulk delete wrote nothing to the changelog and showed no undo toast, so the
+    // single most destructive action in BMZ was the only one with no way back.
+    /* [ZeroLabs] 2026-08-27 - added: drop selections contained by another selection */
+    // A folder and a bookmark inside it can both be ticked. Removing the folder
+    // takes the child with it, so removing the child afterwards fails - and
+    // capturing both would have duplicated the child on undo.
+    const covered = new Set();
+    for (const id of selectedItems) {
+      const n = bookmarkManager.getBookmark(id);
+      const walk = (node) => (node && node.children || []).forEach(c => { covered.add(c.id); walk(c); });
+      walk(n);
+    }
+    const topLevelIds = Array.from(selectedItems).filter(id => !covered.has(id));
+
+    const deleted = [];
+    for (const itemId of topLevelIds) {
+      const node = bookmarkManager.getBookmark(itemId);
+      if (!node) continue;
+      /* [ZeroLabs] 2026-08-27 - added: the website's tree nodes carry no parentId */
+      // It is a nested structure, so the parent is implicit and has to be looked
+      // up before the node is removed. chrome.bookmarks.getSubTree hands parentId
+      // and index over for free, which is why the extensions did not need this.
+      const parent = findParentById(bookmarkTree, itemId);
+      const fullData = JSON.parse(JSON.stringify(node));
+      fullData.parentId = parent ? parent.id : undefined;
+      fullData.index = parent && parent.children
+        ? parent.children.findIndex(c => c.id === itemId)
+        : undefined;
+
       await bookmarkManager.remove(itemId);
+      const itemType = fullData.url ? 'bookmark' : 'folder';
+      await addChangelogEntry('delete', itemType, fullData.title || 'Untitled', fullData.url || null, { fullData });
+      deleted.push({ type: itemType, data: fullData });
     }
 
     selectedItems.clear();
@@ -8228,7 +8485,14 @@ async function bulkDeleteItems() {
     renderBookmarks();
     updateSelectedCount();
 
-    alert('Selected items deleted successfully.');
+    showUndoToast({
+      type: 'bulk',
+      data: deleted,
+      message: `${deleted.length} item${deleted.length === 1 ? '' : 's'} deleted`
+    });
+
+    /* [ZeroLabs] 2026-08-27 - added: ask about these deletions now */
+    window.syncAfterLocalDeletion?.();
   } catch (error) {
     console.error('Error deleting items:', error);
     alert('Failed to delete some items. Please try again.');

@@ -915,44 +915,6 @@
       background: rgba(0, 0, 0, 0.05);
     }
 
-    .announcement-card {
-      background: var(--md-sys-color-primary-container, #1e3a5f);
-      border-left: 4px solid #f97316;
-      border-radius: 12px;
-      padding: 16px;
-      margin-bottom: 12px;
-      display: flex;
-      flex-direction: column;
-      gap: 10px;
-    }
-
-    .announcement-card-badge {
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: #f97316;
-    }
-
-    .announcement-card-title {
-      font-size: 16px;
-      font-weight: 700;
-      color: var(--md-sys-color-on-primary-container, #e2e8f0);
-    }
-
-    .announcement-card-body {
-      font-size: 13px;
-      line-height: 1.55;
-      color: var(--md-sys-color-on-primary-container, #cbd5e1);
-      opacity: 0.9;
-    }
-
-    .announcement-card-actions {
-      display: flex;
-      gap: 8px;
-      margin-top: 4px;
-    }
-
     .announcement-setup-btn {
       flex: 1;
       padding: 10px 16px;
@@ -987,11 +949,54 @@
       background: rgba(0, 0, 0, 0.08);
     }
 
-    .enhanced-blue .announcement-card {
-      background: var(--md-sys-color-surface-variant);
-      border: 0.5px solid rgba(255, 255, 255, 0.12);
-      border-left: 4px solid #f97316;
-      box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+    /* [ZeroLabs] 2026-08-27 - edited: neutral surface, primary accent */
+    /* Was an orange frame (#e8a020) around primary-container, which is PURPLE in
+       every dark theme - it only ever looked deliberate in a light one. It also
+       wore amber, and amber now means "needs your decision" in BMZ: the sync
+       arrows, the notice card, the Approve button. An informational card must not
+       borrow that. Neutral surface with the primary accent instead, matching the
+       shape of .sync-notice-card and using the same elevation and lit-edge
+       variables so it follows the theme. */
+    .announcement-card {
+      background: var(--md-sys-color-surface-variant, #1e293b);
+      border: 0.5px solid var(--bmz-panel-hairline, transparent);
+      border-left: 4px solid var(--md-sys-color-primary, #818cf8);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 12px;
+      box-shadow: var(--md-elevation-1), var(--bmz-lit-top, 0 0 0 0 transparent);
+    }
+    .announcement-card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--md-sys-color-on-surface);
+      margin-bottom: 10px;
+    }
+    .announcement-card-body {
+      font-size: 13px;
+      line-height: 1.65;
+      color: var(--md-sys-color-on-surface-variant);
+      margin-bottom: 16px;
+    }
+    .announcement-card-actions {
+      display: flex;
+      gap: 10px;
+    }
+    .announcement-card-dismiss-btn {
+      flex: 1;
+      padding: 10px 16px;
+      background: var(--md-sys-color-surface-container, #2a2a2a);
+      color: var(--md-sys-color-on-surface);
+      border: 1px solid var(--md-sys-color-outline);
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      box-shadow: var(--md-elevation-1), var(--bmz-lit-top-strong, 0 0 0 0 transparent), var(--bmz-sunk-bottom, 0 0 0 0 transparent);
+      transition: box-shadow 0.2s ease, background 0.2s ease;
+    }
+    .announcement-card-dismiss-btn:hover {
+      box-shadow: var(--md-elevation-2), var(--bmz-lit-top-strong, 0 0 0 0 transparent), var(--bmz-sunk-bottom, 0 0 0 0 transparent);
     }
 
     /* [ZeroLabs] 2026-08-27 - added: deferred sync notice card */
@@ -999,9 +1004,6 @@
        shape, and recoloured to the amber the sync button already uses for a
        deferral, so the card and the button read as the same state. */
     .announcement-card.sync-notice-card,
-    .enhanced-blue .announcement-card.sync-notice-card {
-      border-left-color: #f59e0b;
-    }
     /* No badge and no separate title: one headline carries it. A kicker saying
        sync had paused above a title saying sync was waiting was the same fact
        twice, and the body's last sentence plus the Review button already say
@@ -1011,9 +1013,6 @@
        106px, so it wraps below roughly 410px - the Fold's cover screen. Balance
        evens the two lines instead of leaving "data" alone on the second.
        Ignored by browsers that lack it, which just wrap normally. */
-    .sync-notice-card .announcement-card-title {
-      text-wrap: balance;
-    }
     .sync-notice-card .announcement-setup-btn {
       background: #f59e0b;
       color: #1a1a1a;
