@@ -1,6 +1,8 @@
 ## Changelog
 
-### V2.1 (Current) - Sync That Decides For Itself
+### v5.3 (Current) - Sync That Decides For Itself
+
+**Version numbering:** This release jumps from 2.1 to 5.3 to match the Chrome and Firefox extensions. Nothing was skipped - the web version had simply been counted separately since it began as a smaller thing, and it has now caught up to the extensions feature for feature: the same sync model, the same review-before-anything-is-removed rule, the same undo everywhere, the same checks on what you type. Carrying two numbering schemes for one product made the same release look like different software depending on where you opened it. From here all three move together, so "v5.3" means the same set of behaviour whether you are in the browser extension or on the web.
 
 **New Features:**
 - **Sync now runs on its own** - BMZ checks the cloud every five minutes while it is open, and again about half a minute after you add, rename, move, or delete a bookmark. A bookmark added on your phone shows up here without you asking for it, and one added here travels the other way. Previously the web version only pulled from the cloud on the rare occasion it opened with no bookmarks stored, which in practice meant it almost never pulled at all.
@@ -30,6 +32,7 @@
 - **Bookmarks restore to the folder they came from** - Bulk deletion recorded the bookmark but not where it lived, so restoring it put it in Other Bookmarks instead of its original folder. Both are now recorded. Items deleted before this change still restore, and BMZ tells you it could not tell where they belonged.
 - **Blocklists no longer download when safety checking is off** - The security database was fetched before a scan without ever checking whether safety checking was actually switched on, so a device with the feature turned off still downloaded all ten lists and used the bandwidth to do it, for data nothing would ever read. BMZ now only fetches them when the feature is in use, and picks them back up as soon as you turn it on again.
 - **A finishing blocklist download no longer interrupts a scan** - When the download completed it wrote "Blocklists loaded" over the status bar regardless of what was there, wiping the progress of a scan already running and leaving it with no visible indication it was still going. A scan now keeps the status bar to itself.
+- **A folder is no longer marked as checked when nothing was checked** - Expanding a folder recorded it as scanned as soon as the attempt finished, without distinguishing a completed scan from one that never ran. If checking was switched off at the time, or the scan was stopped part-way, the folder was still stamped as done for seven days - so turning checking back on left it showing no statuses, with no way to prompt it short of waiting the week out. The timestamp is now written only when the bookmarks were genuinely checked, or were already up to date.
 
 **Improvements:**
 - **One notification per sync, not five** - Each step of a sync announced itself separately, so a single sync could produce a stack of toasts. Only the action you actually started reports now, and when the sync button itself shows the outcome there is no toast at all.

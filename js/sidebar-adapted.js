@@ -66,7 +66,11 @@ import {
 const browser = {
   runtime: {
     /* [ZeroLabs] 2026-08-27 11:52 AM - edited: bump version to 2.1 */
-    getManifest: () => ({ version: '2.1' }),
+    /* [ZeroLabs] 2026-08-28 - edited: renumbered from 2.1 to match the extensions */
+    // The website reached feature parity with the Chrome and Firefox extensions,
+    // so it now shares their version number rather than carrying a separate line
+    // that made the same release look like different software on each platform.
+    getManifest: () => ({ version: '5.3' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -1849,17 +1853,24 @@ async function rescanAllBookmarks() {
 
 // Automatically check bookmark statuses for unchecked bookmarks
 // Uses rate limiting to prevent browser overload
+/* [ZeroLabs] 2026-08-28 - edited: report whether a scan actually happened */
+// Callers recorded a "folder scanned" timestamp as soon as this returned, but an
+// early return was indistinguishable from a completed scan. Expanding a folder
+// with checking switched off therefore marked it scanned for seven days, so
+// turning checking back on left that folder stuck with no statuses and no way to
+// prompt a rescan short of waiting the cache out. Returns true only when the
+// bookmarks were actually queued or found already current.
 async function autoCheckBookmarkStatuses() {
   /* [ZeroLabs] 2026-08-09 1:31 PM - added: no scanning in share window */
   if (window.__bmzShareMode) {
     console.log('[Share] Share mode active, skipping link/safety scan');
-    return;
+    return false;
   }
 
   // Skip if both checking types are disabled
   if (!linkCheckingEnabled && !safetyCheckingEnabled) {
     console.log('Link and safety checking are both disabled, skipping...');
-    return;
+    return false;
   }
 
   // Initialize scanner on first scan
@@ -1891,7 +1902,8 @@ async function autoCheckBookmarkStatuses() {
     // Update status bar to show ready state
     if (scanProgress) scanProgress.textContent = 'Ready';
     if (scanStatusBar) scanStatusBar.classList.remove('scanning');
-    return;
+    // Nothing needed checking, so the folder genuinely is up to date
+    return true;
   }
 
   console.log(`Auto-checking ${bookmarksToCheck.length} bookmarks in batches...`);
@@ -1912,7 +1924,8 @@ async function autoCheckBookmarkStatuses() {
         bookmarksToCheck.forEach(item => checkedBookmarks.delete(item.id));
         if (scanProgress) scanProgress.textContent = 'Ready';
         if (scanStatusBar) scanStatusBar.classList.remove('scanning');
-        return;
+        // Deliberately not scanned: these were put back for a later attempt
+        return false;
       }
       console.log('[Auto-Check] Scanner worker initialized, starting scan');
     }
@@ -1926,7 +1939,7 @@ async function autoCheckBookmarkStatuses() {
       if (scanProgress) scanProgress.textContent = `Scanning: ${window.scannerService.scannedCount}/${window.scannerService.totalCount}`;
       // Kick the queue in case it had already drained between batches
       window.scannerService.processQueue();
-      return;
+      return true;
     }
 
     // Set up scan state similar to manual scans
@@ -1949,7 +1962,7 @@ async function autoCheckBookmarkStatuses() {
     // Start queue processing (this will handle progress updates automatically)
     window.scannerService.processQueue();
 
-    return; // Exit early, queue processing will handle the rest
+    return true; // Exit early, queue processing will handle the rest
   }
 
   // Fallback to batch processing if scanner service is not available
@@ -2089,6 +2102,9 @@ async function autoCheckBookmarkStatuses() {
   }, 2000);
 
   console.log(`Finished checking link status for ${bookmarksToCheck.length} bookmarks (safety checks disabled - use Test VT button)`);
+
+  // Cancelled part-way through is not a completed scan, so it must not count
+  return !scanCancelled;
 }
 
 // Update total bookmark count in status bar
@@ -3945,9 +3961,12 @@ function toggleFolder(folderId, folderElement) {
     if (shouldScanFolder(folderId)) {
       console.log(`[Folder Scan Cache] "${folderTitle}" needs scanning (cache expired or never scanned)`);
       setTimeout(async () => {
-        await autoCheckBookmarkStatuses();
-        // Save timestamp after successful scan completes
-        saveFolderScanTimestamp(folderId);
+        /* [ZeroLabs] 2026-08-28 - fixed: only record a scan that happened */
+        // This saved the timestamp whatever came back, so expanding a folder
+        // with checking switched off marked it scanned for seven days and it
+        // stayed blank long after checking was turned back on.
+        const scanned = await autoCheckBookmarkStatuses();
+        if (scanned) saveFolderScanTimestamp(folderId);
       }, 100);
     } else {
       const lastScan = folderScanTimestamps[folderId];
