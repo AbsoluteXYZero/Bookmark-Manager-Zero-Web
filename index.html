@@ -1003,16 +1003,40 @@
     /* Built on .announcement-card so it inherits every theme's version of the
        shape, and recoloured to the amber the sync button already uses for a
        deferral, so the card and the button read as the same state. */
-    .announcement-card.sync-notice-card,
-    /* No badge and no separate title: one headline carries it. A kicker saying
+    /* [ZeroLabs] 2026-08-28 - fixed: card was being painted solid amber */
+    /* This selector used to end in a comma and run straight into the button rule
+       below, so the card itself took the button's amber fill and near-black text
+       instead of the neutral surface Firefox shows. It carries the amber on its
+       left edge only - the fill stays neutral so the body text keeps full
+       contrast against it.
+       No badge and no separate title: one headline carries it. A kicker saying
        sync had paused above a title saying sync was waiting was the same fact
        twice, and the body's last sentence plus the Review button already say
        that a decision is wanted. */
+    .announcement-card.sync-notice-card {
+      background: var(--md-sys-color-surface-variant, #2a2a2a);
+      color: var(--md-sys-color-on-surface);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* The row and the actions are the card's own layout, so the stacking margins
+       .announcement-card-title and -body carry for the long What's New card would
+       double up on the gaps here. */
+    .sync-notice-card .announcement-card-title,
+    .sync-notice-card .announcement-card-body {
+      margin-bottom: 0;
+    }
 
     /* The headline is 36 characters and the text column is the viewport minus
        106px, so it wraps below roughly 410px - the Fold's cover screen. Balance
        evens the two lines instead of leaving "data" alone on the second.
        Ignored by browsers that lack it, which just wrap normally. */
+    .sync-notice-card .announcement-card-title {
+      text-wrap: balance;
+    }
+
     .sync-notice-card .announcement-setup-btn {
       background: #f59e0b;
       color: #1a1a1a;
