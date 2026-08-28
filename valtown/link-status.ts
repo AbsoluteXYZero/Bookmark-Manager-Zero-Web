@@ -50,17 +50,67 @@ const BATCH_CONCURRENCY = 15;
 // upstream fetches to one.
 const cache = new Map<string, any>();
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type",
-  "Access-Control-Max-Age": "86400",
-};
+/* [ZeroLabs] 2026-08-28 - added: reflect known origins instead of "*" */
+// BMZ is open source and the token ships in the page, so this endpoint is
+// effectively public. The realistic abuse is someone pointing their own site at
+// it and spending Zero's shared 1000/min quota through their visitors' browsers.
+//
+// Reflecting only known origins stops exactly that: a browser will refuse to let
+// a page read a response whose Access-Control-Allow-Origin does not match it.
+//
+// It does NOT stop curl or a server, which can send any Origin they like or none.
+// That is accepted rather than defended against: there is nothing user-specific
+// here to leak, the SSRF guard stops it being aimed at infrastructure, and the
+// worst case is quota burn - fixed in two minutes by rotating BMZ_TOKEN in the
+// val.town UI and the matching constant in workers/scanner-worker.js.
+// ---------------------------------------------------------------------------
+// SELF-HOSTING: change these.
+//
+// This list is specific to the author's deployment. If you are running your own
+// copy of BMZ, replace the two https entries with your own domain(s), or empty
+// the array entirely if you do not want any origin restriction - an empty list
+// simply means every browser request gets "null" and is refused, so do not leave
+// it empty by accident. To allow anything, return "*" from corsFor() instead.
+//
+// You will also need your OWN val rather than pointing at the author's, which
+// will refuse your origin anyway. Deploy this file as an HTTP val, set a
+// BMZ_TOKEN environment variable on it, then update these two constants near the
+// top of workers/scanner-worker.js to match:
+//
+//     const LINK_VAL_URL   = 'https://<you>--<hash>.web.val.run';
+//     const LINK_VAL_TOKEN = '<your BMZ_TOKEN>';
+//
+// The localhost entries are for running the site from a local HTTP server during
+// development; harmless to keep, since a page served from localhost is yours.
+// ---------------------------------------------------------------------------
+const ALLOWED_ORIGINS = [
+  "https://bmzweb.absolutezero.fyi",
+  "https://bookmarkmanagerzero.absolutezero.fyi",
+  "http://127.0.0.1:8000",
+  "http://localhost:8000",
+];
 
-function json(body: unknown, status = 200) {
+function corsFor(req: Request) {
+  const origin = req.headers.get("origin") || "";
+  const allowed = ALLOWED_ORIGINS.includes(origin);
+  return {
+    // No Origin at all (curl, a server) gets "*": harmless, since there is no
+    // browser to protect and nothing user-specific in any response.
+    "Access-Control-Allow-Origin": allowed ? origin : (origin ? "null" : "*"),
+    "Vary": "Origin",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Max-Age": "86400",
+  };
+}
+
+function json(body: unknown, status = 200, req?: Request) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { ...CORS, "Content-Type": "application/json" },
+    headers: {
+      ...(req ? corsFor(req) : { "Access-Control-Allow-Origin": "*" }),
+      "Content-Type": "application/json",
+    },
   });
 }
 
@@ -308,20 +358,20 @@ async function urlvoidAll(domains: string[]) {
 }
 
 export default async function (req: Request): Promise<Response> {
-  if (req.method === "OPTIONS") return new Response(null, { headers: CORS });
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsFor(req) });
 
   const url = new URL(req.url);
 
   if (url.pathname === "/health") {
-    return json({ status: "ok", cached: cache.size });
+    return json({ status: "ok", cached: cache.size }, 200, req);
   }
 
   // Fail closed. If BMZ_TOKEN was never set, an undefined TOKEN would otherwise
   // match a caller who simply omitted ?key= and leave this wide open.
-  if (!TOKEN) return json({ error: "server not configured" }, 503);
+  if (!TOKEN) return json({ error: "server not configured" }, 503, req);
 
   const key = url.searchParams.get("key");
-  if (key !== TOKEN) return json({ error: "bad key" }, 403);
+  if (key !== TOKEN) return json({ error: "bad key" }, 403, req);
 
   // URLVoid: GET ?domain=... or POST { domains: [...] }
   if (url.pathname === "/urlvoid") {
@@ -330,21 +380,21 @@ export default async function (req: Request): Promise<Response> {
       try {
         body = await req.json();
       } catch {
-        return json({ error: "bad json" }, 400);
+        return json({ error: "bad json" }, 400, req);
       }
 
       const domains = Array.isArray(body?.domains) ? body.domains : null;
-      if (!domains) return json({ error: "expected { domains: [...] }" }, 400);
+      if (!domains) return json({ error: "expected { domains: [...] }" }, 400, req);
       if (domains.length > URLVOID_MAX_BATCH) {
-        return json({ error: `max ${URLVOID_MAX_BATCH} domains per request` }, 400);
+        return json({ error: `max ${URLVOID_MAX_BATCH} domains per request` }, 400, req);
       }
 
-      return json({ results: await urlvoidAll(domains) });
+      return json({ results: await urlvoidAll(domains) }, 200, req);
     }
 
     const domain = url.searchParams.get("domain");
-    if (!domain) return json({ error: "missing domain" }, 400);
-    return json(await urlvoidCount(domain));
+    if (!domain) return json({ error: "missing domain" }, 400, req);
+    return json(await urlvoidCount(domain), 200, req);
   }
 
   // Batch: POST { urls: [...] }
@@ -353,21 +403,21 @@ export default async function (req: Request): Promise<Response> {
     try {
       body = await req.json();
     } catch {
-      return json({ error: "bad json" }, 400);
+      return json({ error: "bad json" }, 400, req);
     }
 
     const urls = Array.isArray(body?.urls) ? body.urls : null;
-    if (!urls) return json({ error: "expected { urls: [...] }" }, 400);
+    if (!urls) return json({ error: "expected { urls: [...] }" }, 400, req);
     if (urls.length > MAX_BATCH) {
-      return json({ error: `max ${MAX_BATCH} urls per request` }, 400);
+      return json({ error: `max ${MAX_BATCH} urls per request` }, 400, req);
     }
 
-    return json({ results: await checkAll(urls) });
+    return json({ results: await checkAll(urls) }, 200, req);
   }
 
   // Single: GET ?url=...
   const target = url.searchParams.get("url");
-  if (!target) return json({ error: "missing url" }, 400);
+  if (!target) return json({ error: "missing url" }, 400, req);
 
-  return json(await fetchStatus(target));
+  return json(await fetchStatus(target), 200, req);
 }
