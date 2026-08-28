@@ -1090,6 +1090,14 @@
     body .announcement-card.sync-notice-card button:active {
       box-shadow: var(--md-elevation-1), var(--bmz-pressed);
     }
+    /* [ZeroLabs] 2026-08-27 - added: full contrast on the notice card's body */
+    /* It borrows .announcement-card-body, which is deliberately muted for the
+       long What's New card. This card asks for a decision, so its body must not
+       be quieter than its heading. */
+    .sync-notice-card .announcement-card-body {
+      color: var(--md-sys-color-on-surface);
+    }
+
     .sync-notice-row {
       display: flex;
       align-items: flex-start;
@@ -3126,7 +3134,13 @@
       font-weight: 600;
     }
     .share-status-reason {
-      color: var(--md-sys-color-on-surface-variant);
+      /* [ZeroLabs] 2026-08-27 - edited: inherit, do not force the muted grey */
+      /* The box already sets its own text colour per state, and on the error
+         state that is on-surface. Overriding the body to on-surface-variant made
+         it a low-contrast grey against the tinted background while the heading
+         above it stayed full strength. Inheriting gives white on the dark themes
+         and near-black on the light ones, with no per-theme rule. */
+      color: inherit;
       word-break: break-word;
       /* [ZeroLabs] 2026-08-27 - added: honour newlines in the reason */
       /* setShareStatus writes this with textContent, so HTML collapses runs of
