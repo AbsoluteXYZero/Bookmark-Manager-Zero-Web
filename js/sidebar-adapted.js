@@ -1069,11 +1069,18 @@ function setupBlocklistProgressListener() {
 
   window.addEventListener('blocklist:complete', (event) => {
     const message = event.detail;
-    // Clear status bar after completion
+    /* [ZeroLabs] 2026-08-28 - added: a running scan owns the status bar */
+    // This had no guard at all, so a blocklist download finishing mid-scan
+    // overwrote the scan's progress text and stripped .scanning off the bar.
+    // The extensions guard this; the website never did.
+    const scanning = !!(window.scannerService && window.scannerService.isScanning);
+    if (scanning) return;
+
     if (scanProgress) {
       scanProgress.textContent = `Blocklists loaded: ${message.domains.toLocaleString()} domains`;
       setTimeout(() => {
-        if (scanProgress && scanProgress.textContent.startsWith('Blocklists loaded:')) {
+        if (scanProgress && scanProgress.textContent.startsWith('Blocklists loaded:') &&
+            !(window.scannerService && window.scannerService.isScanning)) {
           scanProgress.textContent = 'Ready';
         }
       }, 3000); // Show completion message for 3 seconds

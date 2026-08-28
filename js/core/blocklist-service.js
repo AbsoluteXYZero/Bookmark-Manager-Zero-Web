@@ -438,7 +438,36 @@ class BlocklistService {
     }
   }
 
+  /* [ZeroLabs] 2026-08-28 - added: the blocklists are safety checking's data */
+  // Read straight from localStorage rather than importing the sidebar's module
+  // state: this service is loaded by the scanner too, and it must not depend on
+  // the UI having initialised. Absent means on, matching loadCheckingSettings,
+  // so a read that comes back empty never silently disables the feature.
+  isSafetyCheckingEnabled() {
+    try {
+      return localStorage.getItem('safetyCheckingEnabled') !== 'false';
+    } catch (error) {
+      return true; // Storage blocked: behave as though the feature is on
+    }
+  }
+
   async ensureBlocklistReady() {
+    /* [ZeroLabs] 2026-08-28 - added: nothing to make ready when safety is off */
+    // Callers await this and then read domainCount, so it answers rather than
+    // skipping silently. The complete event goes out too, so the status bar is
+    // never left holding a progress message that nothing comes back to clear.
+    if (!this.isSafetyCheckingEnabled()) {
+      console.log('[Blocklist] Safety checking is off. Skipping the download.');
+      window.dispatchEvent(new CustomEvent('blocklist:complete', {
+        detail: {
+          domains: this.maliciousUrlsSet.size,
+          totalEntries: this.maliciousUrlsSet.size,
+          sources: 0
+        }
+      }));
+      return { ready: true, domainCount: this.maliciousUrlsSet.size, skipped: true };
+    }
+
     const now = Date.now();
     const isDifferentDay = !this.isSameDay(now, this.blocklistLastUpdate);
     const isEmpty = this.maliciousUrlsSet.size === 0;
