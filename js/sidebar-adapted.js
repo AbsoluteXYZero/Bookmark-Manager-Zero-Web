@@ -2101,7 +2101,12 @@ async function autoCheckBookmarkStatuses() {
     if (scanProgress) scanProgress.textContent = 'Ready';
   }, 2000);
 
-  console.log(`Finished checking link status for ${bookmarksToCheck.length} bookmarks (safety checks disabled - use Test VT button)`);
+  /* [ZeroLabs] 2026-08-28 - edited: the message claimed the opposite of what ran */
+  // It ended "(safety checks disabled - use Test VT button)", hardcoded and
+  // unconditional, left from when safety was a separate manual step - while the
+  // log above it filled up with completed safety checks. "link status" was wrong
+  // for the same reason, so the line now states only what it can vouch for.
+  console.log(`Finished checking ${bookmarksToCheck.length} bookmarks`);
 
   // Cancelled part-way through is not a completed scan, so it must not count
   return !scanCancelled;
@@ -2821,6 +2826,8 @@ function getStatusDotHtml(linkStatus, url) {
     'dead': 'Link Status: Dead\n\n✗ Link is dead or unreachable\n✗ Error, timeout, or connection failed',
     'parked': 'Link Status: Parked\n\n⚠ Domain is parked\n⚠ Redirects to domain parking service',
     'checking': 'Link Status: Checking\n\nChecking link status...',
+    /* [ZeroLabs] 2026-08-28 - added: checked, but the site would not answer us */
+    'blocked': 'Link Status: Could Not Verify\n\n⚠ The site refused an automated check\n⚠ It is probably fine - open it to be sure',
     'unknown': 'Link Status: Unknown\n\nStatus has not been checked yet'
   };
 
@@ -2862,6 +2869,24 @@ Redirects to domain parking service" data-status-message="${escapedTooltip}">
       <span class="status-icon status-checking clickable-status" title="Checking link status..." data-status-message="${escapedTooltip}">
         <svg width="14" height="14" fill="currentColor" viewBox="0 0 24 24">
           <path d="M3.9,12C3.9,10.29 5.29,8.9 7,8.9H11V7H7A5,5 0 0,0 2,12A5,5 0 0,0 7,17H11V15.1H7C5.29,15.1 3.9,13.71 3.9,12M8,13H16V11H8V13M17,7H13V8.9H17C18.71,8.9 20.1,10.29 20.1,12C20.1,13.71 18.71,15.1 17,15.1H13V17H17A5,5 0 0,0 22,12A5,5 0 0,0 17,7Z"/>
+        </svg>
+      </span>
+    `,
+    /* [ZeroLabs] 2026-08-28 - added: yellow like parked, but "?" not "!" */
+    // Same colour family because both mean "something is up with this link", and
+    // a different glyph because the meanings differ: parked is a verdict about
+    // the domain, this is an admission that we could not reach one.
+    'blocked': `
+      <span class="status-icon status-blocked clickable-status" title="Could not verify
+The site refused an automated check" data-status-message="${escapedTooltip}">
+        <svg width="14" height="14" viewBox="0 0 24 24">
+          <g fill="currentColor">
+            <path d="M3.9,12C3.9,10.29 5.29,8.9 7,8.9H11V7H7A5,5 0 0,0 2,12A5,5 0 0,0 7,17H11V15.1H7C5.29,15.1 3.9,13.71 3.9,12M8,13H16V11H8V13M17,7H13V8.9H17C18.71,8.9 20.1,10.29 20.1,12C20.1,13.71 18.71,15.1 17,15.1H13V17H17A5,5 0 0,0 22,12A5,5 0 0,0 17,7Z"/>
+          </g>
+          <g fill="#eab308">
+            <circle cx="18" cy="6" r="5"/>
+            <text x="18" y="9.5" text-anchor="middle" font-size="10" font-weight="bold" fill="white">?</text>
+          </g>
         </svg>
       </span>
     `,
@@ -4053,8 +4078,24 @@ async function loadCachedStatusesForFolder(folderId) {
   console.log(`[Cache Load] Collected ${bookmarks.length} bookmarks in "${folder.title}"`);
   let linkLoaded = 0;
   let safetyLoaded = 0;
+  /* [ZeroLabs] 2026-08-28 - added: count what was already there, not just new loads */
+  // The caller treats total === 0 as "nothing is cached" and falls back to a
+  // scan. These counters only ever counted statuses NEWLY assigned here, and
+  // both loops skip a bookmark that already has one - so the second expansion of
+  // a folder always reported 0 with the cache untouched, and the caller read
+  // that as empty. A status already sitting on the node is cached data too.
+  let alreadyPresent = 0;
 
   for (const bookmark of bookmarks) {
+    /* [ZeroLabs] 2026-08-28 - edited: 'unknown' is the ABSENCE of a status */
+    // Counting any truthy value meant clearCache(), which resets every node to
+    // the literal string 'unknown', left this reporting the folder as fully
+    // cached - so the caller's "nothing cached, go and scan" fallback never
+    // fired either. 'unknown' means no verdict; it must not count as one.
+    const hasLink = bookmark.linkStatus && bookmark.linkStatus !== 'unknown';
+    const hasSafety = bookmark.safetyStatus && bookmark.safetyStatus !== 'unknown';
+    if (hasLink || hasSafety) alreadyPresent++;
+
     // Load cached link status
     if (!bookmark.linkStatus) {
       const cachedLink = await window.scannerService.getCachedResult(bookmark.url, 'link');
@@ -4075,10 +4116,10 @@ async function loadCachedStatusesForFolder(folderId) {
     }
   }
 
-  console.log(`[Cache Load] COMPLETE - Loaded ${linkLoaded} link + ${safetyLoaded} safety statuses for "${folder.title}"`);
+  console.log(`[Cache Load] COMPLETE - Loaded ${linkLoaded} link + ${safetyLoaded} safety statuses for "${folder.title}" (${alreadyPresent} already present)`);
 
-  // Return count of loaded statuses
-  return { linkLoaded, safetyLoaded, total: linkLoaded + safetyLoaded };
+  // total answers "does this folder have statuses", which is what the caller asks
+  return { linkLoaded, safetyLoaded, alreadyPresent, total: linkLoaded + safetyLoaded + alreadyPresent };
 }
 
 // Toggle bookmark menu - opens context menu modal
@@ -8347,6 +8388,13 @@ async function clearCache() {
 
     // Clear IndexedDB cache too
     await dbManager.clear('cache');
+
+    /* [ZeroLabs] 2026-08-28 - added: forget WHEN folders were scanned, too */
+    // Clearing the results but keeping the timestamps left every folder marked
+    // "already scanned 0 days ago", so shouldScanFolder skipped them all and
+    // expanding a folder after a manual clear scanned nothing for seven days.
+    folderScanTimestamps = {};
+    safeLocalStorage.removeItem('folderScanTimestamps');
 
     // Re-render bookmarks to show "unknown" status
     renderBookmarks();

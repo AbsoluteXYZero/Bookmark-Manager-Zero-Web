@@ -127,291 +127,201 @@ function isPrivilegedUrl(url) {
 /**
  * Check link status (live/dead/parked)
  */
+/* [ZeroLabs] 2026-08-28 - rewritten: DNS + a checker val, not opaque fetches */
+// The old implementation tried `mode:'cors'` and fell back to `mode:'no-cors'`.
+// That fallback ALWAYS "succeeds" and always returns an opaque response - status
+// forced to 0, ok false, headers unreadable - so every status check was gated on
+// `usedCors` and simply skipped. Any site without CORS headers (nearly all of
+// them) fell through to `return 'live'`. On the website "live" meant "a server
+// answered", not "the page exists", so genuinely dead bookmarks showed green
+// while the extensions correctly showed them red.
+//
+// A page cannot read a cross-origin response; that is the same-origin policy and
+// no amount of retrying changes it. The extensions get real status codes because
+// host permissions exempt them. So the work is done elsewhere:
+//
+//   Tier 1  DNS-over-HTTPS (Cloudflare, ACAO:*). NXDOMAIN means the domain is
+//           gone, so every path under it is dead. Free, unlimited, ~50ms, and
+//           cached per HOSTNAME - one lookup settles every bookmark on that host.
+//
+//   Tier 2  A val.town val does the fetch server-side and returns just the status
+//           code with permissive CORS, which the page IS allowed to read.
+//
+// CRITICAL: a val error is NOT death. The val runs from a datacenter IP, so sites
+// with bot protection refuse it - www.ford.com resolves fine and is a real 404,
+// but the val gets nothing. Marking that dead would be a false POSITIVE, telling
+// the user to delete a working bookmark.
+//
+// Two different failures, deliberately reported differently:
+//   'blocked' (yellow)  THEIR refusal - the site turned our checker away. Will
+//                       not change on its own, so the scan queue must not retry
+//                       it; line 1888 only re-queues 'unknown', so it never will.
+//   'unknown' (grey)    OUR failure - DNS unreachable, the val down, a bad batch.
+//                       Transient, and correctly retried on the next scan.
+
+const DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
+const LINK_VAL_URL = 'https://testpilot--bf5f3b50a32d11f18be01607ee4eb77e.web.val.run';
+// Sent from the client, so it deters scanners rather than being a real secret.
+// The val's own SSRF guard and result cache are what actually protect it.
+const LINK_VAL_TOKEN = 'UN_RMNOFQ9Jytbj7QT_kfyJFd07GCUu8';
+
+const VAL_BATCH_SIZE = 50;     // val's documented per-request cap
+const VAL_BATCH_WAIT_MS = 120; // collect concurrent checks before flushing
+
+// hostname -> true (resolves) | false (NXDOMAIN) | null (lookup failed)
+const dnsCache = new Map();
+
+/**
+ * Does this hostname exist at all? Returns null when DNS itself could not be
+ * reached, which must not be confused with NXDOMAIN.
+ */
+async function hostResolves(hostname) {
+  if (dnsCache.has(hostname)) return dnsCache.get(hostname);
+
+  let verdict = null;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+
+    const res = await fetch(
+      `${DOH_ENDPOINT}?name=${encodeURIComponent(hostname)}&type=A`,
+      { headers: { Accept: 'application/dns-json' }, signal: controller.signal },
+    );
+    clearTimeout(timer);
+
+    if (res.ok) {
+      const data = await res.json();
+      // 3 = NXDOMAIN. 0 = NOERROR, but a name can exist with no A record
+      // (MX-only, AAAA-only), so treat "not NXDOMAIN" as resolving.
+      verdict = data.Status !== 3;
+    }
+  } catch (e) {
+    verdict = null; // DNS unreachable - say nothing rather than guess
+  }
+
+  dnsCache.set(hostname, verdict);
+  return verdict;
+}
+
+// Collects concurrent per-URL checks into one batched request. The val allows
+// 1000 requests/minute SHARED across every BMZ user, so one request per bookmark
+// would burn 2909 of them per full scan; batching 50 makes that 59.
+const valBatch = { pending: [], timer: null };
+
+function flushValBatch() {
+  if (valBatch.timer) {
+    clearTimeout(valBatch.timer);
+    valBatch.timer = null;
+  }
+  if (valBatch.pending.length === 0) return;
+
+  const batch = valBatch.pending.splice(0, VAL_BATCH_SIZE);
+
+  (async () => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+
+      const res = await fetch(`${LINK_VAL_URL}/?key=${encodeURIComponent(LINK_VAL_TOKEN)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: batch.map(b => b.url) }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!res.ok) throw new Error(`val HTTP ${res.status}`);
+
+      const body = await res.json();
+      const results = Array.isArray(body.results) ? body.results : [];
+      batch.forEach((item, i) => item.resolve(results[i] || { status: null, error: 'no-result' }));
+    } catch (err) {
+      console.warn('[LinkCheck] Batch failed:', err.message);
+      // Resolve rather than reject: a failed batch means "we learned nothing",
+      // which maps to 'blocked', not to a dead link.
+      batch.forEach(item => item.resolve({ status: null, error: 'val-unreachable' }));
+    }
+
+    // More may have queued while this was in flight
+    if (valBatch.pending.length > 0) flushValBatch();
+  })();
+}
+
+function checkViaVal(url) {
+  return new Promise((resolve) => {
+    valBatch.pending.push({ url, resolve });
+    if (valBatch.pending.length >= VAL_BATCH_SIZE) {
+      flushValBatch();
+    } else if (!valBatch.timer) {
+      valBatch.timer = setTimeout(flushValBatch, VAL_BATCH_WAIT_MS);
+    }
+  });
+}
+
 async function checkLinkStatus(url) {
   // Privileged URLs are always live
   if (isPrivilegedUrl(url)) {
     return 'live';
   }
 
-  let result;
-
-  // Check if URL itself is on parking domain
+  let hostname;
   try {
-    const urlHost = new URL(url).hostname.toLowerCase();
-    if (!isParkingExempt(urlHost) && PARKING_DOMAINS.some(domain => urlHost.includes(domain))) {
-      return 'parked';
-    }
+    hostname = new URL(url).hostname.toLowerCase();
   } catch (e) {
     return 'dead'; // Invalid URL
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 5000);
+  // Known parking service in the hostname itself
+  if (!isParkingExempt(hostname) && PARKING_DOMAINS.some(d => hostname.includes(d))) {
+    return 'parked';
+  }
 
-  const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-  };
+  // Tier 1: does the domain exist? NXDOMAIN settles every path under it, so
+  // there is no point asking about the path.
+  const resolves = await hostResolves(hostname);
+  if (resolves === false) {
+    return 'dead';
+  }
+  if (resolves === null) {
+    // DNS itself was unreachable - our problem, not the bookmark's. Retryable.
+    return 'unknown';
+  }
 
-  try {
-    // Try fetch with cors mode first to get redirect info
-    // Fall back to no-cors if CORS blocks us
-    let response;
-    let usedCors = false;
+  // Tier 2: the actual HTTP status, fetched server-side
+  const result = await checkViaVal(url);
 
-    try {
-      const corsController = new AbortController();
-      const corsTimeout = setTimeout(() => corsController.abort(), 5000);
-
-      response = await fetch(url, {
-        method: 'HEAD',
-        signal: corsController.signal,
-        mode: 'cors',
-        credentials: 'omit',
-        redirect: 'follow',
-        headers: headers
-      });
-      clearTimeout(corsTimeout);
-      usedCors = true;
-    } catch (corsError) {
-      // CORS blocked, try no-cors mode with fresh controller
-      const noCorsController = new AbortController();
-      const noCorsTimeout = setTimeout(() => noCorsController.abort(), 5000);
-
-      response = await fetch(url, {
-        method: 'HEAD',
-        signal: noCorsController.signal,
-        mode: 'no-cors',
-        credentials: 'omit',
-        redirect: 'follow',
-        headers: headers
-      });
-      clearTimeout(noCorsTimeout);
-    }
-
-    clearTimeout(timeoutId);
-
-    // Check if redirected to parking domain (only works with cors mode)
-    if (usedCors && response.url) {
+  if (typeof result.status === 'number') {
+    // Redirected onto a parking service
+    if (result.finalUrl) {
       try {
-        const finalHost = new URL(response.url).hostname.toLowerCase();
-        const originalHost = new URL(url).hostname.toLowerCase();
-
-        // Only flag if redirected to a DIFFERENT domain that's a known parking service
-        if (finalHost !== originalHost &&
+        const finalHost = new URL(result.finalUrl).hostname.toLowerCase();
+        if (finalHost !== hostname &&
             !isParkingExempt(finalHost) &&
-            PARKING_DOMAINS.some(domain => finalHost.includes(domain))) {
+            PARKING_DOMAINS.some(d => finalHost.includes(d))) {
           return 'parked';
         }
-      } catch (e) {
-        // URL parsing failed, continue with live status
-      }
-
-      // Check response status (only available in cors mode)
-      // 404, 410, 451 indicate the content is gone
-      if (response.status === 404 || response.status === 410 || response.status === 451) {
-        return 'dead';
-      }
+      } catch (e) { /* unparseable final URL, fall through to the status */ }
     }
 
-    // Site is reachable - check for successful status codes
-    if (usedCors && (response.ok || (response.status >= 300 && response.status < 400))) {
-      const urlHost = new URL(url).hostname.toLowerCase();
-      if (isParkingExempt(urlHost)) {
-        return 'live';
-      }
-
-      // Try content-based parking detection
-      try {
-        const contentController = new AbortController();
-        const contentTimeout = setTimeout(() => contentController.abort(), 3000);
-
-        const contentResponse = await fetch(url, {
-          method: 'GET',
-          signal: contentController.signal,
-          credentials: 'omit',
-          redirect: 'follow',
-          headers: headers
-        });
-        clearTimeout(contentTimeout);
-
-        if (contentResponse.ok) {
-          const html = await contentResponse.text();
-          const htmlLower = html.toLowerCase();
-          const contentSize = html.length;
-
-          // Strong parking indicators
-          const strongIndicators = [
-            'sedo domain parking',
-            'this domain is parked',
-            'domain is parked',
-            'parked by',
-            'parked domain',
-            'hugedomains.com/domain',
-            'afternic.com/forsale',
-            'this domain name is for sale',
-            'buy this domain name',
-            'domain has expired'
-          ];
-
-          if (strongIndicators.some(indicator => htmlLower.includes(indicator))) {
-            return 'parked';
-          }
-
-          // Skip weak indicators for substantial content (>30KB)
-          if (contentSize > 30000) {
-            return 'live';
-          }
-
-          // Weak indicators - need 3+ matches on small pages
-          const weakIndicators = [
-            'domain for sale',
-            'buy this domain',
-            'make an offer',
-            'expired domain',
-            'purchase this domain',
-            'coming soon',
-            'under construction'
-          ];
-
-          const matchCount = weakIndicators.filter(indicator =>
-            htmlLower.includes(indicator)
-          ).length;
-
-          if (matchCount >= 3) {
-            return 'parked';
-          }
-        }
-      } catch (contentError) {
-        // Content check failed, continue
-      }
-
-      return 'live';
-    }
-
-    // Check for Cloudflare (only available in cors mode)
-    if (usedCors) {
-      const serverHeader = response.headers.get('server');
-      const cfRay = response.headers.get('cf-ray');
-      if (serverHeader?.toLowerCase().includes('cloudflare') || cfRay) {
-        return 'live';
-      }
-
-      // Status codes that indicate live but blocking
-      const liveButBlocking = [401, 403, 405, 406, 429];
-      if (liveButBlocking.includes(response.status)) {
-        return 'live';
-      }
-
-      // 5xx - try GET fallback
-      if (response.status >= 500) {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    }
-
-    // Site is reachable and not parked
-    return 'live';
-
-  } catch (error) {
-    clearTimeout(timeoutId);
-
-    // Timeout = slow server (live)
-    if (error.name === 'AbortError') {
-      return 'live';
-    }
-
-    // NetworkError usually means CORS (site exists but blocks us)
-    if (error.message?.includes('NetworkError') ||
-        error.message?.includes('CORS')) {
-      return 'live';
-    }
-
-    // Try GET fallback
-    try {
-      let fallbackResponse;
-      let usedCorsFallback = false;
-
-      try {
-        const corsController = new AbortController();
-        const corsTimeout = setTimeout(() => corsController.abort(), 5000);
-
-        fallbackResponse = await fetch(url, {
-          method: 'GET',
-          signal: corsController.signal,
-          mode: 'cors',
-          credentials: 'omit',
-          redirect: 'follow',
-          headers: headers
-        });
-        clearTimeout(corsTimeout);
-        usedCorsFallback = true;
-      } catch (corsError) {
-        // CORS blocked, try no-cors mode with fresh controller
-        const noCorsController = new AbortController();
-        const noCorsTimeout = setTimeout(() => noCorsController.abort(), 5000);
-
-        fallbackResponse = await fetch(url, {
-          method: 'GET',
-          signal: noCorsController.signal,
-          mode: 'no-cors',
-          credentials: 'omit',
-          redirect: 'follow',
-          headers: headers
-        });
-        clearTimeout(noCorsTimeout);
-      }
-
-      // Check if redirected to parking domain (only works with cors mode)
-      if (usedCorsFallback && fallbackResponse.url) {
-        try {
-          const finalHost = new URL(fallbackResponse.url).hostname.toLowerCase();
-          const originalHost = new URL(url).hostname.toLowerCase();
-
-          if (finalHost !== originalHost &&
-              !isParkingExempt(finalHost) &&
-              PARKING_DOMAINS.some(domain => finalHost.includes(domain))) {
-            return 'parked';
-          }
-        } catch (e) {
-          // URL parsing failed, continue with live status
-        }
-
-        // Check response status (only available in cors mode)
-        // 404, 410, 451 indicate the content is gone
-        if (fallbackResponse.status === 404 || fallbackResponse.status === 410 || fallbackResponse.status === 451) {
-          return 'dead';
-        }
-      }
-
-      // Check Cloudflare (only available in cors mode)
-      if (usedCorsFallback) {
-        const fbServerHeader = fallbackResponse.headers.get('server');
-        const fbCfRay = fallbackResponse.headers.get('cf-ray');
-        if (fbServerHeader?.toLowerCase().includes('cloudflare') || fbCfRay) {
-          return 'live';
-        }
-
-        if (fallbackResponse.ok) {
-          return 'live';
-        }
-      }
-
-      return 'live';
-    } catch (fallbackError) {
-      // Timeout = slow server (live)
-      if (fallbackError.name === 'AbortError') {
-        return 'live';
-      }
-
-      // NetworkError usually means CORS (site exists but blocks us)
-      if (fallbackError.message?.includes('NetworkError') ||
-          fallbackError.message?.includes('CORS')) {
-        return 'live';
-      }
-
-      // Both HEAD and GET failed - link is likely dead
+    // Content is gone
+    if (result.status === 404 || result.status === 410 || result.status === 451) {
       return 'dead';
     }
+
+    // Everything else that answered is live, including 401/403/429 - those mean
+    // the server is up and refusing us, which is not a broken bookmark.
+    return 'live';
   }
+
+  // No status code came back. The domain resolves, so the host exists - which
+  // means either it refused our checker, or our own checking failed.
+  //
+  // 'val-unreachable' and 'no-result' are OUR side falling over, so they stay
+  // grey and get retried. Everything else means the val reached the network and
+  // the target refused or hung: that is the site's decision and will not change,
+  // so it goes yellow and is never retried.
+  const ourFault = result.error === 'val-unreachable' || result.error === 'no-result';
+  return ourFault ? 'unknown' : 'blocked';
 }
 
 /**
@@ -447,11 +357,304 @@ function queueResult(result) {
   });
 }
 
-// Store blocklist data passed from main thread
+/* [ZeroLabs] 2026-08-28 - edited: the worker owns the blocklist now */
+// These used to be built on the main thread and shipped in here, which meant the
+// tab froze for seconds: fetching ~97 MB, splitting it into a 2.6M-element array,
+// a 3.1M-iteration loop building these three structures, then THREE Array.from
+// copies and a structured clone of all of it across the postMessage boundary.
+// None of that work ever needed to be on the thread that draws the UI - nothing
+// out there reads these; this worker is the only consumer.
+//
+// Now the worker fetches, parses and caches them itself. The main thread sends
+// 'loadBlocklists' and receives small progress messages back. The data also now
+// exists once rather than twice, which halves peak memory.
 let blocklist = new Set();
 let domainSourceMap = new Map();
 let domainOnlyMap = new Map();
 let trustedDomains = [];
+let blocklistLoading = false;
+let blocklistLastUpdate = 0;
+
+// Free, CORS-enabled endpoints. Kept in sync with the extensions' background
+// scripts - if a source breaks or moves, it has to change in all three.
+const BLOCKLIST_SOURCES = [
+  { name: 'URLhaus (Active)', url: 'https://raw.githubusercontent.com/AbsoluteXYZero/urlhaus-list/main/urlhaus-active.txt', format: 'urlhaus_text' },
+  { name: 'URLhaus (Historical)', url: 'https://curbengh.github.io/malware-filter/urlhaus-filter.txt', format: 'domains' },
+  { name: 'BlockList Project (Malware)', url: 'https://blocklistproject.github.io/Lists/malware.txt', format: 'hosts' },
+  { name: 'BlockList Project (Phishing)', url: 'https://blocklistproject.github.io/Lists/phishing.txt', format: 'hosts' },
+  { name: 'BlockList Project (Scam)', url: 'https://blocklistproject.github.io/Lists/scam.txt', format: 'hosts' },
+  // jsDelivr 403s this repo (>150 MB) and the repo dropped domains/ for wildcard/.
+  // GitHub raw sends Access-Control-Allow-Origin: *. Medium tier, not full TIF.
+  { name: 'HaGeZi TIF', url: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt', format: 'domains' },
+  { name: 'Phishing-Filter', url: 'https://malware-filter.gitlab.io/malware-filter/phishing-filter-hosts.txt', format: 'hosts' },
+  { name: 'OISD Big', url: 'https://raw.githubusercontent.com/sjhgvr/oisd/refs/heads/main/domainswild2_big.txt', format: 'domains' },
+  { name: 'FMHY Filterlist', url: 'https://raw.githubusercontent.com/fmhy/FMHYFilterlist/main/filterlist-basic-domains.txt', format: 'domains' },
+  { name: 'Dandelion Sprout Anti-Malware', url: 'https://raw.githubusercontent.com/DandelionSprout/adfilt/master/Alternate%20versions%20Anti-Malware%20List/AntiMalwareHosts.txt', format: 'hosts' }
+];
+
+/* [ZeroLabs] 2026-08-28 - added: a database of its own, deliberately */
+// NOT dbManager's database. That one holds the bookmarks and carries real
+// migration logic in onupgradeneeded (a v1->v2 keyPath change); a second
+// connection from here with a mismatched version could trigger or block an
+// upgrade on the store holding Zero's data. A separate database removes that
+// entire risk by construction rather than by being careful.
+//
+// NEVER point this at the bookmarks database.
+const BLOCKLIST_DB_NAME = 'bmz-blocklists';
+const BLOCKLIST_DB_VERSION = 1;
+const BLOCKLIST_STORE = 'compiled';
+
+function openBlocklistDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(BLOCKLIST_DB_NAME, BLOCKLIST_DB_VERSION);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(BLOCKLIST_STORE)) {
+        db.createObjectStore(BLOCKLIST_STORE, { keyPath: 'key' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error('Blocklist database blocked'));
+  });
+}
+
+async function readBlocklistCache() {
+  const db = await openBlocklistDb();
+  try {
+    return await new Promise((resolve, reject) => {
+      const tx = db.transaction(BLOCKLIST_STORE, 'readonly');
+      const req = tx.objectStore(BLOCKLIST_STORE).get('compiled');
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+async function writeBlocklistCache(record) {
+  const db = await openBlocklistDb();
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(BLOCKLIST_STORE, 'readwrite');
+      tx.objectStore(BLOCKLIST_STORE).put({ key: 'compiled', ...record });
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error);
+    });
+  } finally {
+    db.close();
+  }
+}
+
+function isSameDayUtc(a, b) {
+  if (!a || !b) return false;
+  const d1 = new Date(a);
+  const d2 = new Date(b);
+  return d1.getFullYear() === d2.getFullYear() &&
+         d1.getMonth() === d2.getMonth() &&
+         d1.getDate() === d2.getDate();
+}
+
+function parseBlocklistLine(line, format) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) return null;
+
+  let domain = null;
+
+  if (format === 'hosts') {
+    const parts = trimmed.split(/\s+/);
+    if (parts.length >= 2) domain = parts[1];
+  } else if (format === 'urlhaus_text') {
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      try {
+        domain = new URL(trimmed).hostname.toLowerCase();
+      } catch {
+        return null;
+      }
+    } else {
+      return null;
+    }
+  } else {
+    domain = trimmed;
+  }
+
+  if (!domain) return null;
+
+  const normalized = domain.toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/\/$/, '')
+    .replace(/^\*\./, '');
+
+  if (normalized === 'localhost' || normalized.startsWith('127.') || normalized.startsWith('0.0.0.0')) {
+    return null;
+  }
+
+  return normalized;
+}
+
+// Fold one source straight into the shared structures. The old code collected
+// every source's domains into arrays first and merged afterwards, so peak memory
+// held the arrays AND the Set AND both Maps at once.
+function ingestSource(text, source) {
+  let count = 0;
+  const lines = text.split('\n');
+
+  for (const line of lines) {
+    const domain = parseBlocklistLine(line, source.format);
+    if (!domain) continue;
+    count++;
+
+    blocklist.add(domain);
+
+    const existing = domainSourceMap.get(domain);
+    if (existing) {
+      if (!existing.includes(source.name)) existing.push(source.name);
+    } else {
+      domainSourceMap.set(domain, [source.name]);
+    }
+
+    const domainPart = domain.split('/')[0];
+    if (domainPart !== domain) {
+      const existingDomainOnly = domainOnlyMap.get(domainPart);
+      if (existingDomainOnly) {
+        if (!existingDomainOnly.includes(source.name)) existingDomainOnly.push(source.name);
+      } else {
+        domainOnlyMap.set(domainPart, [source.name]);
+      }
+    }
+  }
+
+  return count;
+}
+
+async function downloadBlocklistSource(source) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000);
+
+  try {
+    const response = await fetch(source.url, {
+      method: 'GET',
+      signal: controller.signal,
+      mode: 'cors',
+      cache: 'no-store',
+      credentials: 'omit'
+    });
+
+    if (!response.ok) {
+      console.error(`[Blocklist] ${source.name} failed: HTTP ${response.status}`);
+      return 0;
+    }
+
+    const text = await response.text();
+    console.log(`[Blocklist] ${source.name}: ${text.length} bytes downloaded`);
+    return ingestSource(text, source);
+  } catch (error) {
+    console.error(`[Blocklist] ${source.name} error:`, error.message);
+    return 0;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+function postBlocklistProgress(detail) {
+  self.postMessage({ action: 'blocklistProgress', data: detail });
+}
+
+async function loadBlocklistsFromCache() {
+  try {
+    const cached = await readBlocklistCache();
+    if (!cached || !isSameDayUtc(Date.now(), cached.lastUpdate)) return false;
+
+    blocklist = new Set(cached.domains || []);
+    domainSourceMap = new Map(cached.domainSourceMap || []);
+    domainOnlyMap = new Map(cached.domainOnlyMap || []);
+    blocklistLastUpdate = cached.lastUpdate;
+    console.log(`[Blocklist] Loaded ${blocklist.size} domains from cache`);
+    return true;
+  } catch (error) {
+    console.error('[Blocklist] Cache read failed:', error);
+    return false;
+  }
+}
+
+async function updateBlocklistDatabase() {
+  console.log(`[Blocklist] Starting update from ${BLOCKLIST_SOURCES.length} sources...`);
+  postBlocklistProgress({ current: 0, total: BLOCKLIST_SOURCES.length, status: 'starting' });
+
+  blocklist.clear();
+  domainSourceMap.clear();
+  domainOnlyMap.clear();
+
+  let totalEntries = 0;
+  for (let i = 0; i < BLOCKLIST_SOURCES.length; i++) {
+    const source = BLOCKLIST_SOURCES[i];
+    postBlocklistProgress({
+      current: i + 1,
+      total: BLOCKLIST_SOURCES.length,
+      sourceName: source.name,
+      status: 'downloading'
+    });
+    totalEntries += await downloadBlocklistSource(source);
+  }
+
+  blocklistLastUpdate = Date.now();
+  console.log(`[Blocklist] Database updated: ${blocklist.size} unique domains from ${totalEntries} total entries`);
+
+  try {
+    await writeBlocklistCache({
+      domains: Array.from(blocklist),
+      domainSourceMap: Array.from(domainSourceMap.entries()),
+      domainOnlyMap: Array.from(domainOnlyMap.entries()),
+      lastUpdate: blocklistLastUpdate
+    });
+  } catch (error) {
+    // A cache failure costs a re-download tomorrow, nothing more
+    console.error('[Blocklist] Cache write failed:', error);
+  }
+
+  return totalEntries;
+}
+
+// Entry point for the main thread. Resolves to counts only - the structures
+// themselves never cross the boundary again.
+async function ensureBlocklistReady(force = false) {
+  if (blocklistLoading) {
+    while (blocklistLoading) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return { domainCount: blocklist.size, totalEntries: 0, fromCache: true };
+  }
+
+  blocklistLoading = true;
+  let totalEntries = 0;
+  let fromCache = false;
+
+  try {
+    if (!force && blocklist.size > 0 && isSameDayUtc(Date.now(), blocklistLastUpdate)) {
+      fromCache = true;
+    } else if (!force && await loadBlocklistsFromCache()) {
+      fromCache = true;
+    } else {
+      totalEntries = await updateBlocklistDatabase();
+    }
+    return { domainCount: blocklist.size, totalEntries, fromCache };
+  } finally {
+    blocklistLoading = false;
+    // Always announced, so the status bar is never left holding a progress
+    // message that nothing comes back to clear.
+    self.postMessage({
+      action: 'blocklistComplete',
+      data: {
+        domains: blocklist.size,
+        totalEntries,
+        sources: fromCache ? 0 : BLOCKLIST_SOURCES.length,
+        success: blocklist.size > 0
+      }
+    });
+  }
+}
 
 /**
  * Check URL using Google Safe Browsing API
@@ -581,76 +784,100 @@ async function checkYandexSafeBrowsing(url) {
  * Always runs on every bookmark
  * WARNING: For personal use only. May violate VirusTotal ToS if distributed.
  */
-async function checkURLVoidScraping(url) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname.toLowerCase();
-    const urlvoidUrl = `https://www.urlvoid.com/scan/${encodeURIComponent(hostname)}/`;
+/* [ZeroLabs] 2026-08-28 - rewritten: through the val, not public CORS proxies */
+// The three public proxies this used have all rotted, verified across a night of
+// logs: corsproxy.io returns 403 to EVERY request without exception,
+// api.codetabs.com returns 522, and api.allorigins.win works intermittently but
+// hangs for 19-20 seconds before failing. Those hangs became the single largest
+// cost in a scan once link checking was fixed.
+//
+// The val fetches URLVoid server-side and counts detections there, so a ~36KB
+// page never crosses the wire - only the number does. Verified byte-identical to
+// what a browser gets: pastes.io 3, netfilm.app 5, google.com 0.
+//
+// URLVoid is per DOMAIN, not per URL, so requests are batched by hostname. A
+// full library of 2909 bookmarks is only ~600 distinct domains.
 
-    // Race all CORS proxies in parallel, use first successful response
-    const corsProxies = [
-      `https://corsproxy.io/?${encodeURIComponent(urlvoidUrl)}`,
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(urlvoidUrl)}`,
-      `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(urlvoidUrl)}`
-    ];
+const URLVOID_BATCH_SIZE = 10;    // the val's cap: sized to its 1 min execution ceiling
+const URLVOID_BATCH_WAIT_MS = 150;
 
-    // Create fetch promises for all proxies
-    const fetchPromises = corsProxies.map(async (proxiedUrl) => {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000);
-      const proxyName = proxiedUrl.split('?')[0].split('/').slice(2, 3).join('');
+const urlvoidBatch = { pending: [], timer: null };
 
-      try {
-        const response = await fetch(proxiedUrl, { signal: controller.signal });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
-        }
-
-        const html = await response.text();
-        return { html, proxyName };
-      } catch (error) {
-        clearTimeout(timeout);
-        throw error;
-      }
-    });
-
-    // Use Promise.any() - resolves with first success, rejects only if ALL fail
-    let result;
-    try {
-      result = await Promise.any(fetchPromises);
-    } catch (aggregateError) {
-      console.log(`[URLVoid Scraping] All proxies failed for ${hostname}`);
-      return 'unknown';
-    }
-
-    const detectedPattern = /detected/gi;
-    const detectedMatches = result.html.match(detectedPattern) || [];
-    const detectedCount = detectedMatches.length;
-
-    const countColor = detectedCount === 0 ? 'color: #4dabf7' : 'color: #ff6b6b';
-    console.log(`[URLVoid Scraping] ${hostname} - Detected: %c${detectedCount}%c (via ${result.proxyName})`, countColor, 'color: inherit');
-
-    if (detectedCount >= 2) {
-      return 'unsafe'; // 2 or more scanners detected malicious
-    } else if (detectedCount === 1) {
-      return 'warning'; // 1 scanner detected suspicious
-    } else {
-      return 'safe'; // No detections
-    }
-
-  } catch (error) {
-    console.log(`[URLVoid Scraping] Error:`, error.message);
-    return 'unknown';
+function flushUrlvoidBatch() {
+  if (urlvoidBatch.timer) {
+    clearTimeout(urlvoidBatch.timer);
+    urlvoidBatch.timer = null;
   }
+  if (urlvoidBatch.pending.length === 0) return;
+
+  const batch = urlvoidBatch.pending.splice(0, URLVOID_BATCH_SIZE);
+
+  (async () => {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 45000);
+
+      const res = await fetch(`${LINK_VAL_URL}/urlvoid?key=${encodeURIComponent(LINK_VAL_TOKEN)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domains: batch.map(b => b.domain) }),
+        signal: controller.signal,
+      });
+      clearTimeout(timer);
+
+      if (!res.ok) throw new Error(`val HTTP ${res.status}`);
+
+      const body = await res.json();
+      const results = Array.isArray(body.results) ? body.results : [];
+      batch.forEach((item, i) => item.resolve(results[i] || { count: null, error: 'no-result' }));
+    } catch (err) {
+      console.warn('[URLVoid] Batch failed:', err.message);
+      // Resolve rather than reject: a failed batch means URLVoid said nothing,
+      // which must abstain rather than vote either way.
+      batch.forEach(item => item.resolve({ count: null, error: 'val-unreachable' }));
+    }
+
+    if (urlvoidBatch.pending.length > 0) flushUrlvoidBatch();
+  })();
 }
 
-/**
- * Check URL using VirusTotal API
- * Requires API key - get free key at https://www.virustotal.com/gui/my-apikey
- * Free tier: 500 requests per day, 4 requests per minute
- */
+function urlvoidLookup(domain) {
+  return new Promise((resolve) => {
+    urlvoidBatch.pending.push({ domain, resolve });
+    if (urlvoidBatch.pending.length >= URLVOID_BATCH_SIZE) {
+      flushUrlvoidBatch();
+    } else if (!urlvoidBatch.timer) {
+      urlvoidBatch.timer = setTimeout(flushUrlvoidBatch, URLVOID_BATCH_WAIT_MS);
+    }
+  });
+}
+
+async function checkURLVoidScraping(url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname.toLowerCase();
+  } catch (e) {
+    return 'unknown';
+  }
+
+  const result = await urlvoidLookup(hostname);
+
+  // A count of null means URLVoid contributed nothing - it has never scanned the
+  // domain ('no-report'), or we could not reach it. ABSTAIN. Reporting 'safe'
+  // here is the bug this replaced: an unscanned domain returns a "Report Not
+  // Found" page containing no "detected" either, so the old code counted zero
+  // and called it clean when in truth nobody had looked.
+  if (typeof result.count !== 'number') {
+    console.log(`[URLVoid] ${hostname}: no verdict (${result.error || 'unknown'})`);
+    return 'unknown';
+  }
+
+  console.log(`[URLVoid] ${hostname} - Detected: ${result.count}`);
+
+  if (result.count >= 2) return 'unsafe';   // 2+ engines flagged it
+  if (result.count === 1) return 'warning'; // a single engine flagged it
+  return 'safe';                            // genuinely checked, nothing found
+}
 async function checkVirusTotal(url) {
   try {
     const apiKey = apiKeys.virusTotalApiKey;
@@ -895,18 +1122,12 @@ self.addEventListener('message', async (e) => {
       // Reset rate limiting flags
       virusTotalRateLimited = false;
 
-      // Initialize with API keys and blocklist data
+      /* [ZeroLabs] 2026-08-28 - edited: no blocklist arrays cross this boundary */
+      // init used to carry blocklist, domainSourceMap and domainOnlyMap as
+      // arrays - millions of entries structured-cloned on every worker start.
+      // The worker builds them itself now; only the small config comes in here.
       if (data.apiKeys) {
         apiKeys = data.apiKeys;
-      }
-      if (data.blocklist) {
-        blocklist = new Set(data.blocklist);
-      }
-      if (data.domainSourceMap) {
-        domainSourceMap = new Map(data.domainSourceMap);
-      }
-      if (data.domainOnlyMap) {
-        domainOnlyMap = new Map(data.domainOnlyMap);
       }
       if (data.trustedDomains) {
         trustedDomains = data.trustedDomains;
@@ -919,6 +1140,30 @@ self.addEventListener('message', async (e) => {
         action: 'initComplete',
         data: { success: true }
       });
+      break;
+
+    /* [ZeroLabs] 2026-08-28 - added: fetch/parse/cache happen in here now */
+    // Answers with counts only. requestId lets the main thread match the reply,
+    // since it awaits this before starting a scan.
+    case 'loadBlocklists':
+      try {
+        const result = await ensureBlocklistReady(data && data.force);
+        self.postMessage({
+          action: 'blocklistReady',
+          data: { requestId: data && data.requestId, ...result }
+        });
+      } catch (error) {
+        console.error('[Blocklist] Load failed:', error);
+        self.postMessage({
+          action: 'blocklistReady',
+          data: {
+            requestId: data && data.requestId,
+            domainCount: blocklist.size,
+            totalEntries: 0,
+            error: error.message
+          }
+        });
+      }
       break;
 
     case 'resetRateLimit':

@@ -1,448 +1,75 @@
 /**
  * Blocklist Service
- * Web-compatible version of the background script's blocklist functionality
- * Downloads and maintains malware/phishing blocklists from public sources
+ *
+ * [ZeroLabs] 2026-08-28 - rewritten: a controller, not a parser
+ *
+ * This used to download ~97 MB across ten sources, split it into a 2.6M-element
+ * array, run a 3.1M-iteration loop building a Set and two Maps, then Array.from()
+ * all three and structured-clone them into the scanner worker - every bit of it
+ * on the thread that draws the UI. Enabling safety checking froze the tab for
+ * seconds, and the same freeze hit again on the first scan of any later session
+ * when loadCachedBlocklist() rebuilt the Set from IndexedDB.
+ *
+ * None of that work needed to be here: nothing on the main thread ever read the
+ * blocklist. workers/scanner-worker.js was the only consumer, so it now fetches,
+ * parses and caches for itself. This file is what remains - the safety-checking
+ * gate, a request/response wrapper around the worker, and re-emission of the
+ * worker's progress as the window events the status bar already listens for.
+ *
+ * The parsed data now exists once instead of twice, which also halves peak memory.
  */
-
-import dbManager from '../storage/indexeddb.js';
 
 class BlocklistService {
   constructor() {
-    this.maliciousUrlsSet = new Set();
-    this.domainSourceMap = new Map();
-    this.domainOnlyMap = new Map();
-    this.blocklistLastUpdate = 0;
-    this.blocklistLoading = false;
-
-    // Blocklist sources - free, CORS-enabled endpoints
-    this.BLOCKLIST_SOURCES = [
-      {
-        name: 'URLhaus (Active)',
-        url: 'https://raw.githubusercontent.com/AbsoluteXYZero/urlhaus-list/main/urlhaus-active.txt',
-        format: 'urlhaus_text'
-      },
-      {
-        name: 'URLhaus (Historical)',
-        url: 'https://curbengh.github.io/malware-filter/urlhaus-filter.txt',
-        format: 'domains'
-      },
-      {
-        name: 'BlockList Project (Malware)',
-        url: 'https://blocklistproject.github.io/Lists/malware.txt',
-        format: 'hosts'
-      },
-      {
-        name: 'BlockList Project (Phishing)',
-        url: 'https://blocklistproject.github.io/Lists/phishing.txt',
-        format: 'hosts'
-      },
-      {
-        name: 'BlockList Project (Scam)',
-        url: 'https://blocklistproject.github.io/Lists/scam.txt',
-        format: 'hosts'
-      },
-      {
-        /* [ZeroLabs] 2026-08-18 12:32 AM - edited: jsdelivr 403, repo restructured (see also: Bookmark-Manager-Zero-Chrome/background.js) */
-        // Was cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/domains/tif.txt.
-        // Two unrelated breakages: jsDelivr now 403s every path in this repo
-        // ("Package size exceeded the configured limit of 150 MB"), and the repo
-        // dropped domains/ in favour of wildcard/, renaming plain domain lists
-        // to *-onlydomains.txt. GitHub raw sends Access-Control-Allow-Origin: *.
-        // medium tier rather than full TIF: 7 MB vs 36.6 MB / 2.06M entries.
-        name: 'HaGeZi TIF',
-        url: 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/tif.medium-onlydomains.txt',
-        format: 'domains'
-      },
-      {
-        name: 'Phishing-Filter',
-        url: 'https://malware-filter.gitlab.io/malware-filter/phishing-filter-hosts.txt',
-        format: 'hosts'
-      },
-      {
-        name: 'OISD Big',
-        url: 'https://raw.githubusercontent.com/sjhgvr/oisd/refs/heads/main/domainswild2_big.txt',
-        format: 'domains'
-      },
-      {
-        name: 'FMHY Filterlist',
-        // FMHY unsafe sites list - fake activators, malware distributors, unsafe piracy sites
-        url: 'https://raw.githubusercontent.com/fmhy/FMHYFilterlist/main/filterlist-basic-domains.txt',
-        format: 'domains'
-      },
-      {
-        name: 'Dandelion Sprout Anti-Malware',
-        // Curated anti-malware list - scams, phishing, malware domains
-        url: 'https://raw.githubusercontent.com/DandelionSprout/adfilt/master/Alternate%20versions%20Anti-Malware%20List/AntiMalwareHosts.txt',
-        format: 'hosts'
-      }
-    ];
-
-    // Trusted domains that bypass blocklist checks
+    // Kept here because scanner.js forwards it to the worker on init. Small,
+    // and it belongs with the rest of the blocklist configuration.
     this.TRUSTED_DOMAINS = [
       'archive.org', 'github.io', 'githubusercontent.com', 'github.com',
       'gitlab.com', 'gitlab.io', 'docs.google.com', 'sites.google.com', 'drive.google.com'
     ];
+
+    this.worker = null;
+    this.domainCount = 0;
+
+    // Outstanding loadBlocklists calls, keyed by request id
+    this._pending = new Map();
+    this._nextRequestId = 1;
   }
 
-  /**
-   * Helper to check if two timestamps are on the same calendar day.
-   */
-  isSameDay(timestamp1, timestamp2) {
-    if (!timestamp1 || !timestamp2 || timestamp1 === 0 || timestamp2 === 0) return false;
-    const d1 = new Date(timestamp1);
-    const d2 = new Date(timestamp2);
-    return d1.getFullYear() === d2.getFullYear() &&
-           d1.getMonth() === d2.getMonth() &&
-           d1.getDate() === d2.getDate();
+  /* Injected by scannerService when it creates the worker. */
+  attachWorker(worker) {
+    this.worker = worker;
   }
 
-  async init() {
-    // Skip if already initialized
-    if (this._lazyInitialized) return;
-    this._lazyInitialized = true;
-    
-    try {
-      // Load last update time from storage
-      const metadata = await dbManager.get('metadata', 'blocklistLastUpdate');
-      if (metadata) {
-        this.blocklistLastUpdate = metadata.value;
-      }
-
-      // Load cached blocklist data from IndexedDB
-      await this.loadCachedBlocklist();
-
-      console.log('[Blocklist] Service initialized with', this.maliciousUrlsSet.size, 'cached domains');
-    } catch (error) {
-      console.error('[Blocklist] Failed to initialize:', error);
+  /* Routed here by scanner.js's message dispatcher. */
+  handleWorkerMessage(action, data) {
+    if (action === 'blocklistProgress') {
+      window.dispatchEvent(new CustomEvent('blocklist:progress', { detail: data }));
+      return;
     }
-  }
 
-  /**
-    * Load cached blocklist from IndexedDB
-    */
-   async loadCachedBlocklist() {
-     try {
-       // Check if we have cached blocklist data
-       const cachedData = await dbManager.get('blocklists', 'compiled');
-       if (!cachedData) {
-         console.log('[Blocklist] No cached data found');
-         return false;
-       }
+    if (action === 'blocklistComplete') {
+      this.domainCount = data.domains || 0;
+      window.dispatchEvent(new CustomEvent('blocklist:complete', { detail: data }));
+      return;
+    }
 
-       // Check if cache is from the same calendar day
-       const now = Date.now();
-       if (!this.isSameDay(now, this.blocklistLastUpdate)) {
-         console.log('[Blocklist] Cached data is from a different day, will update');
-         return false;
-       }
-
-       // Load from cache
-       this.maliciousUrlsSet = new Set(cachedData.domains || []);
-       this.domainSourceMap = new Map(cachedData.domainSourceMap || []);
-       this.domainOnlyMap = new Map(cachedData.domainOnlyMap || []);
-       return true;
-     } catch (error) {
-       console.error('[Blocklist] Failed to load cached blocklist:', error);
-       return false;
-     }
-   }
-
-  /**
-   * Save compiled blocklist to IndexedDB for faster loading
-   */
-  async saveCachedBlocklist() {
-    try {
-      console.log('[Blocklist] Saving to cache...');
-      await dbManager.put('blocklists', {
-        source: 'compiled',
-        domains: Array.from(this.maliciousUrlsSet),
-        domainSourceMap: Array.from(this.domainSourceMap.entries()),
-        domainOnlyMap: Array.from(this.domainOnlyMap.entries()),
-        lastUpdate: this.blocklistLastUpdate
-      });
-      console.log('[Blocklist] Cache saved successfully');
-    } catch (error) {
-      console.error('[Blocklist] Failed to save cache:', error);
+    if (action === 'blocklistReady') {
+      this.domainCount = data.domainCount || 0;
+      const pending = this._pending.get(data.requestId);
+      if (pending) {
+        this._pending.delete(data.requestId);
+        clearTimeout(pending.timer);
+        pending.resolve({ ready: true, domainCount: this.domainCount });
+      }
     }
   }
 
-  parseBlocklistLine(line, format) {
-    const trimmed = line.trim();
-
-    if (!trimmed || trimmed.startsWith('#') || trimmed.startsWith('!')) {
-      return null;
-    }
-
-    let domain = null;
-
-    if (format === 'hosts') {
-      const parts = trimmed.split(/\s+/);
-      if (parts.length >= 2) {
-        domain = parts[1];
-      }
-    } else if (format === 'urlhaus_text') {
-      if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        try {
-          const urlObj = new URL(trimmed);
-          domain = urlObj.hostname.toLowerCase();
-        } catch {
-          return null;
-        }
-      } else {
-        return null;
-      }
-    } else {
-      domain = trimmed;
-    }
-
-    if (!domain) return null;
-
-    const normalized = domain.toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/\/$/, '')
-      .replace(/^\*\./, '');
-
-    if (normalized === 'localhost' || normalized.startsWith('127.') || normalized.startsWith('0.0.0.0')) {
-      return null;
-    }
-
-    return normalized;
-  }
-
-  async downloadBlocklistSource(source) {
-    try {
-      console.log(`[Blocklist] Downloading ${source.name}...`);
-
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
-
-      // If source has proxies array, race them
-      if (source.proxies) {
-        console.log(`[Blocklist] Racing ${source.proxies.length} proxies for ${source.name}...`);
-        
-        clearTimeout(timeoutId);
-        
-        const fetchPromises = source.proxies.slice(0, 6).map(async (url) => {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 15000);
-          try {
-            const res = await fetch(url, { signal: controller.signal, mode: 'cors', cache: 'no-store' });
-            clearTimeout(timeout);
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return { url, text: await res.text() };
-          } catch (e) {
-            clearTimeout(timeout);
-            return { url, text: null, error: e };
-          }
-        });
-        
-        let text;
-        let winnerUrl = '';
-        
-        try {
-          const result = await Promise.any(fetchPromises);
-          if (result.text) {
-            winnerUrl = result.url;
-            text = result.text;
-          } else {
-            throw new Error('No text');
-          }
-        } catch (e) {
-          // All proxies failed - try fallback URL
-          if (source.fallbackUrl) {
-            console.log(`[Blocklist] All proxies failed, trying fallback...`);
-            try {
-              const controller = new AbortController();
-              const timeout = setTimeout(() => controller.abort(), 30000);
-              const res = await fetch(source.fallbackUrl, { signal: controller.signal, cache: 'no-store' });
-              clearTimeout(timeout);
-              if (res.ok) {
-                winnerUrl = source.fallbackUrl;
-                text = await res.text();
-              }
-            } catch {}
-          }
-          if (!text) {
-            console.error(`[Blocklist] All proxies failed for ${source.name}!`);
-            return { domains: [], count: 0 };
-          }
-        }
-        
-        console.log(`[Blocklist] ${source.name}: ${text.length} bytes (winner: ${winnerUrl})`);
-        
-        // Check if response is JSON-wrapped
-        if (source.proxies) {
-          try {
-            const jsonData = JSON.parse(text);
-            if (jsonData.contents) text = jsonData.contents;
-            else if (jsonData.contents) text = jsonData.contents;
-          } catch {}
-        }
-        
-        // Determine format - use fallbackFormat if using fallback URL
-        const parseFormat = (winnerUrl === source.fallbackUrl && source.fallbackFormat) 
-          ? source.fallbackFormat 
-          : source.format;
-        const lines = text.split('\n');
-        const domains = [];
-        for (const line of lines) {
-          const normalized = this.parseBlocklistLine(line, source.format);
-          if (normalized) domains.push(normalized);
-        }
-        console.log(`[Blocklist] ${source.name}: ${domains.length} domains loaded (via proxy)`);
-        return { domains, count: domains.length };
-      }
-      
-      // Original single URL logic
-      const response = await fetch(source.url, {
-        method: 'GET',
-        signal: controller.signal,
-        mode: 'cors',
-        cache: 'no-store',
-        credentials: 'omit'
-      });
-
-      clearTimeout(timeoutId);
-
-      if (!response.ok) {
-        console.error(`[Blocklist] ${source.name} failed: HTTP ${response.status}`);
-        return { domains: [], count: 0 };
-      }
-
-      let text = await response.text();
-      console.log(`[Blocklist] ${source.name}: ${text.length} bytes downloaded`);
-
-      // Check if response is JSON-wrapped (some proxies do this)
-      try {
-        const jsonData = JSON.parse(text);
-        if (jsonData.contents) {
-          text = jsonData.contents;
-        } else if (jsonData.data) {
-          text = jsonData.data;
-        }
-      } catch (e) {
-        // Not JSON, use text as-is
-      }
-
-      const lines = text.split('\n');
-      const domains = [];
-
-      for (const line of lines) {
-        const normalized = this.parseBlocklistLine(line, source.format);
-        if (normalized) {
-          domains.push(normalized);
-        }
-      }
-
-      console.log(`[Blocklist] ${source.name}: ${domains.length} domains loaded`);
-      return { domains, count: domains.length };
-
-    } catch (error) {
-      console.error(`[Blocklist] ${source.name} error:`, error.message);
-      return { domains: [], count: 0 };
-    }
-  }
-
-  async updateBlocklistDatabase() {
-    if (this.blocklistLoading) {
-      console.log(`[Blocklist] Already loading, skipping duplicate request`);
-      return true;
-    }
-
-    this.blocklistLoading = true;
-    let success = false;
-    let totalCount = 0;
-
-    try {
-      console.log(`[Blocklist] Starting update from ${this.BLOCKLIST_SOURCES.length} sources...`);
-
-      // Emit progress event
-      window.dispatchEvent(new CustomEvent('blocklist:progress', {
-        detail: { current: 0, total: this.BLOCKLIST_SOURCES.length, status: 'starting' }
-      }));
-
-      this.maliciousUrlsSet.clear();
-      this.domainSourceMap.clear();
-      this.domainOnlyMap.clear();
-
-      const results = [];
-      for (let i = 0; i < this.BLOCKLIST_SOURCES.length; i++) {
-        const source = this.BLOCKLIST_SOURCES[i];
-
-        window.dispatchEvent(new CustomEvent('blocklist:progress', {
-          detail: { current: i + 1, total: this.BLOCKLIST_SOURCES.length, sourceName: source.name, status: 'downloading' }
-        }));
-
-        const result = await this.downloadBlocklistSource(source);
-        results.push(result);
-      }
-
-      totalCount = 0;
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i];
-        const sourceName = this.BLOCKLIST_SOURCES[i].name;
-
-        for (const domain of result.domains) {
-          this.maliciousUrlsSet.add(domain);
-
-          if (this.domainSourceMap.has(domain)) {
-            const sources = this.domainSourceMap.get(domain);
-            if (!sources.includes(sourceName)) {
-              sources.push(sourceName);
-            }
-          } else {
-            this.domainSourceMap.set(domain, [sourceName]);
-          }
-
-          const domainPart = domain.split('/')[0];
-          if (domainPart !== domain) {
-            if (this.domainOnlyMap.has(domainPart)) {
-              const sources = this.domainOnlyMap.get(domainPart);
-              if (!sources.includes(sourceName)) {
-                sources.push(sourceName);
-              }
-            } else {
-              this.domainOnlyMap.set(domainPart, [sourceName]);
-            }
-          }
-        }
-        totalCount += result.count;
-      }
-
-      this.blocklistLastUpdate = Date.now();
-
-      console.log(`[Blocklist] ✓ Database updated: ${this.maliciousUrlsSet.size} unique domains from ${totalCount} total entries`);
-
-      // Save to IndexedDB cache for next page load
-      await this.saveCachedBlocklist();
-      await dbManager.put('metadata', { key: 'blocklistLastUpdate', value: this.blocklistLastUpdate });
-
-      success = true;
-      return true;
-    } catch (error) {
-      console.error(`[Blocklist] Error updating database:`, error);
-      return false;
-    } finally {
-      // ALWAYS dispatch complete event to prevent UI from getting stuck
-      // Even on partial failures, the UI should reset to "Ready"
-      window.dispatchEvent(new CustomEvent('blocklist:complete', {
-        detail: {
-          domains: this.maliciousUrlsSet.size,
-          totalEntries: success ? totalCount : 0,
-          sources: this.BLOCKLIST_SOURCES.length,
-          success: success
-        }
-      }));
-
-      this.blocklistLoading = false;
-    }
-  }
-
-  /* [ZeroLabs] 2026-08-28 - added: the blocklists are safety checking's data */
-  // Read straight from localStorage rather than importing the sidebar's module
-  // state: this service is loaded by the scanner too, and it must not depend on
-  // the UI having initialised. Absent means on, matching loadCheckingSettings,
-  // so a read that comes back empty never silently disables the feature.
+  /* [ZeroLabs] 2026-08-28 - the blocklists are safety checking's data */
+  // Stays on the MAIN THREAD deliberately: workers have no localStorage, so this
+  // check cannot move into the worker with the rest of the pipeline. Absent means
+  // on, matching loadCheckingSettings, so a read that comes back empty never
+  // silently disables the feature.
   isSafetyCheckingEnabled() {
     try {
       return localStorage.getItem('safetyCheckingEnabled') !== 'false';
@@ -451,103 +78,57 @@ class BlocklistService {
     }
   }
 
-  async ensureBlocklistReady() {
-    /* [ZeroLabs] 2026-08-28 - added: nothing to make ready when safety is off */
-    // Callers await this and then read domainCount, so it answers rather than
-    // skipping silently. The complete event goes out too, so the status bar is
-    // never left holding a progress message that nothing comes back to clear.
+  /**
+   * Ask the worker to make the blocklist usable, and wait until it is.
+   * Resolves to counts only - the data itself never leaves the worker.
+   */
+  async ensureBlocklistReady({ force = false, timeoutMs = 180000 } = {}) {
+    // Nothing to make ready when the feature is off. Answered rather than
+    // skipped silently, because callers await this and then read domainCount,
+    // and the complete event keeps the status bar from holding a stale message.
     if (!this.isSafetyCheckingEnabled()) {
       console.log('[Blocklist] Safety checking is off. Skipping the download.');
       window.dispatchEvent(new CustomEvent('blocklist:complete', {
-        detail: {
-          domains: this.maliciousUrlsSet.size,
-          totalEntries: this.maliciousUrlsSet.size,
-          sources: 0
-        }
+        detail: { domains: this.domainCount, totalEntries: this.domainCount, sources: 0 }
       }));
-      return { ready: true, domainCount: this.maliciousUrlsSet.size, skipped: true };
+      return { ready: true, domainCount: this.domainCount, skipped: true };
     }
 
-    const now = Date.now();
-    const isDifferentDay = !this.isSameDay(now, this.blocklistLastUpdate);
-    const isEmpty = this.maliciousUrlsSet.size === 0;
+    /* [ZeroLabs] 2026-08-28 - added: bring the worker up if nobody has yet */
+    // Not every caller goes through the scanner first. rescanFolder calls this
+    // directly, so on a fresh page load where no scan had run yet there was no
+    // worker attached and the rescan silently did nothing - "Blocklist ready with
+    // 0 domains", then it reported itself complete without scanning anything.
+    //
+    // Reached through window rather than an import because scanner.js already
+    // imports this module and the reverse would be circular. scannerService.init()
+    // is idempotent, so calling it here costs nothing when it is already up.
+    if (!this.worker && typeof window !== 'undefined' && window.scannerService) {
+      await window.scannerService.init();
+    }
 
-    console.log('[Blocklist] ensureBlocklistReady check:', {
-      lastUpdate: new Date(this.blocklistLastUpdate).toISOString(),
-      isDifferentDay,
-      isEmpty,
-      currentSize: this.maliciousUrlsSet.size
+    if (!this.worker) {
+      console.warn('[Blocklist] No worker attached; cannot load blocklists.');
+      return { ready: false, domainCount: this.domainCount };
+    }
+
+    const requestId = this._nextRequestId++;
+
+    return new Promise((resolve) => {
+      // A dead or wedged worker must not hang every caller forever. The window is
+      // generous because a cold load genuinely fetches ~97 MB over ten sources.
+      const timer = setTimeout(() => {
+        this._pending.delete(requestId);
+        console.warn('[Blocklist] Worker did not answer in time.');
+        window.dispatchEvent(new CustomEvent('blocklist:complete', {
+          detail: { domains: this.domainCount, totalEntries: 0, sources: 0, success: false }
+        }));
+        resolve({ ready: false, domainCount: this.domainCount, timedOut: true });
+      }, timeoutMs);
+
+      this._pending.set(requestId, { resolve, timer });
+      this.worker.postMessage({ action: 'loadBlocklists', data: { requestId, force } });
     });
-
-    if (isDifferentDay || isEmpty) {
-      console.log('[Blocklist] Need update - isDifferentDay:', isDifferentDay, 'isEmpty:', isEmpty);
-      await this.updateBlocklistDatabase();
-    } else {
-      console.log('[Blocklist] Using cached data from today');
-      // Dispatch complete event so UI updates properly even when using cache
-      window.dispatchEvent(new CustomEvent('blocklist:complete', {
-        detail: {
-          domains: this.maliciousUrlsSet.size,
-          totalEntries: this.maliciousUrlsSet.size,
-          sources: this.BLOCKLIST_SOURCES.length
-        }
-      }));
-    }
-
-    if (this.blocklistLoading) {
-      await new Promise(resolve => {
-        const checkInterval = setInterval(() => {
-          if (!this.blocklistLoading) {
-            clearInterval(checkInterval);
-            resolve();
-          }
-        }, 500);
-      });
-    }
-
-    return { ready: true, domainCount: this.maliciousUrlsSet.size };
-  }
-
-  isTrustedDomain(hostname) {
-    if (!hostname) return false;
-    const lowerHost = hostname.toLowerCase();
-
-    for (const trustedDomain of this.TRUSTED_DOMAINS) {
-      if (lowerHost === trustedDomain || lowerHost.endsWith('.' + trustedDomain)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  checkAgainstBlocklist(url) {
-    const normalizedUrl = url.toLowerCase()
-      .replace(/^https?:\/\//, '')
-      .replace(/\/$/, '');
-
-    const domain = normalizedUrl.split('/')[0];
-    const hostname = domain.split(':')[0];
-
-    if (this.isTrustedDomain(hostname)) {
-      return { blocked: false, sources: [] };
-    }
-
-    if (this.maliciousUrlsSet.has(normalizedUrl)) {
-      const sources = this.domainSourceMap.get(normalizedUrl) || [];
-      return { blocked: true, sources };
-    }
-
-    if (this.maliciousUrlsSet.has(domain)) {
-      const sources = this.domainSourceMap.get(domain) || [];
-      return { blocked: true, sources };
-    }
-
-    if (this.domainOnlyMap.has(domain)) {
-      const sources = this.domainOnlyMap.get(domain);
-      return { blocked: true, sources };
-    }
-
-    return { blocked: false, sources: [] };
   }
 }
 

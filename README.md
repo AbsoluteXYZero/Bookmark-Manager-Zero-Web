@@ -6,8 +6,8 @@
 
 **A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
-<!-- [ZeroLabs] 2026-08-19 7:12 PM - edited: bump badge to 2.0 -->
-![Version](https://img.shields.io/badge/version-2.1-blue)
+<!-- [ZeroLabs] 2026-08-28 - edited: renumbered to 5.3 to match the extensions -->
+![Version](https://img.shields.io/badge/version-5.3-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -77,9 +77,9 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 ### Link & Safety Checking
 
-- **Link Status Checking** - Automatically detects broken/dead links via HTTP HEAD requests
+- **Link Status Checking** - Detects dead links via DNS lookup plus a server-side status check, since a web page cannot read cross-origin responses itself
 -️ **Multi-Source Security Scanning** - 6-phase threat detection system with 10 free blocklists + URLVoid
-- **Background Scanning** - Web Worker processes scans without blocking UI
+- **Background Scanning** - A Web Worker owns scanning and the threat database, so neither blocks the page
 - **Safety Indicators** - Visual warnings for suspicious links with detailed tooltips
 - **Clickable Status Icons** - Click shield or chain icons for full status details popup
 - **HTTP Redirect Detection** - Detects when HTTP bookmarks redirect to HTTPS
@@ -247,7 +247,7 @@ If you're already using Local Mode and want to add GitLab sync:
 
 - **Search:** Type in the search bar to filter by title/URL
 - **Filter by Status:** Click the filter icon to show filters:
-  - **Link Status:** Live, Parked, Dead
+  - **Link Status:** Live, Parked, Dead, Could Not Verify
   - **Safety Status:** Safe, Suspicious, Unsafe, Trusted (whitelisted)
 - **Multiple Filters:** Select multiple filters simultaneously
   - Filters in the same category use OR logic (e.g., Live + Dead shows both)
@@ -327,8 +327,8 @@ The website can optionally use external services for enhanced features. **All ca
 
 - **WordPress mshots** - Website screenshot previews via `https://s0.wp.com/mshots/v1/`
 - **Google Favicons** - Website icons via `https://www.google.com/s2/favicons`
-- **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/` (uses CORS proxy, no API key required)
-- **10 Free Blocklist Sources** - Community-maintained threat databases (~1.36M domains):
+- **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/`, retrieved server-side and batched by domain (no API key required). A domain URLVoid has never examined returns *no verdict* rather than being recorded as clean.
+- **10 Free Blocklist Sources** - Community-maintained threat databases (~3.1M unique domains), downloaded, parsed and cached entirely inside the Web Worker:
   - URLhaus Active (abuse.ch) - ~107K actively distributing malware
   - URLhaus Historical (CDN mirror) - ~37K historical threats
   - BlockList Project Malware - ~300K malware domains
@@ -399,26 +399,56 @@ This section provides technical details on how the website determines link statu
 
 ### Link Status Checking
 
-The website checks if bookmark URLs are still accessible and categorizes them as **Live**, **Dead**, or **Parked**.
+The website categorizes bookmarks as **Live**, **Dead**, **Parked**, or **Could Not Verify**.
+
+#### Why this is harder on the web than in an extension
+
+A web page is not permitted to read the result of a request to another site. The
+browser will make the request, but unless that site explicitly opts in with CORS
+headers — and almost none do — the response comes back *opaque*: the status code
+is forced to `0` and the headers are unreadable. The browser extensions do not
+have this problem, because host permissions exempt them from that restriction.
+
+Earlier versions worked around this by treating "the request did not throw" as
+success, which meant **Live really meant "a server answered"** rather than "the
+page exists". A deleted page on a working domain showed as Live. Detection now
+uses two checks a web page *is* allowed to read.
 
 #### Detection Method
 
-1. **Initial Domain Check**: The URL's domain is first checked against a list of 22+ known domain parking services:
+1. **Parking check**: the hostname is matched against 22+ known domain parking
+   services (registrars such as HugeDomains and GoDaddy, marketplaces such as
+   Sedo, Dan.com and Afternic, and parking services such as Bodis and ParkingCrew).
 
-   - **Registrars**: HugeDomains, GoDaddy, Namecheap, NameSilo, Porkbun, Dynadot, Epik
-   - **Marketplaces**: Sedo, Dan.com, Afternic, DomainMarket, Squadhelp, BrandBucket, Undeveloped, Atom
-   - **Parking Services**: Bodis, ParkingCrew, Above.com, SedoParking
+2. **DNS lookup** via DNS-over-HTTPS. If the domain no longer exists (NXDOMAIN),
+   every bookmark under it is Dead — no path can be served by a host that isn't
+   there, so nothing further is checked. This runs once per *hostname* rather than
+   per bookmark, so one lookup settles every bookmark on that domain.
 
-2. **HTTP HEAD Request**: A lightweight HEAD request is sent (10-second timeout)
+3. **HTTP status**, retrieved server-side. Domains that resolve are checked by a
+   small hosted endpoint that performs the request and returns only the status
+   code. Requests are batched, and the page body is never transferred.
 
-   - No page content is downloaded
-   - Credentials are omitted for privacy
+4. **Interpretation**:
 
-3. **Response Interpretation**:
+   - **404 / 410 / 451** → Dead
+   - **Any other response** → Live (including 401/403/429 — the server is up and
+     declining to serve *us*, which is not a broken bookmark)
+   - **Redirect onto a parking service** → Parked
+   - **Domain resolves but the check was refused** → Could Not Verify
 
-   - **Successful response** → Live
-   - **Domain matches parking list** → Parked
-   - **Timeout/Network Error** → Dead
+#### Could Not Verify
+
+Some sites refuse automated requests from datacenter addresses. Those are shown
+with a yellow question mark rather than being guessed at in either direction:
+calling them Dead would be worse than useless, since it would invite deleting a
+working bookmark. They are not re-checked automatically, because nothing about
+them will change on its own. Links that failed for *our* side's reasons — DNS
+unreachable, the checker unavailable — stay grey and are retried normally.
+
+This is the one area where the browser extensions remain more capable: they read
+the true status code directly for every site, including those that refuse
+automated checks.
 
 #### Performance & Rate Limiting
 
@@ -430,10 +460,10 @@ The website checks if bookmark URLs are still accessible and categorizes them as
 
 **Smart Timeout Strategy:**
 
-- Link checks: 5s timeout (HEAD request), 5s timeout (GET fallback)
-- URLVoid checks: 5s timeout (down from 15s)
+- Link checks: 5s DNS timeout, then a batched server-side status request
+- URLVoid checks: batched by domain, 15s per domain server-side
 - VirusTotal checks: 8s timeout (down from 15s)
-- Timeout handling: Sites that timeout are marked as 'live' (slow server) instead of 'dead'
+- Timeout handling: a site that will not answer is marked 'could not verify', never 'dead'
 - No redundant GET fallback on timeout - saves up to 5s per slow site
 
 **Network Protection:**
@@ -482,7 +512,7 @@ URLs are checked against ten community-maintained blocklists with dual URLhaus c
 | **[FMHY Filterlist](https://github.com/fmhy/FMHYFilterlist)** | Unsafe Sites | Fake activators, malware distributors, unsafe download sites | ~282 |
 | **[Dandelion Sprout Anti-Malware](https://github.com/DandelionSprout/adfilt)** | Anti-Malware | Curated malware, scam, and phishing domains | ~5K |
 
-**Total Coverage**: **~1.36M unique malicious domains** after deduplication
+**Total Coverage**: **~3.1M unique malicious domains** after deduplication
 
 **Implementation Details:**
 
@@ -585,7 +615,7 @@ Multiple object stores for organized data:
 - **bookmarks** - Hierarchical bookmark tree structure
 - **metadata** - Sync status, snippet IDs, edit locks, version tracking
 - **cache** - Link/safety status with 7-day TTL
-- **blocklists** - 10 malware/phishing domain lists (~1.36M domains)
+- **blocklists** - 10 malware/phishing domain lists (~3.1M domains). Held in a database of its own, owned by the scanning Web Worker.
 - **apiKeys** - Encrypted API credentials for external services
 
 ### Security Implementation
@@ -690,7 +720,7 @@ Please report security vulnerabilities via GitLab Issues (mark as security issue
 
 - **Large Collections** - Tested with 2,000+ bookmarks
 - **Efficient Storage** - IndexedDB handles millions of cached entries
-- **Blocklist Performance** - 1.35M domain lookups via indexed hash tables
+- **Blocklist Performance** - 3.1M domain lookups via in-memory hash sets inside the Web Worker
 - **Memory Management** - Automatic garbage collection of expired cache entries
 
 ## Developer Information

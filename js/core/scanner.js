@@ -24,10 +24,55 @@ class ScannerService {
   /**
    * Initialize scanner service
    */
+  /* [ZeroLabs] 2026-08-28 - added: initialise once, not once per scan */
+  // Callers run this before every scan (two sites in sidebar-adapted.js), and it
+  // had no guard - so each folder expansion built a BRAND NEW worker with a
+  // cache-busted URL and threw the previous one away.
+  //
+  // That was merely wasteful while the main thread held the parsed blocklist and
+  // posted it in. Now that the worker owns the data, a fresh worker starts empty
+  // and rebuilds 3.1M domains from IndexedDB every time - about seven seconds
+  // before each scan could start. Holding one worker keeps the parsed blocklist,
+  // the API keys and the rate-limiter state alive for the whole session.
+  //
+  // The promise is stored rather than a boolean so two scans starting together
+  // await the same initialisation instead of racing to build two workers.
+  /* [ZeroLabs] 2026-08-28 - added: rebuild if the worker died under us */
+  // Holding one worker for the session means a worker that DIES takes scanning
+  // with it - nothing would recreate it and scans would quietly stop until the
+  // page was reloaded. A phone under memory pressure is exactly where a WebView
+  // kills a worker holding 3.1M domains.
+  //
+  // Checked here rather than reacting to an event, because a worker killed by
+  // the browser may never fire onerror at all. init() already runs before every
+  // scan, so verifying liveness here covers every entry point for free.
   async init() {
+    if (this._initPromise && this.worker && !this._workerDead) return this._initPromise;
+
+    if (this._initPromise) {
+      console.warn('[Scanner] Worker is gone; rebuilding.');
+      try { this.worker?.terminate(); } catch (e) { /* already dead */ }
+      this.worker = null;
+      this.workerInitialized = false;
+      this._workerDead = false;
+      // The blocklist lives in the worker, so a rebuild starts empty and reloads
+      // it from its own IndexedDB cache - no re-download unless the day rolled.
+      this.urlsBeingScanned.clear();
+    }
+
+    this._initPromise = this._doInit();
+    return this._initPromise;
+  }
+
+  async _doInit() {
     try {
       // Initialize Web Worker with cache busting
       this.worker = new Worker(`workers/scanner-worker.js?v=${Date.now()}`);
+
+      /* [ZeroLabs] 2026-08-28 - added: the service sends through this worker */
+      // Injected rather than imported the other way round, because scanner.js
+      // already imports blocklist-service and the reverse would be circular.
+      blocklistService.attachWorker(this.worker);
 
       // Set up message handler
       this.worker.onmessage = (e) => this.handleWorkerMessage(e);
@@ -35,6 +80,11 @@ class ScannerService {
       // Set up error handler
       this.worker.onerror = (error) => {
         console.error('Scanner worker error:', error);
+        /* [ZeroLabs] 2026-08-28 - added: flag it so the next init() rebuilds */
+        // Belt and braces with the liveness check in init(): when onerror DOES
+        // fire we know immediately, rather than waiting for the next scan to
+        // notice. When it does not fire, init() still catches it.
+        this._workerDead = true;
       };
 
       // Initialize worker with API keys and blocklist
@@ -44,6 +94,9 @@ class ScannerService {
       await this.restoreCachedStatuses();
     } catch (error) {
       console.error('Failed to initialize scanner worker:', error);
+      // Cleared so a later scan can retry rather than being stuck with a worker
+      // that never came up
+      this._initPromise = null;
       // Gracefully degrade - scanning just won't work
     }
   }
@@ -155,26 +208,22 @@ class ScannerService {
         virustotal: !!apiKeys.virusTotalApiKey
       });
 
-      // Ensure blocklist is loaded
-      await blocklistService.ensureBlocklistReady();
-
-      // Get blocklist data
-      const blocklistArray = Array.from(blocklistService.maliciousUrlsSet);
-      const domainSourceMapArray = Array.from(blocklistService.domainSourceMap.entries());
-      const domainOnlyMapArray = Array.from(blocklistService.domainOnlyMap.entries());
-      const trustedDomains = blocklistService.TRUSTED_DOMAINS;
-
-      // Send initialization data to worker
+      /* [ZeroLabs] 2026-08-28 - edited: config in, blocklist built in the worker */
+      // This used to Array.from() three structures totalling millions of entries
+      // and structured-clone them into the worker on every start - seconds of
+      // main-thread work, and the data then existed twice. The worker fetches and
+      // parses for itself now, so only the small config crosses here.
       this.worker.postMessage({
         action: 'init',
         data: {
           apiKeys,
-          blocklist: blocklistArray,
-          domainSourceMap: domainSourceMapArray,
-          domainOnlyMap: domainOnlyMapArray,
-          trustedDomains
+          trustedDomains: blocklistService.TRUSTED_DOMAINS
         }
       });
+
+      // Then let it build the blocklist, which is where the real work happens.
+      // Awaited so a scan never starts against an empty database.
+      await blocklistService.ensureBlocklistReady();
     } catch (error) {
       console.error('Failed to initialize worker with data:', error);
     }
@@ -231,6 +280,16 @@ class ScannerService {
         this.workerInitialized = true;
         /* [ZeroLabs] 2026-06-20 10:50 AM - added: apply saved concurrency/jitter to worker */
         this.applyNetworkSettings();
+        break;
+
+      /* [ZeroLabs] 2026-08-28 - added: blocklist traffic from the worker */
+      // The worker owns fetch/parse/cache now, so its progress has to reach the
+      // status bar. blocklistService re-emits these as the same window events
+      // the UI already listens for, so nothing downstream had to change.
+      case 'blocklistProgress':
+      case 'blocklistComplete':
+      case 'blocklistReady':
+        blocklistService.handleWorkerMessage(action, data);
         break;
 
       case 'linkResult':
@@ -309,8 +368,16 @@ class ScannerService {
    async handleScanComplete(data) {
      const { id, url, linkStatus, safetyStatus, safetySources } = data;
 
-     // Remove from tracking set
+     /* [ZeroLabs] 2026-08-28 - fixed: count it before yielding to the cache writes */
+     // The URL was dropped from urlsBeingScanned here but scannedCount was not
+     // incremented until after the two awaited IndexedDB writes below. Completion
+     // is decided by `scanQueue.length === 0 && urlsBeingScanned.size === 0`, so
+     // if the LAST bookmark was still awaiting its cache writes, processQueue saw
+     // both empty and announced the scan finished with a count that had not
+     // caught up - "2/3 bookmarks scanned" on a scan where all three completed.
+     // Counting alongside the removal keeps the two in step whatever the timing.
      this.urlsBeingScanned.delete(url);
+     this.scannedCount++;
 
      // Cache both results
      await this.cacheResult(url, linkStatus, 'link');
@@ -325,7 +392,6 @@ class ScannerService {
        });
      }
 
-     this.scannedCount++;
      this.updateProgress();
 
      // Emit progress event
