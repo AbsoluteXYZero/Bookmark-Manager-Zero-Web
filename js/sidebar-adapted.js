@@ -6124,14 +6124,18 @@ function showShareConflict(deferral) {
   const total = fromSnippet.length + fromDevice.length + overwrites.length;
   if (total > listed.length) listed.push(`and ${total - listed.length} more`);
 
+  /* [ZeroLabs] 2026-08-27 - edited: real line breaks, not runs of spaces */
+  // The panel renders this with textContent and the stylesheet now sets
+  // white-space: pre-line, so newlines survive. Spaces did not - HTML collapsed
+  // them and every line ran together.
   const already = addedHere.length
-    ? `Already added ${count(addedHere.length, 'bookmark', 'bookmarks')} to this device.  `
+    ? `Already added ${count(addedHere.length, 'bookmark', 'bookmarks')} to this device.\n\n`
     : '';
 
   setShareStatus(
     'error',
     'Sync changes to review',
-    already + 'Syncing would:  ' + lines.join('  '),
+    already + 'Syncing would:\n' + lines.map(l => '\u2022 ' + l).join('\n'),
     [
       { label: 'Approve', primary: true, onClick: () => approveShareSync(deferral) },
       {

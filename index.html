@@ -3128,6 +3128,11 @@
     .share-status-reason {
       color: var(--md-sys-color-on-surface-variant);
       word-break: break-word;
+      /* [ZeroLabs] 2026-08-27 - added: honour newlines in the reason */
+      /* setShareStatus writes this with textContent, so HTML collapses runs of
+         whitespace and the deferral's operation lines ran together into one
+         paragraph. pre-line keeps the breaks and still wraps normally. */
+      white-space: pre-line;
     }
     /* [ZeroLabs] 2026-08-19 6:01 PM - added: deletion list inside the share status */
     .share-status-details {
