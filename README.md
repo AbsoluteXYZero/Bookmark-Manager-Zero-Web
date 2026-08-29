@@ -6,8 +6,8 @@
 
 **A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
-<!-- [ZeroLabs] 2026-08-28 - edited: renumbered to 5.3 to match the extensions -->
-![Version](https://img.shields.io/badge/version-5.3-blue)
+<!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
+![Version](https://img.shields.io/badge/version-5.4-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 

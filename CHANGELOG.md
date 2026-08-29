@@ -1,6 +1,12 @@
 ## Changelog
 
-### v5.3 (Current) - Sync That Decides For Itself
+### v5.4 (Current)
+
+Version number only, raised to stay in step with the Chrome and Firefox extensions. No new features, changes or fixes in this release - everything described under v5.3 below is what you already have.
+
+---
+
+### v5.3 - Sync That Decides For Itself
 
 **Version numbering:** This release jumps from 2.1 to 5.3 to match the Chrome and Firefox extensions. Nothing was skipped - the web version had simply been counted separately since it began as a smaller thing, and it has now caught up to the extensions feature for feature: the same sync model, the same review-before-anything-is-removed rule, the same undo everywhere, the same checks on what you type. Carrying two numbering schemes for one product made the same release look like different software depending on where you opened it. From here all three move together, so "v5.3" means the same set of behaviour whether you are in the browser extension or on the web.
 
