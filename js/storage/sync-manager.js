@@ -150,8 +150,8 @@ class SyncManager {
       const after = this.collectSnippetEntries(info.newTree);
       const created = [];
       const deleted = [];
-      after.forEach((entry, url) => { if (!before.has(url)) created.push(url); });
-      before.forEach((entry, url) => { if (!after.has(url)) deleted.push(url); });
+      after.forEach((entry, key) => { if (!before.has(key)) created.push(entry.url); });
+      before.forEach((entry, key) => { if (!after.has(key)) deleted.push(entry.url); });
 
       if (created.length) await this.recordLocalBookmarkUrls('created', created);
       if (deleted.length) await this.recordLocalBookmarkUrls('deleted', deleted);
@@ -255,14 +255,49 @@ class SyncManager {
   // differently depending on which browser last wrote it, and the key is the one
   // thing that survives that. Comparing anything title-derived across clients
   // would report a difference forever and the two would push at each other.
+  /* [ZeroLabs] 2026-08-29 - added: a URL is an address, not an identity (mirrors background.js) */
+  // Keyed on the URL alone, two bookmarks pointing at the same place overwrote
+  // each other, so a library holding the same link twice reported one fewer item
+  // than it had. This instance never showed it because it already held both
+  // copies from an earlier wholesale load - a fresh one rebuilding from the
+  // snippet would create only one of the pair, and no later sync would heal it.
+  //
+  // The Nth copy of a URL is keyed "<url>\u0000#N". The FIRST copy keeps the bare
+  // URL, so anything appearing once has exactly the key it always had.
+  //
+  // Copies are numbered by sorted location, not by tree order, so two clients
+  // walking their trees differently still agree on which copy is which.
+  keyByUrlCopy(list) {
+    const SEP = '\u0000#';
+    const location = (e) => [e.rootKey].concat(e.segments || []).join('/') + '/' + (e.title || '');
+    const byUrl = new Map();
+    list.forEach(entry => {
+      if (!byUrl.has(entry.url)) byUrl.set(entry.url, []);
+      byUrl.get(entry.url).push(entry);
+    });
+
+    const keyed = new Map();
+    byUrl.forEach((group, url) => {
+      if (group.length === 1) {
+        keyed.set(url, group[0]);
+        return;
+      }
+      group.sort((a, b) => location(a).localeCompare(location(b)));
+      group.forEach((entry, i) => {
+        keyed.set(i === 0 ? url : `${url}${SEP}${i + 1}`, entry);
+      });
+    });
+    return keyed;
+  }
+
   collectSnippetEntries(snippetData) {
-    const entries = new Map();
-    if (!snippetData || !snippetData.roots) return entries;
+    const list = [];
+    if (!snippetData || !snippetData.roots) return new Map();
 
     const walk = (node, rootKey, segments) => {
       if (!node) return;
       if (node.url) {
-        entries.set(node.url, { url: node.url, title: node.title || node.url, rootKey, segments });
+        list.push({ url: node.url, title: node.title || node.url, rootKey, segments });
         return;
       }
       if (Array.isArray(node.children)) {
@@ -286,7 +321,7 @@ class SyncManager {
       }
     });
 
-    return entries;
+    return this.keyByUrlCopy(list);
   }
 
   generateLocalId() {
@@ -456,10 +491,15 @@ class SyncManager {
       // bookmarks share a name. The path is already known here.
       const pathOf = (entry) => [entry.rootKey].concat(entry.segments).join('/');
 
-      remoteEntries.forEach((entry, url) => {
-        if (localEntries.has(url)) return;
-        if (deletedHere.has(url)) {
-          removesFromSnippet.push({ url, title: entry.title, path: pathOf(entry) });
+      /* [ZeroLabs] 2026-08-29 - edited: the map key is a copy, the URL is not */
+      // Attribution stays keyed by URL, because a URL is what survives the round
+      // trip through the snippet. That is still the right question to ask of it:
+      // "did you delete this link here". Which copy went is answered by the
+      // counts on either side, not by the event lists.
+      remoteEntries.forEach((entry, key) => {
+        if (localEntries.has(key)) return;
+        if (deletedHere.has(entry.url)) {
+          removesFromSnippet.push({ url: entry.url, title: entry.title, path: pathOf(entry) });
         } else {
           toAddLocally.push(entry);
         }
@@ -467,12 +507,12 @@ class SyncManager {
 
       const removesFromDevice = [];   // here, not in the snippet, not added here
       let hasLocalAdditions = false;
-      localEntries.forEach((entry, url) => {
-        if (remoteEntries.has(url)) return;
-        if (createdHere.has(url)) {
+      localEntries.forEach((entry, key) => {
+        if (remoteEntries.has(key)) return;
+        if (createdHere.has(entry.url)) {
           hasLocalAdditions = true;
         } else {
-          removesFromDevice.push({ url, title: entry.title, path: pathOf(entry) });
+          removesFromDevice.push({ url: entry.url, title: entry.title, path: pathOf(entry) });
         }
       });
 
@@ -489,8 +529,8 @@ class SyncManager {
       let hasLocalEdits = false;
       const overwritesOnDevice = [];
 
-      localEntries.forEach((localEntry, url) => {
-        const remoteEntry = remoteEntries.get(url);
+      localEntries.forEach((localEntry, key) => {
+        const remoteEntry = remoteEntries.get(key);
         if (!remoteEntry) return; // Additions are handled by the loops above
 
         const movedOrRenamed =
@@ -499,13 +539,13 @@ class SyncManager {
           localEntry.segments.join('/') !== remoteEntry.segments.join('/');
         if (!movedOrRenamed) return;
 
-        if (editedHere.has(url)) {
+        if (editedHere.has(localEntry.url)) {
           hasLocalEdits = true;
         } else {
           // rootKey and segments travel with it so the bookmark can be placed on
           // approval without re-deriving a path from a title.
           overwritesOnDevice.push({
-            url,
+            url: localEntry.url,
             title: localEntry.title,
             remoteTitle: remoteEntry.title,
             localPath: [localEntry.rootKey].concat(localEntry.segments).join('/'),
@@ -542,9 +582,9 @@ class SyncManager {
         url: e.url, title: e.title, path: pathOf(e)
       }));
       const pendingPushItems = [];
-      localEntries.forEach((entry, url) => {
-        if (!remoteEntries.has(url) && createdHere.has(url)) {
-          pendingPushItems.push({ url, title: entry.title, path: pathOf(entry) });
+      localEntries.forEach((entry, key) => {
+        if (!remoteEntries.has(key) && createdHere.has(entry.url)) {
+          pendingPushItems.push({ url: entry.url, title: entry.title, path: pathOf(entry) });
         }
       });
 

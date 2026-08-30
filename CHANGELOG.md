@@ -1,6 +1,13 @@
 ## Changelog
 
-### v5.5 (Current)
+### v5.6 (Current)
+
+**Bug Fixes:**
+- **Bookmarking the same link twice no longer loses a copy** - Sync treated a web address as the name of a single bookmark, so two bookmarks pointing at the same place counted as one. A device setting itself up from your snippet built only one of the pair, and never saw the other as missing, so no later sync put it back - that machine simply held one fewer bookmark than the rest, with nothing to say which one. Deleting one of two copies was invisible for the same reason: the address was still there, so sync decided nothing had changed and the deletion never travelled anywhere. Each copy is now counted and followed separately, so duplicates arrive intact on a new device and removing one of them asks for approval and syncs like any other deletion.
+
+---
+
+### v5.5
 
 **Changes:**
 - **Opening the sync dialog no longer starts a sync** - It used to begin the moment the dialog appeared, on the assumption that opening it meant you wanted to sync. That made the dialog impossible to reach for anything else: turning background auto-sync off, or changing which snippet you use, meant triggering the very sync you were trying to avoid. Syncing now happens when you press the sync button and not before.

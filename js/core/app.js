@@ -1979,7 +1979,7 @@ class App {
           const remoteEntries = syncManager.collectSnippetEntries(remoteData);
           const localEntries = syncManager.collectSnippetEntries(localTree);
           let losing = 0;
-          remoteEntries.forEach((entry, url) => { if (!localEntries.has(url)) losing++; });
+          remoteEntries.forEach((entry, key) => { if (!localEntries.has(key)) losing++; });
 
           const proceed = confirm(losing > 0
             ? `Warning: the snippet will be replaced with this device's bookmarks.\n\n${losing} item(s) currently in the snippet are not on this device and will be lost, on every device using it.\n\nContinue?`
