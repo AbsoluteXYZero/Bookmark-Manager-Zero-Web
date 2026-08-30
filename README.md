@@ -7,7 +7,7 @@
 **A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
 
 <!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
-![Version](https://img.shields.io/badge/version-5.4-blue)
+![Version](https://img.shields.io/badge/version-5.5-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -229,9 +229,9 @@ If you're already using Local Mode and want to add GitLab sync:
   - Deletions require user confirmation (shows "View Changes" button)
   - 5-minute interval helps avoid rate limiting and account flagging
 - **Manual Sync:**
-  - Click "Push to Snippet" to upload local changes
-  - Click "Pull from Snippet" to download remote changes
-  - **Shift+Click Sync Button** - Force push local to remote (overwrite)
+  - Press the large sync button in GitLab Sync Settings. It compares both sides: additions are applied silently in either direction, and anything that would remove, rename or move a bookmark stops and asks first.
+  - Opening the dialog does not sync on its own, so the settings below it can be reached without triggering anything.
+  - **Overwrite Snippet with Local** / **Overwrite Local with Snippet** live under Snippet Sync Options for the rare case where you want one side to win outright. Each names how many bookmarks would be lost first.
 - **Change Preview:** Click "View Changes" to see detailed line-by-line diff before syncing
 - **Edit Lock System:**
   - Prevents concurrent edits across devices
@@ -383,13 +383,13 @@ All external service usage is disclosed in [PRIVACY.md](PRIVACY.md).
 
 - **Event-driven sync**: API calls are made when you add/edit/delete bookmarks
 - **Auto-sync polling**: When enabled, checks for remote changes every 5 minutes
-- **Manual sync**: Use the "Pull from Snippet" and "Push to Snippet" buttons for manual control
+- **Manual sync**: Press the sync button in GitLab Sync Settings for a one-off check
 - **Rate limiting protection**: Built-in exponential backoff with jitter respects GitLab API limits
 - **Rate limits**: GitLab has API rate limits; typical bookmark usage stays well within limits
 
 **Best Practices:**
 
-- Use manual "Pull from Snippet" to check for changes from other devices when needed
+- Press the sync button in GitLab Sync Settings to check for changes from other devices when needed
 - The application automatically syncs when you make changes (add/edit/delete bookmarks)
 - For very large collections (>5000 bookmarks), edits will naturally sync less frequently
 

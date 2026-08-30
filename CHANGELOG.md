@@ -1,6 +1,13 @@
 ## Changelog
 
-### v5.4 (Current)
+### v5.5 (Current)
+
+**Changes:**
+- **Opening the sync dialog no longer starts a sync** - It used to begin the moment the dialog appeared, on the assumption that opening it meant you wanted to sync. That made the dialog impossible to reach for anything else: turning background auto-sync off, or changing which snippet you use, meant triggering the very sync you were trying to avoid. Syncing now happens when you press the sync button and not before.
+
+---
+
+### v5.4
 
 Version number only, raised to stay in step with the Chrome and Firefox extensions. No new features, changes or fixes in this release - everything described under v5.3 below is what you already have.
 

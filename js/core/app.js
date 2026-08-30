@@ -1798,7 +1798,7 @@ class App {
               <svg width="92" height="92" viewBox="0 0 24 24" style="display:block;">
                 <path fill="#000000" d="M22.65 14.39L12 22.13 1.35 14.39a.84.84 0 01-.3-.94l1.22-3.78 2.44-7.51A.42.42 0 014.82 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.49h8.1l2.44-7.51A.42.42 0 0118.6 2a.43.43 0 01.58 0 .42.42 0 01.11.18l2.44 7.51L23 13.45a.84.84 0 01-.35.94z"/>
               </svg>
-              <span id="manualSyncStatus" style="position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);font-size:13px;font-weight:700;color:#ffffff;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.8);">Syncing</span>
+              <span id="manualSyncStatus" style="position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);font-size:13px;font-weight:700;color:#ffffff;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.8);">Sync</span>
             </button>
           </div>
           <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
@@ -1960,9 +1960,13 @@ class App {
         };
 
         manualSyncNowBtn.addEventListener('click', runManualSync);
-        // Opening the dialog is itself a request to sync, so it starts straight
-        // away rather than making you press the button you just navigated to.
-        runManualSync();
+        /* [ZeroLabs] 2026-08-29 - edited: opening the dialog no longer syncs */
+        // It used to call runManualSync() here, on the reasoning that opening the
+        // dialog was itself a request to sync. That made the dialog impossible to
+        // reach for any other purpose: turning OFF background auto-sync, or
+        // switching snippets, meant triggering the very sync you were trying to
+        // stop. The button is right there and clearly labelled; syncing is now
+        // always something the user asks for.
       }
 
       /* [ZeroLabs] 2026-08-27 - added: the two forced overwrites */

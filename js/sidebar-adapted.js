@@ -70,7 +70,7 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    getManifest: () => ({ version: '5.4' }),
+    getManifest: () => ({ version: '5.5' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
