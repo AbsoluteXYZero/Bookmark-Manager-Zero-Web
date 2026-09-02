@@ -1132,34 +1132,59 @@ async function init() {
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: load quick access and recent state */
   // loadDisplayOptions also calls these, but it runs later in initUI and the
   // first render happens before then.
-  loadQuickAccess();
-  loadRecentOpens();
-  loadSectionState();
-  // Not awaited: pins render from the local cache immediately and refresh when
-  // this lands, so a slow GitLab never delays the sidebar.
-  try {
-    const remoteId = syncManager?.getRemoteId?.();
-    if (remoteId) {
-      window.bmzQuickAccessMeta.loadForSnippet(remoteId).catch(err => {
-        console.error('[QuickAccess] Startup pin load failed:', err);
-      });
+  /* [ZeroLabs] 2026-09-02 6:31 PM - added: the share window skips the bookmark list */
+  // The Android share window is a modal over a bookmark manager nobody sees.
+  // Everything below that exists to BUILD that list was still being paid for,
+  // and the modal only opens once it finishes. On a phone that was the wait
+  // between tapping share and seeing where to file the bookmark.
+  //
+  // Kept: loadBookmarks, because the folder picker and the duplicate check read
+  // the tree, and setupEventListeners, which binds the modal's own buttons. The
+  // settings above are localStorage reads and cost nothing.
+  //
+  // Skipped: every list section, the scanner data, and the render itself. Share
+  // mode already turns scanning off, so the whitelist, the safety history and
+  // the folder scan timestamps have no reader here. All of them declare an
+  // empty default, so skipping the load leaves them empty rather than undefined.
+  const shareOnly = window.__bmzShareMode === true;
+
+  if (!shareOnly) {
+    loadQuickAccess();
+    loadRecentOpens();
+    loadSectionState();
+    // Not awaited: pins render from the local cache immediately and refresh when
+    // this lands, so a slow GitLab never delays the sidebar.
+    try {
+      const remoteId = syncManager?.getRemoteId?.();
+      if (remoteId) {
+        window.bmzQuickAccessMeta.loadForSnippet(remoteId).catch(err => {
+          console.error('[QuickAccess] Startup pin load failed:', err);
+        });
+      }
+    } catch (error) {
+      console.error('[QuickAccess] Startup pin load skipped:', error);
     }
-  } catch (error) {
-    console.error('[QuickAccess] Startup pin load skipped:', error);
+    await loadWhitelist();
+    await loadSafetyHistory();
+    await loadFolderScanTimestamps();
   }
-  await loadWhitelist();
-  await loadSafetyHistory();
-  await loadFolderScanTimestamps();
+
   await loadAutoClearSetting();
   await loadStartFolder();
 
   console.log('[init] Loading bookmarks...');
   await loadBookmarks();
 
+  setupEventListeners();
+
+  if (shareOnly) {
+    console.log('[Share] Sidebar list skipped, share modal only');
+    return;
+  }
+
   cleanupSafetyHistory(); // Clean up stale entries on sidebar load
   await expandToStartFolder();
 
-  setupEventListeners();
   setupBlocklistProgressListener();
 
   renderBookmarks();
