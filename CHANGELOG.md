@@ -3,7 +3,7 @@
 ### v5.6 (Current)
 
 **Bug Fixes:**
-- **Bookmarking the same link twice no longer loses a copy** - Sync treated a web address as the name of a single bookmark, so two bookmarks pointing at the same place counted as one. A device setting itself up from your snippet built only one of the pair, and never saw the other as missing, so no later sync put it back - that machine simply held one fewer bookmark than the rest, with nothing to say which one. Deleting one of two copies was invisible for the same reason: the address was still there, so sync decided nothing had changed and the deletion never travelled anywhere. Each copy is now counted and followed separately, so duplicates arrive intact on a new device and removing one of them asks for approval and syncs like any other deletion.
+- **Bookmarking the same link twice no longer loses a copy** - Sync treated a web address as the name of a single bookmark, so two bookmarks pointing at the same place counted as one. A device setting itself up from your snippet built only one of the pair, and never saw the other as missing, so no later sync put it back - that machine simply held one fewer bookmark than the rest, with nothing to say which one. Deleting one of two copies was invisible for the same reason: the address was still there, so sync decided nothing had changed and the deletion never travelled anywhere. Each copy is now counted and followed separately, so duplicates arrive intact on a new device and removing one of them asks for approval and syncs like any other deletion. Working on more optimizations.
 
 ---
 
