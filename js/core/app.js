@@ -3595,7 +3595,21 @@ class App {
       // existed, which is almost always, so the site effectively never pulled.
       // The reconcile is safe to run unconditionally: it adds what is missing on
       // either side and defers rather than removing anything.
-      if (!this._syncInProgress) {
+      /* [ZeroLabs] 2026-08-29 - added: the share window runs its own reconcile */
+      // This reconcile and runSharePull call the same reconcileWithSnippet, so
+      // the share window did the identical network round trip twice - once here
+      // before the modal could appear, once after. On mobile that was most of
+      // the three to five seconds between tapping share and seeing the folder
+      // tree, and the result of this one is never read: saveSharedBookmark
+      // waits on runSharePull's promise and blocks on ITS conflict, not this.
+      //
+      // Worse, this one can push. runSharePull deliberately passes push: false
+      // because stage 3 publishes after the bookmark is saved, so leaving this
+      // in wrote to GitLab twice for a single share.
+      //
+      // Nothing is lost by skipping it. A deletion waiting on either side still
+      // stops the save and is shown inline with an Approve button.
+      if (!this._syncInProgress && !window.__bmzShareMode) {
         this._syncInProgress = true;
         console.log('[App] Reconciling with snippet...');
         try {
