@@ -3609,7 +3609,18 @@ class App {
       //
       // Nothing is lost by skipping it. A deletion waiting on either side still
       // stops the save and is shown inline with an Approve button.
-      if (!this._syncInProgress && !window.__bmzShareMode) {
+      /* [ZeroLabs] 2026-09-02 6:31 PM - edited: reconcile AFTER the page is drawn */
+      // This used to be awaited right here, before initSidebar, so the boot
+      // loader covered a full GitLab round trip before a single bookmark
+      // appeared. Nothing about the list depends on it: the local copy is
+      // already on disk and is what the list draws from.
+      //
+      // It is stored and started once the page is revealed instead. Anything it
+      // pulls in redraws through the existing sync:localTreeChanged listener,
+      // so a late arrival still lands on screen. Additions apply silently, and
+      // anything that would remove or overwrite still stops and waits for you.
+      this._startupReconcile = async () => {
+        if (this._syncInProgress || window.__bmzShareMode) return;
         this._syncInProgress = true;
         console.log('[App] Reconciling with snippet...');
         try {
@@ -3632,7 +3643,7 @@ class App {
         } finally {
           this._syncInProgress = false;
         }
-      }
+      };
 
       /* [ZeroLabs] 2026-08-27 - added: keep checking while the page is open */
       // Not in the Android share window. That is a transient floating window
@@ -3693,6 +3704,15 @@ class App {
     // whose list was still empty - which draws its "No bookmarks found" state for
     // a moment before the real bookmarks replace it. One flash traded for another.
     document.documentElement.classList.add('booted');
+
+    /* [ZeroLabs] 2026-09-02 6:31 PM - added: start the reconcile once the page is up */
+    // Deliberately not awaited. Your bookmarks are on screen by this line, so
+    // the sync runs behind them rather than in front of them.
+    if (this._startupReconcile) {
+      const runStartupReconcile = this._startupReconcile;
+      this._startupReconcile = null;
+      runStartupReconcile();
+    }
 
     // blocklistService and scannerService are initialized on first use (lazy loading)
 
