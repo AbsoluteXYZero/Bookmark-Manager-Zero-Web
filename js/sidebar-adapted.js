@@ -6338,41 +6338,6 @@ function startSharePull() {
     });
 }
 
-/* [ZeroLabs] 2026-08-29 - added: stage 0, the share form before the app is ready */
-// openShareBookmarkModal cannot run until the bookmark tree is loaded, because
-// it populates the folder picker and the duplicate notice from it. That put the
-// share form behind two seconds of boot on a phone.
-//
-// The form ITSELF needs no bookmark data. The URL and title arrive in the share
-// intent. So this puts the modal up immediately, over the boot loader, and
-// openShareBookmarkModal fills in the rest when the tree lands.
-//
-// Save is disabled here on purpose. Nothing can be written until there is a
-// folder picker to write into, and enabling it is the last thing stage 1 does.
-function openShareBookmarkShell(url, title) {
-  window.__bmzShareMode = true;
-  document.documentElement.classList.add('share-mode');
-
-  const modal = document.getElementById('addBookmarkModal');
-  if (!modal) return;
-
-  const titleInput = document.getElementById('newBookmarkTitle');
-  const urlInput = document.getElementById('newBookmarkUrl');
-  const modalTitle = document.getElementById('addBookmarkModalTitle');
-  const saveBtn = document.getElementById('addBookmarkModalSave');
-
-  if (modalTitle) modalTitle.textContent = 'Save to BMZ';
-  if (saveBtn) saveBtn.textContent = 'Save Bookmark';
-  if (urlInput) urlInput.value = url || '';
-  if (titleInput) titleInput.value = title || '';
-
-  setShareSaveEnabled(false);
-  setShareStatus('info', 'Loading your folders...', '');
-
-  modal.classList.remove('hidden');
-  modal.setAttribute('aria-hidden', 'false');
-}
-
 // Open the add-bookmark modal prefilled from an Android share intent
 async function openShareBookmarkModal(url, title) {
   window.__bmzShareMode = true;
@@ -6424,11 +6389,6 @@ async function openShareBookmarkModal(url, title) {
   }
 
   await updateShareDuplicateNotice(url);
-
-  /* [ZeroLabs] 2026-08-29 - added: the picker exists now, so saving is safe */
-  // openShareBookmarkShell disabled Save because there was no folder picker to
-  // write into. Everything it was waiting for is in place by this line.
-  setShareSaveEnabled(true);
 
   startSharePull();
 }
@@ -10382,5 +10342,3 @@ window.initSidebar = init;
 
 /* [ZeroLabs] 2026-08-09 1:31 PM - added: entry point for Android share intents */
 window.openShareBookmarkModal = openShareBookmarkModal;
-/* [ZeroLabs] 2026-08-29 - added: stage 0, called before the app finishes booting */
-window.openShareBookmarkShell = openShareBookmarkShell;

@@ -44,20 +44,6 @@ class App {
         window.__bmzShareMode = true;
         document.documentElement.classList.add('share-mode');
         console.log('[Share] Share intent detected, link and safety checking disabled');
-
-        /* [ZeroLabs] 2026-08-29 - added: put the share form up before the app loads */
-        // The share modal used to open at the END of showMainApp, after the whole
-        // bookmark list had rendered, so tapping share showed two seconds of the
-        // boot loader before anything usable appeared.
-        //
-        // The form needs no bookmark data - the URL and title come from the
-        // intent - so the shell goes up now. In share mode the loader sits BELOW
-        // the modal, so it still hides the half-built bookmark manager behind it.
-        // openShareBookmarkModal fills in the folder picker and enables Save once
-        // the tree is loaded.
-        if (window.openShareBookmarkShell) {
-          window.openShareBookmarkShell(this.shareIntent.url, this.shareIntent.title);
-        }
       }
 
       // Initialize IndexedDB first (needed for everything)

@@ -3246,20 +3246,6 @@
       opacity: 0;
       animation: bootLoaderIn 0.2s ease 0.15s forwards;
     }
-    /* [ZeroLabs] 2026-08-29 - added: in a share window the loader goes BEHIND the modal */
-    /* The loader is z-index 99998 and .modal is 10000, so the loader covered the
-       share form as well as the bookmark manager. A share tap then showed two
-       seconds of dots before anything usable appeared.
-
-       Dropping it below the modal keeps its real job - hiding the half-built
-       bookmark manager - while the share form sits on top of it and can be read
-       and corrected while the app is still loading. Share windows only. The main
-       app still shows the loader over everything, which is what stops the setup
-       screen and the empty list from flashing. */
-    html.share-mode #bootLoader {
-      z-index: 9999;
-    }
-
     html.booted #bootLoader {
       display: none;
     }
