@@ -135,12 +135,12 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 - **URL Tooltips** - Hover over bookmark title/URL to see full URL
 - **Import/Export** - HTML (Netscape format with ADD_DATE) and JSON bookmark files
 - **Undo System** - Toast notifications with 10-second countdown timer to restore deletions
-- **Changelog with Full Restore** - View complete operation history with restore buttons:
+- **Event Log with Full Restore** - View complete operation history with restore buttons, plus any errors BMZ runs into:
   - Tracks all bookmark operations (add, edit, delete, move, recheck)
   - Restore deleted bookmarks and folders (stores complete data)
   - Restore move operations back to original folder
   - Restore update operations (revert changes)
-  - Click URL to copy, "Clear Changelog" to reset history
+  - Click URL to copy, "Clear Event Log" to reset history
   - Note: For folders with children, only the folder itself is restored (children tracked separately)
 - **Pre-Sync Snapshot Protection** - Automatic snapshots before sync operations with one-click restore to undo mistaken syncs
 - **Favicon Display** - Batch-loaded website icons with error handling
