@@ -533,8 +533,19 @@ class SyncManager {
         const remoteEntry = remoteEntries.get(key);
         if (!remoteEntry) return; // Additions are handled by the loops above
 
+        /* [ZeroLabs] 2026-09-07 4:33 PM - edited: surrounding whitespace is not a rename */
+        // Titles are compared trimmed. A browser will happily store "Sebtube "
+        // with a trailing space, while an HTML export and re-import strips it, so
+        // the two sides disagree over a character nobody can see. That produced a
+        // consent prompt reading "Name: Sebtube -> Sebtube", which is impossible
+        // to make a sensible decision about and comes straight back on the next
+        // round trip through the format.
+        //
+        // Only the comparison is trimmed. Neither copy is rewritten, so whatever
+        // each side stores is left exactly as it is.
+        const sameTitle = String(localEntry.title || '').trim() === String(remoteEntry.title || '').trim();
         const movedOrRenamed =
-          localEntry.title !== remoteEntry.title ||
+          !sameTitle ||
           localEntry.rootKey !== remoteEntry.rootKey ||
           localEntry.segments.join('/') !== remoteEntry.segments.join('/');
         if (!movedOrRenamed) return;
@@ -878,7 +889,7 @@ class SyncManager {
   // overwrite button after you confirm.
   async pushLocalToSnippet() {
     const remoteId = this.getRemoteId();
-    if (!remoteId) throw new Error('No Snippet connected');
+    if (!remoteId) throw new Error('No cloud sync connected');
 
     const adapter = this.getAdapter();
     const local = await this.loadLocalBookmarks();
@@ -1849,7 +1860,12 @@ class SyncManager {
     this.snippetId = snippetId;
     this.provider = 'gitlab';
 
-    snippetAdapter.setSnippetId(snippetId);
+    /* [ZeroLabs] 2026-09-07 4:33 PM - edited: record the id, do not reset the backend */
+    // setSnippetId also declares the store to BE a snippet, which undid a project
+    // connection that had just been made and sent the next read to the snippets
+    // endpoint with a project path. The paths that genuinely connect a snippet
+    // call snippetAdapter.setSnippetId themselves, so the kind is still set there.
+    snippetAdapter.setStoreId(snippetId);
     await dbManager.put('metadata', { key: 'snippetId', value: snippetId });
     await this.setProvider('gitlab');
     console.log('Snippet ID saved:', snippetId);

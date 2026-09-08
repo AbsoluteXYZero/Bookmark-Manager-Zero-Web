@@ -11,6 +11,17 @@ class SnippetAdapter {
   constructor() {
     this.apiBase = 'https://gitlab.com/api/v4';
     this.snippetId = null;
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: which kind of store this id names (see also: Bookmark-Manager-Zero-Chrome/gitlab-store.js) */
+    // A snippet is a git repository GitLab never repacks, so every push keeps a
+    // full copy of bookmarks.json and the store eventually passes its allocation
+    // and goes permanently read-only, answering every write with a bare 400.
+    // Project repositories get housekeeping and draw on the namespace allowance.
+    //
+    // null means snippet, so an install that predates this keeps working with no
+    // migration and no prompt. snippetId holds the id either way, because one id
+    // field cannot disagree with itself and every existing read of it still works.
+    this.storeKind = null;
+    this.branch = null;
     this.rateLimit = {
       remaining: null,
       limit: null,
@@ -302,19 +313,65 @@ class SnippetAdapter {
     this.snippetId = snippetId;
     // Store in localStorage so we remember it
     safeLocalStorage.setItem('bmz_snippet_id', snippetId);
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: connecting a snippet says so */
+    // Stating the backend rather than inheriting whatever was there. Connecting
+    // a snippet while the stored kind still read "project" would point the wrong
+    // backend at this id and fail every call with nothing explaining why.
+    this.storeKind = null;
+    this.branch = null;
+    safeLocalStorage.removeItem('bmz_store_kind');
+    safeLocalStorage.removeItem('bmz_store_branch');
     console.log('Set bookmark Snippet ID:', snippetId);
+  }
+
+  /* [ZeroLabs] 2026-09-07 4:33 PM - added: point this device at a project repository */
+  setProjectStore(projectId, branch = 'main') {
+    this.snippetId = String(projectId);
+    this.storeKind = 'project';
+    this.branch = branch;
+    safeLocalStorage.setItem('bmz_snippet_id', String(projectId));
+    safeLocalStorage.setItem('bmz_store_kind', 'project');
+    safeLocalStorage.setItem('bmz_store_branch', branch);
+    console.log('[Store] This device now syncs to project', projectId, 'on', branch);
+  }
+
+  /* [ZeroLabs] 2026-09-07 4:33 PM - added: record the id without declaring the backend */
+  // setSnippetId means "this device is on a snippet" and clears the kind to say
+  // so. syncManager.setSnippetId calls it on EVERY connect, including one that
+  // has just been pointed at a project, which reset the kind and sent the next
+  // read to the snippets endpoint with a project path. This one only stores the
+  // id, which is all the sync manager actually needs from it.
+  setStoreId(id) {
+    this.snippetId = id;
+    safeLocalStorage.setItem('bmz_snippet_id', id);
+  }
+
+  isProject() {
+    return this.storeKind === 'project';
+  }
+
+  // A project can be addressed by numeric id or by "user/repo", and the path form
+  // has to be encoded to survive the URL.
+  storeRef() {
+    return encodeURIComponent(String(this.snippetId));
   }
 
   /**
    * Load saved snippet ID from storage
    */
   loadSavedSnippetId() {
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: restore the backend alongside the id */
+    // Read before the id, so the kind is in place whichever branch below runs.
+    // Absent means snippet, which is what every install had before this existed.
+    this.storeKind = safeLocalStorage.getItem('bmz_store_kind') || null;
+    this.branch = safeLocalStorage.getItem('bmz_store_branch') || null;
+
     const savedId = safeLocalStorage.getItem('bmz_snippet_id');
     if (savedId) {
       // Validate that it's a string and not an object
       if (typeof savedId === 'string' && !savedId.startsWith('{') && !savedId.startsWith('[')) {
         this.snippetId = savedId;
-        console.log('Loaded saved Snippet ID:', savedId);
+        console.log('Loaded saved store:', this.storeKind || 'snippet', savedId, this.branch ? `on ${this.branch}` : '');
         return savedId;
       } else {
         console.warn('Invalid snippet ID in localStorage:', savedId);
@@ -322,6 +379,142 @@ class SnippetAdapter {
       }
     }
     return null;
+  }
+
+  /* [ZeroLabs] 2026-09-07 4:33 PM - added: the project backend, three primitives */
+  // Everything the project path needs. The public methods keep their own error
+  // handling and branch to these, rather than the snippet code being rewritten,
+  // so the snippet path stays byte for byte what it was.
+
+  // Throws rather than returning an empty list, deliberately. Callers use this to
+  // decide whether a file needs create or update, and answering "no files" for
+  // what was really a network failure makes the next write say create for a file
+  // that exists, which GitLab refuses outright.
+  /* [ZeroLabs] 2026-09-08 2:00 AM - added: the repositories on this account */
+  // min_access_level=30 is Developer, the lowest level that can commit. A
+  // repository the user can merely read is useless as a bookmark store, and
+  // offering it in a picker only produces a failure two clicks later. Newest
+  // activity first, so a repository just created for this sits at the top.
+  // per_page is GitLab's maximum; past that the paste field is the way in, which
+  // is why the picker never replaces it.
+  //
+  // Unlike the other project methods this one takes no store: it runs BEFORE a
+  // repository has been chosen, so it cannot go through storeRef().
+  async listProjects() {
+    const headers = await this.getHeaders();
+    const url = `${this.apiBase}/projects?membership=true&simple=true&min_access_level=30&order_by=last_activity_at&per_page=100`;
+    const response = await this.fetchWithTimeout(url, { headers });
+    this.updateRateLimitFromResponse(response);
+    if (!response.ok) {
+      throw new Error(`Failed to list your repositories: ${response.status}`);
+    }
+    const all = await response.json();
+    return (all || []).map(item => ({ id: item.id, title: item.path_with_namespace }));
+  }
+
+  async projectListFiles() {
+    const entries = await this.projectListEntries();
+    return entries.filter(entry => entry.type === 'blob').map(entry => entry.path);
+  }
+
+  /* [ZeroLabs] 2026-09-08 12:40 AM - added: the root as it really is, folders included */
+  // projectListFiles drops directories, because its only job is deciding create
+  // against update for two known filenames. The emptiness check cannot use it: a
+  // repository whose code all sits under src/ would come back as a lone README
+  // and read as empty.
+  async projectListEntries() {
+    const headers = await this.getHeaders();
+    const url = `${this.apiBase}/projects/${this.storeRef()}/repository/tree?ref=${encodeURIComponent(this.branch || 'main')}&per_page=100`;
+    const response = await this.fetchWithTimeout(url, { headers });
+    this.updateRateLimitFromResponse(response);
+    if (!response.ok) {
+      throw new Error(`Failed to list repository files: ${response.status}`);
+    }
+    const entries = await response.json();
+    return (entries || []).map(entry => ({ path: entry.path, type: entry.type }));
+  }
+
+  /* [ZeroLabs] 2026-09-08 12:40 AM - added: is this repository free for BMZ to use */
+  // "Use an empty repository I already made" never checked that it was empty, so
+  // pointing BMZ at a real project committed bookmarks.json onto its main branch
+  // and kept committing there on every sync. Nothing was destroyed, but nobody
+  // asked for it either.
+  //
+  // A repository BMZ creates is initialised with a README, and the how-to screen
+  // tells people to leave that box ticked, so a lone README has to read as empty
+  // or the check would fire on the very repositories it is meant to approve. The
+  // same goes for a licence or a .gitignore, and for BMZ's own two files.
+  //
+  // ANY directory counts as content. There is no such thing as a folder that
+  // arrived by accident.
+  contentEntries(entries) {
+    const BOILERPLATE = /^(readme(\.(md|txt|rst|adoc))?|license(\.(md|txt))?|copying|changelog(\.md)?|\.gitignore|\.gitattributes|\.gitkeep)$/i;
+    const BMZ_FILES = ['bookmarks.json', 'bmz-meta.json'];
+
+    return (entries || []).filter(entry => {
+      if (entry.type === 'tree') return true;
+      if (BMZ_FILES.includes(entry.path)) return false;
+      return !BOILERPLATE.test(entry.path);
+    });
+  }
+
+  async projectReadFile(filePath) {
+    const headers = await this.getHeaders();
+    const url = `${this.apiBase}/projects/${this.storeRef()}/repository/files/${encodeURIComponent(filePath)}/raw?ref=${encodeURIComponent(this.branch || 'main')}`;
+    const response = await this.fetchWithTimeout(url, { headers });
+    this.updateRateLimitFromResponse(response);
+    if (!response.ok) return null;
+    return await response.text();
+  }
+
+  // The commits endpoint rather than the files endpoint, on purpose: it takes
+  // every file in ONE commit. Writing them one at a time would let a sync land
+  // half applied, which the snippets API never allowed.
+  async projectWriteFiles(files, message = 'Update bookmarks') {
+    this.checkRateLimit();
+    const headers = await this.getHeaders();
+    const url = `${this.apiBase}/projects/${this.storeRef()}/repository/commits`;
+    const response = await this.fetchWithTimeout(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        branch: this.branch || 'main',
+        commit_message: message,
+        actions: files.map(file => ({
+          action: file.action,
+          file_path: file.file_path,
+          content: file.content
+        }))
+      })
+    });
+    this.updateRateLimitFromResponse(response);
+    return response;
+  }
+
+  /* [ZeroLabs] 2026-09-07 4:33 PM - added: create a private repository to sync into */
+  // initialize_with_readme is not optional. Without it the project has no branch,
+  // and the first commit has nothing to target.
+  async createProject(name = 'bmz-bookmarks') {
+    const headers = await this.getHeaders();
+    const response = await this.fetchWithTimeout(`${this.apiBase}/projects`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        name,
+        visibility: 'private',
+        initialize_with_readme: true,
+        description: 'Bookmark storage for Bookmark Manager Zero'
+      })
+    });
+    this.updateRateLimitFromResponse(response);
+
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`Could not create the repository: ${response.status} - ${body}`);
+    }
+
+    const created = await response.json();
+    return { id: created.id, path: created.path_with_namespace };
   }
 
   /**
@@ -471,7 +664,19 @@ class SnippetAdapter {
     });
 
     if (!id) {
-      throw new Error('No Snippet ID provided');
+      throw new Error('No cloud sync connected');
+    }
+
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: the project path reads one file */
+    // A repository answers with the content directly, so the snippet's two-step
+    // read and its raw-endpoint fallback have nothing to do here.
+    if (this.isProject()) {
+      const content = await this.projectReadFile('bookmarks.json');
+      if (content === null) {
+        throw new Error('Repository does not contain bookmarks.json');
+      }
+      if (!content.trim()) return this.getEmptyBookmarkTree();
+      return JSON.parse(content);
     }
 
     try {
@@ -490,14 +695,22 @@ class SnippetAdapter {
       if (!response.ok) {
         if (response.status === 404) {
           const errorText = await response.text();
-          console.error('[ReadSnippet] 404 Error - Snippet not found. Response:', errorText);
+          console.error('[ReadStore] 404 - not found. Response:', errorText);
 
-          // Clear the invalid Snippet ID immediately
-          console.warn('[ReadSnippet] Clearing invalid Snippet ID:', id);
-          this.snippetId = null;
-          safeLocalStorage.removeItem('bmz_snippet_id');
+          /* [ZeroLabs] 2026-09-07 4:33 PM - edited: only a snippet 404 disconnects */
+          // This branch clears the saved id, which is right for a snippet that has
+          // genuinely been deleted. It is wrong for anything else, and while the
+          // store kind was being reset elsewhere a project read arrived here with
+          // a project path on the snippets endpoint, 404'd, and wiped a working
+          // connection. A disconnect is too destructive to be a side effect of
+          // one failed request against the wrong URL.
+          if (!this.isProject()) {
+            console.warn('[ReadStore] Clearing invalid Snippet ID:', id);
+            this.snippetId = null;
+            safeLocalStorage.removeItem('bmz_snippet_id');
+          }
 
-          throw new Error('Bookmark Snippet not found');
+          throw new Error('Bookmark store not found');
         } else if (response.status >= 500 && response.status < 600) {
           // Show service error popup and allow retry
           return new Promise((resolve, reject) => {
@@ -522,7 +735,7 @@ class SnippetAdapter {
       // GitLab snippets have a 'files' array
       const bookmarkFile = snippet.files?.find(f => f.path === 'bookmarks.json' || f.file_name === 'bookmarks.json');
       if (!bookmarkFile) {
-        throw new Error('Snippet does not contain bookmarks.json');
+        throw new Error('Cloud store does not contain bookmarks.json');
       }
 
       console.log('[ReadSnippet] Found bookmarks.json file:', {
@@ -589,6 +802,30 @@ class SnippetAdapter {
     const id = snippetId || this.snippetId;
     if (!id) return null;
 
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: the project path */
+    // exists decides create against update on the next write, and getting it
+    // wrong makes GitLab refuse the whole commit, so a failure here has to
+    // propagate as null rather than as "no file".
+    if (this.isProject()) {
+      try {
+        const paths = await this.projectListFiles();
+        if (!paths.includes('bmz-meta.json')) return { pins: [], tombstones: [], exists: false };
+
+        const content = await this.projectReadFile('bmz-meta.json');
+        if (!content || !content.trim()) return { pins: [], tombstones: [], exists: true };
+
+        const parsed = JSON.parse(content);
+        return {
+          pins: Array.isArray(parsed.quickAccess) ? parsed.quickAccess : [],
+          tombstones: Array.isArray(parsed.quickAccessRemoved) ? parsed.quickAccessRemoved : [],
+          exists: true
+        };
+      } catch (error) {
+        console.error('[ReadStore] Failed to read quick access meta:', error);
+        return null;
+      }
+    }
+
     try {
       const headers = await this.getHeaders();
       const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, { headers });
@@ -633,6 +870,23 @@ class SnippetAdapter {
     const id = snippetId || this.snippetId;
     if (!id || !payload) return false;
 
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: the project path */
+    if (this.isProject()) {
+      const response = await this.projectWriteFiles([{
+        action: payload.exists ? 'update' : 'create',
+        file_path: 'bmz-meta.json',
+        content: payload.content
+      }], 'Update quick access pins');
+
+      if (!response.ok) {
+        throw new Error(`Failed to update pins: ${response.status}`);
+      }
+      if (typeof window !== 'undefined' && window.bmzQuickAccessMeta) {
+        window.bmzQuickAccessMeta.markWritten();
+      }
+      return true;
+    }
+
     this.checkRateLimit();
 
     const headers = await this.getHeaders();
@@ -670,7 +924,7 @@ class SnippetAdapter {
     });
 
     if (!id) {
-      throw new Error('No Snippet ID provided');
+      throw new Error('No cloud sync connected');
     }
 
     try {
@@ -713,12 +967,21 @@ class SnippetAdapter {
         });
       }
 
-      const headers = await this.getHeaders();
-      const response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, {
-        method: 'PUT',
-        headers,
-        body: JSON.stringify({ files })
-      });
+      /* [ZeroLabs] 2026-09-07 4:33 PM - edited: one payload, two transports */
+      // The files array is identical on both backends, so only the request that
+      // carries it differs. Branching here rather than at the top of the method
+      // keeps the version, the checksum and the pins logic in one place.
+      let response;
+      if (this.isProject()) {
+        response = await this.projectWriteFiles(files);
+      } else {
+        const headers = await this.getHeaders();
+        response = await this.fetchWithTimeout(`${this.apiBase}/snippets/${id}`, {
+          method: 'PUT',
+          headers,
+          body: JSON.stringify({ files })
+        });
+      }
 
       // A successful write means the file is there now, so later pushes update
       // rather than create.
@@ -766,8 +1029,20 @@ class SnippetAdapter {
           });
         }
         const errorText = await response.text();
-        console.error('[UpdateSnippet] Error response:', errorText);
-        throw new Error(`Failed to update Snippet: ${response.status} - ${errorText}`);
+        console.error('[UpdateStore] Error response:', errorText);
+
+        /* [ZeroLabs] 2026-09-07 4:33 PM - added: recognise a store that has filled up */
+        // A snippet whose repository has passed its allocation answers every
+        // write with a bare 400 saying "Repository Error updating the snippet".
+        // It names no cause, never recovers, and reads keep working, so the only
+        // outward sign is that devices stop agreeing. Saying so is the difference
+        // between a user migrating and a user losing sync without ever learning
+        // it happened.
+        if (response.status === 400 && /Repository Error/i.test(errorText) && !this.isProject()) {
+          window.dispatchEvent(new CustomEvent('bmz:storeFull'));
+        }
+
+        throw new Error(`Failed to update cloud storage: ${response.status} - ${errorText}`);
       }
 
       const snippet = await response.json();
@@ -801,7 +1076,7 @@ class SnippetAdapter {
   async deleteSnippet(snippetId = null) {
     const id = snippetId || this.snippetId;
     if (!id) {
-      throw new Error('No Snippet ID provided');
+      throw new Error('No cloud sync connected');
     }
 
     try {

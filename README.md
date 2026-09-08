@@ -4,10 +4,10 @@
 
 # Bookmark Manager Zero
 
-**A fully static web application for managing bookmarks with GitLab Snippet synchronization.**
+**A fully static web application for managing bookmarks with GitLab repository synchronization.**
 
 <!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
-![Version](https://img.shields.io/badge/version-5.6-blue)
+![Version](https://img.shields.io/badge/version-5.7-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -19,9 +19,9 @@
 
 ## Overview
 
-Bookmark Manager Zero is a fully static web application for managing bookmarks with GitLab Snippet synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension installation.
+Bookmark Manager Zero is a fully static web application for managing bookmarks with GitLab repository synchronization. Built from the Bookmark Manager Zero browser extensions, this website provides all the same powerful features without requiring a browser extension installation.
 
-Unlike the browser extensions that work with native browser bookmarks, the website stores your bookmarks in a **private GitLab Snippet** in your own account. This means your data stays under your control, syncs across devices, and can be accessed from any device with a web browser.
+Unlike the browser extensions that work with native browser bookmarks, the website stores your bookmarks in a **private GitLab repository** in your own account. This means your data stays under your control, syncs across devices, and can be accessed from any device with a web browser.
 
 Changes sync **bi-directionally and automatically**: edits made on one device automatically appear on all your other devices. Don't worry about accidental changes—the built-in undo feature lets you quickly restore recently deleted bookmarks.
 
@@ -51,7 +51,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 ### Core Functionality
 
-- **GitLab Snippet Storage** - Store bookmarks in YOUR private GitLab Snippet
+- **GitLab Repository Storage** - Store bookmarks in YOUR private GitLab repository
 - **Auto-Sync with Polling** - Automatic checks every 5 minutes for remote changes
 - **Smart Notifications** - Additions auto-sync with toast; deletions require confirmation
 - **Change Preview with Diffs** - View detailed line-by-line changes before syncing
@@ -200,22 +200,25 @@ Bookmark Manager Zero offers two ways to get started - visit [https://bmzweb.abs
 2. Paste your token in BMZ (must start with `glpat-` prefix)
 
    - Token is encrypted with AES-256-GCM before storage
-3. Choose existing GitLab Snippet or create new one
+3. Choose how to set up your repository from the four options below
 4. Start from scratch or import existing bookmarks (HTML/JSON)
-5. Your bookmarks sync automatically across all devices via private GitLab Snippets
+5. Your bookmarks sync automatically across all devices via a private GitLab repository
 
 **Adding Sync to Existing Local Bookmarks**
 
 If you're already using Local Mode and want to add GitLab sync:
 1. Click "Connect GitLab" button
 2. Enter your GitLab Personal Access Token
-3. Choose how to merge your bookmarks:
+3. Choose how you want your repository set up:
 
-   - **Create New Snippet** - Upload local bookmarks to new snippet
-   - **Merge with Existing Snippet** - Combine local and remote bookmarks
-   - **Replace Local with Snippet** - Discard local, use remote bookmarks
-     - Safety feature: Option to download backup before replacing
-     - Choose "Download Backup & Replace" (recommended) or "Skip Backup & Replace"
+   - **Connect to a repository that already has my bookmarks** - Another device set this up. Nothing here is written over it; the two are merged instead. This is the right choice for your second and every later device
+   - **Use an empty repository I already made** - You made one yourself and it has nothing in it yet. These bookmarks go into it. If it already holds bookmarks, or any other files, BMZ names what is there and asks before going ahead
+   - **Create a repository for me** - BMZ makes a new private repository on your GitLab account and puts these bookmarks in it
+   - **Show me how to make one myself** - Step by step, then point BMZ at it
+
+**Moving from a Snippet**
+
+Earlier versions stored bookmarks in a GitLab Snippet. A snippet has a storage limit that counts every past version of your bookmarks rather than only the current one, so a large collection eventually reaches it and syncing stops. If you are still on a snippet, BMZ shows a card offering to move you, and the move takes about a minute. Nothing is lost. Migrate your first device with any option except the first, then use the first one on every other device so they join the same repository.
 
 **Token Tips**
 
@@ -224,14 +227,14 @@ If you're already using Local Mode and want to add GitLab sync:
 
 ### Sync Management
 
-- **Auto-Sync:** Enabled by default, checks Snippet every 5 minutes
+- **Auto-Sync:** Enabled by default, checks the repository every 5 minutes
   - New bookmarks from other devices auto-sync with notification
   - Deletions require user confirmation (shows "View Changes" button)
   - 5-minute interval helps avoid rate limiting and account flagging
 - **Manual Sync:**
   - Press the large sync button in GitLab Sync Settings. It compares both sides: additions are applied silently in either direction, and anything that would remove, rename or move a bookmark stops and asks first.
   - Opening the dialog does not sync on its own, so the settings below it can be reached without triggering anything.
-  - **Overwrite Snippet with Local** / **Overwrite Local with Snippet** live under Snippet Sync Options for the rare case where you want one side to win outright. Each names how many bookmarks would be lost first.
+  - **Overwrite Cloud with Local** / **Overwrite Local with Cloud** live under Cloud Sync Options for the rare case where you want one side to win outright. Each carries an arrow showing which way your bookmarks move, and names how many would be lost first.
 - **Change Preview:** Click "View Changes" to see detailed line-by-line diff before syncing
 - **Edit Lock System:**
   - Prevents concurrent edits across devices
@@ -261,7 +264,7 @@ If you're already using Local Mode and want to add GitLab sync:
   - Works with exports from Chrome, Firefox, Edge, Safari
 - **Export Bookmarks:**
   - Settings → Export Bookmarks
-  - Choose HTML (cross-browser) or JSON (GitLab Snippet format)
+  - Choose HTML (cross-browser) or JSON (BMZ cloud format)
 
 ### Mobile Support
 
@@ -311,7 +314,7 @@ Click the **theme icon** to access:
 
 Bookmark Manager Zero respects your privacy:
 
-- **All data stored in YOUR GitLab Snippet** - Bookmarks stored in your own private GitLab Snippet (website owner cannot access your data)
+- **All data stored in YOUR GitLab repository** - Bookmarks stored in your own private GitLab repository (website owner cannot access your data)
 - **Tokens encrypted in browser** - AES-256-GCM encryption with browser fingerprint-derived key
 - **No tracking or analytics**
 - **No advertisements**
@@ -356,9 +359,9 @@ The website can optionally use external services for enhanced features. **All ca
 
 **GitLab:**
 
-- **GitLab Snippets API** - Stores your bookmarks in a private Snippet
+- **GitLab Projects API** - Stores your bookmarks in a private repository
 - **GitLab Personal Access Token** - Simple token-based authentication
-- Required scope: `api` (full API access for snippet operations)
+- Required scope: `api` (full API access for repository operations)
 - Tokens encrypted with AES-256-GCM before storage
 - Auto-detected from `glpat-` prefix
 
@@ -372,12 +375,13 @@ All external service usage is disclosed in [PRIVACY.md](PRIVACY.md).
 - The application makes API calls only when you perform sync operations (manual sync or when you add/edit/delete bookmarks)
 - Monitor your API usage through your GitLab account settings if needed
 
-**How GitLab Snippets Are Used:**
+**How GitLab Repositories Are Used:**
 
-- This application uses GitLab Snippets as intended by GitLab: for storing structured data
-- Your bookmarks are stored in a private Snippet in your own GitLab account
-- Snippets are a legitimate GitLab feature designed for storing code, configuration, and structured data
-- The application uses standard GitLab Snippets API endpoints documented in the official GitLab API
+- This application uses a GitLab project repository as intended by GitLab: for storing versioned files
+- Your bookmarks are stored as `bookmarks.json` in a private repository in your own GitLab account
+- The application uses standard GitLab Projects, Repository Files and Commits API endpoints documented in the official GitLab API
+- Writes go through the Commits API, so every sync lands as a single commit and can never be left half applied
+- Snippet storage is still supported for existing installs, but new setups create a repository
 
 **API Usage Considerations:**
 
@@ -600,7 +604,7 @@ Users can whitelist specific URLs to:
 - **Language**: Vanilla JavaScript (ES6 modules) - Zero framework dependencies
 - **Architecture**: Single-page application with modular ES6 imports
 - **Module System**: 24+ ES6 modules organized by feature (core, auth, storage, import-export, utils)
-- **Storage**: Dual-layer storage with GitLab Snippets API + IndexedDB
+- **Storage**: Dual-layer storage with the GitLab Projects API + IndexedDB
 - **Authentication**: Personal Access Token (PAT) with `glpat-` auto-detection
 - **Hosting**: 100% static - GitLab Pages, Cloudflare Pages, or any static host
 - **Security**: AES-256-GCM encryption with Web Crypto API
@@ -613,7 +617,7 @@ Users can whitelist specific URLs to:
 Multiple object stores for organized data:
 
 - **bookmarks** - Hierarchical bookmark tree structure
-- **metadata** - Sync status, snippet IDs, edit locks, version tracking
+- **metadata** - Sync status, store IDs, edit locks, version tracking
 - **cache** - Link/safety status with 7-day TTL
 - **blocklists** - 10 malware/phishing domain lists (~3.1M domains). Held in a database of its own, owned by the scanning Web Worker.
 - **apiKeys** - Encrypted API credentials for external services
@@ -649,7 +653,7 @@ Bookmark-Manager-Zero-Website/
 │   ├── storage/                 # Data persistence
 │   │   ├── indexeddb.js        # IndexedDB wrapper
 │   │   ├── sync-manager.js     # Bidirectional GitLab sync
-│   │   ├── snippet-adapter.js  # GitLab Snippets API client
+│   │   ├── snippet-adapter.js  # GitLab API client (snippet + repository backends)
 │   │   └── storage-adapter.js  # Storage interface
 │   ├── import-export/           # Bookmark import/export
 │   │   ├── html-exporter.js    # Netscape HTML export
@@ -785,7 +789,7 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - **Material Design 3** - Color system by Google
 - **GitLab Pages** - Free static hosting
 - **Cloudflare Pages** - Free static hosting
-- **GitLab Snippets** - Simple, private data storage
+- **GitLab repositories** - Simple, private, versioned data storage
 
 ### Security & Malware Detection
 

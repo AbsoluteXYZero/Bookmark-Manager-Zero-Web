@@ -3202,6 +3202,106 @@
       padding: 6px 12px;
       font-size: 12px;
     }
+
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: the migration card wears its own stripe */
+    /* Same card, different stripe. Amber means "waiting on your decision" on the
+       card directly above this one, and red is held back for a sync that has
+       actually stopped. Violet is distinct from both and carries no alarm, which
+       is right for a limit that has not been reached yet. */
+    .announcement-card.migration-notice-card {
+      border-left-color: #8b5cf6;
+    }
+    .migration-notice-card .announcement-setup-btn {
+      background: #8b5cf6;
+      color: #ffffff;
+    }
+    .migration-notice-card .announcement-setup-btn:hover {
+      background: #7c3aed;
+    }
+
+    /* [ZeroLabs] 2026-09-07 4:33 PM - added: the store chooser in the setup modal */
+    /* Rendered by app.js into #storeSetupSection. Classes rather than inline
+       styles, so the four screens stay consistent and the theme tokens apply. */
+    .bmz-store-choice {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface);
+      border: 2px solid transparent;
+      padding: 14px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      cursor: pointer;
+      margin-bottom: 10px;
+    }
+    .bmz-store-choice:hover {
+      border-color: var(--md-sys-color-primary);
+    }
+    .bmz-store-choice-title {
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .bmz-store-choice-detail {
+      font-size: 12px;
+      color: var(--md-sys-color-on-surface-variant);
+      line-height: 1.45;
+    }
+    .bmz-store-primary {
+      flex: 1;
+      min-width: 160px;
+      background: var(--md-sys-color-primary);
+      color: var(--md-sys-color-on-primary);
+      border: none;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      cursor: pointer;
+    }
+    .bmz-store-plain {
+      background: var(--md-sys-color-surface-variant);
+      color: var(--md-sys-color-on-surface-variant);
+      border: none;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .bmz-store-field {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--md-sys-color-outline);
+      background: var(--md-sys-color-surface);
+      color: var(--md-sys-color-on-surface);
+      font-size: 14px;
+    }
+    .bmz-store-label {
+      display: block;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 8px;
+      color: var(--md-sys-color-on-surface);
+    }
+    .bmz-store-hint {
+      font-size: 12px;
+      color: var(--md-sys-color-on-surface-variant);
+      margin-top: 6px;
+      line-height: 1.5;
+    }
+    .bmz-store-steps {
+      margin: 0 0 16px 18px;
+      padding: 0;
+      font-size: 14px;
+      line-height: 1.7;
+      color: var(--md-sys-color-on-surface);
+    }
+    .bmz-store-steps a {
+      color: var(--md-sys-color-primary);
+      text-decoration: underline;
+    }
   </style>
   <script>
     /* [ZeroLabs] 2026-08-27 - edited: never guess, show a loader until the app knows */
@@ -4560,8 +4660,15 @@
       <!-- [ZeroLabs] 2026-08-19 7:12 PM - edited: wording parity with the extensions -->
       <h2 style="font-size: 24px; margin-bottom: 16px; color: var(--md-sys-color-on-surface);">Set Up Bookmark Sync</h2>
       <p style="font-size: 14px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 24px;">
-        Your bookmarks will be stored in a private GitLab Snippet for syncing across devices.
+        <span id="snippetSetupIntro">Your bookmarks are stored in a private GitLab repository, which is what keeps them in step across your devices.</span>
       </p>
+
+      <!-- [ZeroLabs] 2026-09-07 4:33 PM - added: the store chooser, rendered by app.js -->
+      <!-- One container rather than another set of static sections. The four
+           options, the migration copy and the manual instructions all live in
+           app.js so the website and the extensions can say the same things. The
+           three snippet sections below are kept for installs already on one. -->
+      <div id="storeSetupSection" style="display: none;"></div>
 
       <!-- No snippets found -->
       <div id="noSnippetsSection" style="display: none;">
@@ -4605,10 +4712,14 @@
       <div id="snippetSetupError" style="display: none; margin-top: 16px; padding: 12px; background: #fee; border-radius: 8px; color: #c00; font-size: 14px;"></div>
 
       <!-- Logout option -->
+      <!-- [ZeroLabs] 2026-09-08 1:35 AM - edited: Back sits with the exits, and the caption is gone -->
+      <!-- Back belongs next to the other way out of this screen, not stranded at
+           the end of the option list. It is filled by renderStoreChooser and
+           cleared by every other screen, which carries its own Back inline.
+           The caption that used to sit here explained a button whose own label
+           already says exactly what it does. -->
       <div style="margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--md-sys-color-outline-variant);">
-        <p style="font-size: 13px; color: var(--md-sys-color-on-surface-variant); margin-bottom: 12px; text-align: center;">
-          Used the wrong token or changed your mind?
-        </p>
+        <div id="storeChooserBackSlot"></div>
         <button id="snippetSetupLogoutBtn" style="width: 100%; padding: 10px 24px; background: transparent; color: var(--md-sys-color-error); border: 1px solid var(--md-sys-color-error); border-radius: 8px; font-size: 14px; font-weight: 500; cursor: pointer;">
           Logout and Start Over
         </button>

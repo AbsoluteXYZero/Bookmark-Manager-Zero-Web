@@ -70,7 +70,7 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    getManifest: () => ({ version: '5.6' }),
+    getManifest: () => ({ version: '5.7' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -2369,6 +2369,9 @@ function renderBookmarks() {
   // is the only thing here that is waiting on a decision.
   renderSyncNoticeCard(bookmarkList);
 
+  /* [ZeroLabs] 2026-09-07 4:33 PM - added: the migration offer, same standing-alert slot */
+  renderMigrationCard(bookmarkList);
+
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access and recent sections */
   // Hidden while searching or filtering: the tree is already showing matches
   // from everywhere, so mirrored rows would just duplicate the results.
@@ -2621,6 +2624,63 @@ function syncNoticeSummary(counts) {
   return parts.join('  ·  ');
 }
 
+/* [ZeroLabs] 2026-09-07 4:33 PM - added: offer the move before the snippet dies (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+// A card rather than a dialog, matching the deferred-sync notice above it. A
+// modal that opens itself on every load is what that card was built to replace,
+// and this is not urgent yet: it warns about a limit that has not been hit. The
+// modal is kept for a store that has ALREADY stopped accepting writes.
+//
+// Only for a device syncing to a snippet. A local-only install never has an id,
+// and one already on a repository has nothing to migrate.
+let migrationDismissedUntil = Number(safeLocalStorage.getItem('bmz_migration_snoozed_until')) || 0;
+const MIGRATION_SNOOZE_MS = 7 * 24 * 60 * 60 * 1000;
+
+function shouldOfferMigration() {
+  if (!snippetAdapter.getSnippetId()) return false;
+  if (snippetAdapter.isProject()) return false;
+  return Date.now() >= migrationDismissedUntil;
+}
+
+function renderMigrationCard(container) {
+  if (!shouldOfferMigration()) return;
+
+  const card = document.createElement('div');
+  card.className = 'announcement-card migration-notice-card';
+  card.innerHTML = `
+    <div class="sync-notice-row">
+      <div class="sync-notice-text">
+        <div class="announcement-card-title">Cloud Sync Migration</div>
+        <div class="announcement-card-body">
+          Your bookmarks are currently synced to a GitLab snippet, which has a storage limit
+          that counts every past version of your bookmarks rather than just the current one.
+          A large collection reaches that limit eventually, and syncing then stops. To prevent
+          this from happening, BMZ will migrate from Snippets to a GitLab repository. This
+          takes about a minute and nothing is lost.
+        </div>
+      </div>
+    </div>
+    <div class="announcement-card-actions">
+      <button class="announcement-setup-btn" id="migrationCardStart">Migrate now</button>
+      <button class="announcement-dismiss-btn" id="migrationCardDismiss">Not now</button>
+    </div>
+  `;
+  container.appendChild(card);
+
+  setTimeout(() => {
+    document.getElementById('migrationCardStart')?.addEventListener('click', () => {
+      window.app?.showSnippetSetup('migrate');
+    });
+
+    // Snoozed rather than silenced. The limit does not go away, so asking again
+    // in a week is honest, and it is quiet enough not to nag.
+    document.getElementById('migrationCardDismiss')?.addEventListener('click', () => {
+      migrationDismissedUntil = Date.now() + MIGRATION_SNOOZE_MS;
+      safeLocalStorage.setItem('bmz_migration_snoozed_until', String(migrationDismissedUntil));
+      renderBookmarks();
+    });
+  }, 0);
+}
+
 function renderSyncNoticeCard(container) {
   if (!syncNoticeVisible || syncNoticeDismissed) return;
 
@@ -2643,7 +2703,7 @@ function renderSyncNoticeCard(container) {
       <div class="sync-notice-text">
         <div class="announcement-card-title">Sync was paused to protect your data</div>
         <div class="announcement-card-body">
-          BMZ found differences between your Snippet and your local bookmarks that need
+          BMZ found differences between your cloud bookmarks and this device that need
           your approval. Please review the changes to resume syncing.
         </div>
         <div class="sync-notice-summary">${syncNoticeSummary(syncNoticeCounts)}</div>
@@ -2660,7 +2720,8 @@ function renderSyncNoticeCard(container) {
   // of the render is still running.
   setTimeout(() => {
     document.getElementById('syncNoticeReview')?.addEventListener('click', () => {
-      window.app?.showHeldPushDialog();
+      /* [ZeroLabs] 2026-09-08 2:20 AM - edited: a click always gets an answer */
+      window.app?.showHeldPushDialog(true);
     });
     // Dismissal lasts until the situation changes. The amber sync arrows stay on
     // whatever happens here, so the signal is never fully silenced.
@@ -6076,7 +6137,7 @@ function describeSyncError(error) {
     return message;
   }
   if (/not found/i.test(message)) {
-    return 'The GitLab snippet no longer exists. Open BMZ and set up sync again.';
+    return 'Your cloud bookmark store no longer exists. Open BMZ and set up sync again.';
   }
   if (/401|403|unauthorized|forbidden/i.test(message)) {
     return 'GitLab rejected the request. Your token may have expired.';
@@ -6209,22 +6270,25 @@ function showShareConflict(deferral) {
   const blocks = [];
   if (pendingPush.length) {
     blocks.push(block(
-      `Add ${count(pendingPush.length, 'bookmark', 'bookmarks')} from this device to your Snippet.`,
+      `Add ${count(pendingPush.length, 'bookmark', 'bookmarks')} from this device to the cloud.`,
       pendingPush, false));
   }
   if (fromSnippet.length) {
     blocks.push(block(
-      `Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your Snippet to match this device.`,
+      /* [ZeroLabs] 2026-09-07 11:20 PM - edited: the share window said Snippet */
+      // The last user-facing "Snippet" on the share path. Everything else there
+      // already said GitLab or cloud.
+      `Remove ${count(fromSnippet.length, 'bookmark', 'bookmarks')} from your cloud bookmarks to match this device.`,
       fromSnippet, false));
   }
   if (fromDevice.length) {
     blocks.push(block(
-      `Remove ${count(fromDevice.length, 'bookmark', 'bookmarks')} from this device to match the Snippet.`,
+      `Remove ${count(fromDevice.length, 'bookmark', 'bookmarks')} from this device to match the cloud.`,
       fromDevice, false));
   }
   if (overwrites.length) {
     blocks.push(block(
-      `Rename or move ${count(overwrites.length, 'bookmark', 'bookmarks')} on this device to match the Snippet.`,
+      `Rename or move ${count(overwrites.length, 'bookmark', 'bookmarks')} on this device to match the cloud.`,
       overwrites, true));
   }
 
