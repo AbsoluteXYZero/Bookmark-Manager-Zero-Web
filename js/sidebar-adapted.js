@@ -7922,8 +7922,8 @@ async function openChangelogModal() {
         <svg width="48" height="48" fill="currentColor" viewBox="0 0 24 24" style="opacity: 0.3; margin-bottom: 12px;">
           <path d="M13.5,8H12V13L16.28,15.54L17,14.33L13.5,12.25V8M13,3A9,9 0 0,0 4,12H1L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.5,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3Z"/>
         </svg>
-        <p style="font-size: 14px;">No changes recorded yet.</p>
-        <p style="font-size: 12px; opacity: 0.7; margin-top: 8px;">Your bookmark changes will appear here.</p>
+        <p style="font-size: 14px;">No events recorded yet.</p>
+        <p style="font-size: 12px; opacity: 0.7; margin-top: 8px;">Bookmark changes and errors will appear here.</p>
       </div>
     `;
   } else {
@@ -7938,6 +7938,8 @@ async function openChangelogModal() {
       else if (entry.type === 'move') iconColor = '#3b82f6';
       else if (entry.type === 'undo') iconColor = '#8b5cf6';
       else if (entry.type === 'pre-sync-snapshot') iconColor = '#f59e0b';
+      /* [ZeroLabs] 2026-09-08 6:50 AM - added: errors are recorded here too */
+      else if (entry.type === 'error') iconColor = '#ef4444';
       else iconColor = '#f59e0b';
 
       // SVG icons for operation types
@@ -7950,6 +7952,8 @@ async function openChangelogModal() {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M14,18L12.6,16.6L15.2,14H4V12H15.2L12.6,9.4L14,8L19,13L14,18M20,6H10A2,2 0 0,0 8,8V11H10V8H20V20H10V17H8V20A2,2 0 0,0 10,22H20A2,2 0 0,0 22,20V8A2,2 0 0,0 20,6Z"/></svg>`;
       } else if (entry.type === 'undo') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 19.56,16H22.01C21.43,12.16 17.97,9 13.9,9H12.5V8M12.5,16C10.54,16 8.77,15.28 7.38,14.12L11,10.5H2V19.5L5.6,15.9C7.45,17.5 9.85,18.5 12.5,18.5C17.1,18.5 20.95,15.4 21.9,11.2H19.38C18.77,14.16 15.76,16.34 12.5,16Z"/></svg>`;
+      } else if (entry.type === 'error') {
+        icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/></svg>`;
       } else if (entry.type === 'pre-sync-snapshot') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>`;
       } else {
@@ -7958,7 +7962,7 @@ async function openChangelogModal() {
 
       // SVG icons for item types (skip for sync snapshots)
       let itemIcon = '';
-      if (entry.type !== 'pre-sync-snapshot') {
+      if (entry.type !== 'pre-sync-snapshot' && entry.type !== 'error') {
         if (entry.itemType === 'folder') {
           itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-primary);"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>`;
         } else {
@@ -7968,7 +7972,21 @@ async function openChangelogModal() {
 
       let detailsHtml = '';
       if (entry.details) {
-        if (entry.type === 'pre-sync-snapshot') {
+        if (entry.type === 'error') {
+          /* [ZeroLabs] 2026-09-08 6:50 AM - added: the frame is the useful half */
+          // The message says what broke; this says where. On a phone there is no
+          // console, so if it is not printed here it is not available at all.
+          //
+          // Escaped locally, because this renderer does no escaping of its own and an
+          // error message can carry anything, including markup from a failed request.
+          const safe = (v) => String(v == null ? '' : v)
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+          const where = entry.details.frame
+            ? `<div style="font-size: 10px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px; word-break: break-all; font-family: monospace;">${safe(entry.details.frame)}</div>`
+            : '';
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">${safe(entry.details.context || 'Error')}</div>${where}`;
+        } else if (entry.type === 'pre-sync-snapshot') {
           detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">⚠️ Replaced all local bookmarks with remote data</div>`;
         } else if (entry.type === 'undo') {
           if (entry.details.undoType === 'move') {
@@ -8092,7 +8110,7 @@ async function restoreChangelogEntry(entryId) {
     const entry = entries.find(e => e.id == entryId);
 
     if (!entry) {
-      alert('Changelog entry not found.');
+      alert('Event not found.');
       return;
     }
 
@@ -9918,7 +9936,7 @@ function setupEventListeners() {
 
   if (clearChangelogBtn) {
     clearChangelogBtn.addEventListener('click', async () => {
-      if (confirm('Are you sure you want to clear all changelog history? This action cannot be undone.')) {
+      if (confirm('Are you sure you want to clear the entire event log? This action cannot be undone.')) {
         await clearChangelog();
         await openChangelogModal(); // Refresh the display
       }

@@ -3,9 +3,35 @@
  * Handles error toasts and logging for the application
  */
 
-import { safeLocalStorage } from './storage-utils.js';
+import { safeLocalStorage, addChangelogEntry } from './storage-utils.js';
 
 const MAX_ERROR_LOGS = 50;
+
+/* [ZeroLabs] 2026-09-08 6:50 AM - added: errors land in the changelog you can actually read */
+// errorLogs in localStorage already held the message, the stack and the context,
+// but reading it needs a console, and on the Fold 5 in the APK there is not one.
+// The changelog is the only log surface reachable on the device, so errors go
+// there too. They render as their own type with no Restore button, since there is
+// nothing to restore.
+//
+// Throttled by message: a failing sync or a scan loop can raise the same rejection
+// dozens of times a minute, and without this it would push every real bookmark
+// change out of a 1000-entry list.
+const ERROR_REPEAT_WINDOW_MS = 30000;
+const recentErrorTimes = new Map();
+
+function shouldRecordError(message) {
+  const now = Date.now();
+
+  // Drop anything that aged out, so the map cannot grow without bound.
+  for (const [key, at] of recentErrorTimes) {
+    if (now - at > ERROR_REPEAT_WINDOW_MS) recentErrorTimes.delete(key);
+  }
+
+  if (recentErrorTimes.has(message)) return false;
+  recentErrorTimes.set(message, now);
+  return true;
+}
 
 let errorToast;
 let errorTitle;
@@ -90,6 +116,25 @@ async function logError(error, context = '') {
     // Save to storage
     safeLocalStorage.setItem('errorLogs', JSON.stringify(errorLogs));
     console.error(`[Error Logged] ${context}:`, error);
+
+    /* [ZeroLabs] 2026-09-08 6:50 AM - added: mirror it into the changelog */
+    // Deliberately after the localStorage write, so a failure here can never cost
+    // the error record itself. The first stack frame is carried in details, which
+    // is the line that actually identifies where it came from.
+    if (shouldRecordError(errorLog.message)) {
+      const firstFrame = (errorLog.stack || '')
+        .split('\n')
+        .map(line => line.trim())
+        .find(line => line.startsWith('at ') || line.includes('@')) || '';
+
+      await addChangelogEntry(
+        'error',
+        'error',
+        errorLog.message || 'Unknown error',
+        null,
+        { context: context || 'Error', frame: firstFrame }
+      );
+    }
   } catch (storageError) {
     console.error('Failed to log error to storage:', storageError);
   }
