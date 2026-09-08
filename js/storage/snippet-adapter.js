@@ -390,6 +390,37 @@ class SnippetAdapter {
   // decide whether a file needs create or update, and answering "no files" for
   // what was really a network failure makes the next write say create for a file
   // that exists, which GitLab refuses outright.
+  /* [ZeroLabs] 2026-09-08 3:10 AM - added: a name the user recognises */
+  // The settings dialog showed a bare id under a hardcoded "Snippet:" label, so
+  // on a repository it was both uninformative and wrong. A snippet has a title;
+  // a project has a path. path_with_namespace rather than name, because
+  // "bmz-bookmarks" alone does not say whose account it is on.
+  async describeStore() {
+    const headers = await this.getHeaders();
+    const url = this.isProject()
+      ? `${this.apiBase}/projects/${this.storeRef()}`
+      : `${this.apiBase}/snippets/${this.snippetId}`;
+
+    const response = await this.fetchWithTimeout(url, { headers });
+    this.updateRateLimitFromResponse(response);
+    if (!response.ok) {
+      throw new Error(`Failed to read the store: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const name = this.isProject() ? data.path_with_namespace : data.title;
+    return { kind: this.isProject() ? 'project' : 'snippet', name: name || '' };
+  }
+
+  /* [ZeroLabs] 2026-09-08 3:10 AM - added: drop the suffix BMZ adds to its own snippets */
+  // Every snippet BMZ creates is titled "BMZ Bookmarks - Managed by Bookmark
+  // Manager Zero". The second half exists so the snippet is identifiable in
+  // GitLab's own list, and it is noise once you are already inside BMZ. A title
+  // the user chose is left exactly as they wrote it.
+  cleanStoreName(name) {
+    return String(name || '').replace(/ - Managed by Bookmark Manager Zero\s*$/i, '').trim();
+  }
+
   /* [ZeroLabs] 2026-09-08 2:00 AM - added: the repositories on this account */
   // min_access_level=30 is Developer, the lowest level that can commit. A
   // repository the user can merely read is useless as a bookmark store, and

@@ -70,7 +70,7 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    getManifest: () => ({ version: '5.7' }),
+    getManifest: () => ({ version: '5.8' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -172,26 +172,74 @@ function fitHeaderText() {
 }
 window.fitHeaderText = fitHeaderText;
 
+/* [ZeroLabs] 2026-09-08 4:05 AM - added: scale the status message, never clip it */
+// The status bar puts a fixed-width section on each side of the progress message,
+// so on a narrow window a long message had nowhere to go and overlapped the
+// "Scan All Bookmarks" label to its left. The CSS now lets the middle section
+// shrink; this makes the text fit inside whatever it gets.
+//
+// Scaled rather than truncated: every one of these messages carries a count or a
+// stage that is the entire reason it is on screen, and an ellipsis would eat
+// exactly the numbers you are watching.
+function fitStatusText() {
+  const center = document.querySelector('.scan-status-bar .status-center');
+  const el = document.getElementById('scanProgress');
+  if (!center || !el) return;
+
+  el.style.transformOrigin = 'center center';
+  el.style.transform = '';                           // reset before measuring
+
+  // The info icon shares the centre section, so its width is not available.
+  const icon = center.querySelector('.info-icon');
+  const iconWidth = icon ? icon.getBoundingClientRect().width + 6 : 0;
+  const box = center.clientWidth - iconWidth;
+
+  const range = document.createRange();
+  range.selectNodeContents(el);
+  const width = range.getBoundingClientRect().width;
+
+  // Floor at 0.6: below that the numbers stop being readable, and at that point
+  // overflowing slightly is the lesser evil.
+  if (width > box && box > 0) {
+    el.style.transform = 'scale(' + Math.max(0.6, box / width) + ')';
+  }
+}
+window.fitStatusText = fitStatusText;
+
+const scheduleFit = () => requestAnimationFrame(() => {
+  fitHeaderText();
+  fitStatusText();
+});
+
 function initHeaderFit() {
-  requestAnimationFrame(fitHeaderText);
+  scheduleFit();
+
+  /* [ZeroLabs] 2026-09-08 4:05 AM - added: the status text changes constantly */
+  // Unlike the header, this one is rewritten on every scanned batch, so it has to
+  // be re-fitted on content change rather than only on resize.
+  const progress = document.getElementById('scanProgress');
+  if (progress && window.MutationObserver && !progress.dataset.fitObserved) {
+    progress.dataset.fitObserved = '1';
+    new MutationObserver(scheduleFit).observe(progress, { childList: true, characterData: true, subtree: true });
+  }
   // Observe the BUTTON cluster: its width changes when GitLab login swaps the buttons
   // (login -> sync + logout). .header-top stays full-width so observing it wouldn't fire.
   const cluster = document.querySelector('.header-settings');
   if (cluster && window.ResizeObserver && !cluster.dataset.fitObserved) {
     cluster.dataset.fitObserved = '1';
-    new ResizeObserver(() => requestAnimationFrame(fitHeaderText)).observe(cluster);
+    new ResizeObserver(scheduleFit).observe(cluster);
   }
   // Re-fit when the title/subtitle text changes (e.g. the version string is injected after load)
   ['.logo-title', '.logo-subtitle'].forEach((sel) => {
     const t = document.querySelector(sel);
     if (t && window.MutationObserver && !t.dataset.fitTextObserved) {
       t.dataset.fitTextObserved = '1';
-      new MutationObserver(() => requestAnimationFrame(fitHeaderText)).observe(t, { childList: true, characterData: true, subtree: true });
+      new MutationObserver(scheduleFit).observe(t, { childList: true, characterData: true, subtree: true });
     }
   });
   if (!window._headerFitResize) {
     window._headerFitResize = true;
-    window.addEventListener('resize', () => requestAnimationFrame(fitHeaderText));
+    window.addEventListener('resize', scheduleFit);
   }
 }
 window.initHeaderFit = initHeaderFit;
@@ -203,7 +251,7 @@ if (document.readyState === 'loading') {
 } else {
   initHeaderFit();
 }
-window.addEventListener('load', () => requestAnimationFrame(fitHeaderText));
+window.addEventListener('load', scheduleFit);
 
 // ============================================================================
 // FIRST-TIME SETUP CARD
@@ -2618,7 +2666,7 @@ function buildRecentBody(resolved) {
 function syncNoticeSummary(counts) {
   const n = (c, one, many) => `${c} ${c === 1 ? one : many}`;
   const parts = [];
-  if (counts.fromSnippet > 0) parts.push(n(counts.fromSnippet, 'bookmark', 'bookmarks') + ' to remove from your Snippet');
+  if (counts.fromSnippet > 0) parts.push(n(counts.fromSnippet, 'bookmark', 'bookmarks') + ' to remove from your cloud bookmarks');
   if (counts.fromDevice > 0) parts.push(n(counts.fromDevice, 'bookmark', 'bookmarks') + ' to remove from this device');
   if (counts.overwrites > 0) parts.push(n(counts.overwrites, 'bookmark', 'bookmarks') + ' to rename or move');
   return parts.join('  ·  ');

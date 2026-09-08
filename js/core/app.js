@@ -2408,15 +2408,21 @@ class App {
               <span id="manualSyncStatus" style="position:absolute;left:50%;top:56%;transform:translate(-50%,-50%);font-size:13px;font-weight:700;color:#ffffff;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px rgba(0,0,0,0.8);">Sync</span>
             </button>
           </div>
+          <!-- [ZeroLabs] 2026-09-08 3:35 AM - moved: out of the collapsed panel -->
+          <!-- Which store you are connected to is the first thing you want when
+               you open this dialog, and it was hidden behind the Cloud Sync
+               Options toggle, which starts collapsed. It sits with the sync
+               button now, above the divider, since both describe the current
+               connection rather than offering an action. -->
+          <div style="text-align:center;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);line-height:1.7;padding:4px 0;">
+            Connected to ${snippetAdapter.isProject() ? 'Repository' : 'Snippet'}:<br><code id="connectedStoreName" style="font-size:12px;word-break:break-all;">${snippetId}</code>
+          </div>
           <hr style="border:none;border-top:1px solid var(--md-sys-color-outline,#444);margin:4px 0;">
           <button id="snippetOptionsToggle" aria-expanded="false" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:space-between;gap:8px;">
             <span>Cloud Sync Options</span>
             <svg id="snippetOptionsChevron" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0;transition:transform 0.2s ease;transform:rotate(-90deg);"><path d="M7.41,8.58L12,13.17L16.59,8.58L18,10L12,16L6,10L7.41,8.58Z"/></svg>
           </button>
           <div id="snippetOptionsPanel" style="display:none;flex-direction:column;gap:10px;">
-            <p style="margin:0;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">
-              Connected to Snippet: <code style="font-size:11px;">${snippetId}</code>
-            </p>
             <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--md-sys-color-surface-variant,#2a2a2a);border-radius:8px;">
               <span style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);">Token Storage: <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${modeLabel}</strong></span>
               <button id="switchTokenMode" style="padding:6px 12px;border-radius:6px;border:none;background:var(--md-sys-color-secondary-container,#3a3a5c);color:var(--md-sys-color-on-secondary-container,#d0bcff);font-size:12px;cursor:pointer;">${switchLabel}</button>
@@ -2451,6 +2457,21 @@ class App {
       /* [ZeroLabs] 2026-08-19 6:01 PM - added: collapsible snippet options section (see also: Bookmark-Manager-Zero-Firefox/sidebar.js) */
       // Collapsed by default: this dialog only renders when a snippet is already
       // connected, so the two sync buttons are all most visits need.
+      /* [ZeroLabs] 2026-09-08 3:10 AM - added: fill in the store's real name */
+      // Not awaited. The dialog is already usable, and a slow GitLab must not
+      // hold it shut over a label. On failure the id simply stays, which is what
+      // the dialog showed before this existed.
+      if (snippetId) {
+        snippetAdapter.describeStore().then(info => {
+          const name = snippetAdapter.cleanStoreName(info && info.name);
+          if (!name) return;
+          const el = dialog.querySelector('#connectedStoreName');
+          if (el) el.textContent = name;
+        }).catch(error => {
+          console.warn('[Store] Could not read the store name:', error);
+        });
+      }
+
       const snippetOptionsToggle = dialog.querySelector('#snippetOptionsToggle');
       const snippetOptionsPanel = dialog.querySelector('#snippetOptionsPanel');
       const snippetOptionsChevron = dialog.querySelector('#snippetOptionsChevron');
@@ -2553,7 +2574,7 @@ class App {
             // just a second notification for a non-event.
             if (outcome.changed) {
               this.showToast(outcome.addedLocally > 0
-                ? `Synced. ${outcome.addedLocally} added here, snippet updated.`
+                ? `Synced. ${outcome.addedLocally} added here, cloud updated.`
                 : 'Synced. Cloud updated.', 'success');
             }
           } catch (error) {
@@ -2589,8 +2610,8 @@ class App {
           remoteEntries.forEach((entry, key) => { if (!localEntries.has(key)) losing++; });
 
           const proceed = confirm(losing > 0
-            ? `Warning: the snippet will be replaced with this device's bookmarks.\n\n${losing} item(s) currently in the snippet are not on this device and will be lost, on every device using it.\n\nContinue?`
-            : 'The snippet will be replaced with this device\'s bookmarks. Nothing in the snippet is missing here, so nothing will be lost.\n\nContinue?');
+            ? `Warning: your cloud bookmarks will be replaced with this device's.\n\n${losing} item(s) currently in the cloud are not on this device and will be lost, on every device using it.\n\nContinue?`
+            : 'Your cloud bookmarks will be replaced with this device\'s. Nothing in the cloud is missing here, so nothing will be lost.\n\nContinue?');
           if (!proceed) return;
 
           modal.remove();
@@ -2603,7 +2624,7 @@ class App {
       });
 
       dialog.querySelector('#forceOverwriteLocal')?.addEventListener('click', async () => {
-        if (!confirm('Warning: every bookmark on this device will be replaced with the cloud copy.\n\nAnything here that is not in the snippet will be lost.\n\nContinue?')) return;
+        if (!confirm('Warning: every bookmark on this device will be replaced with the cloud copy.\n\nAnything here that is not in the cloud will be lost.\n\nContinue?')) return;
         try {
           const remoteData = await snippetAdapter.readBookmarks(snippetId);
           modal.remove();
@@ -2791,10 +2812,10 @@ class App {
       <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:440px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
         <h2 style="margin:0 0 12px 0;font-size:18px;">🔑 Your GitLab Token</h2>
         <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 12px 0;">This is the Personal Access Token currently saved in BMZ on this device. Keep it private — it grants access to your GitLab bookmark snippet.</p>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:16px;">
-          <input type="password" readonly id="revealTokenInput" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
-          <button id="toggleReveal" style="padding:10px 12px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;cursor:pointer;">Show</button>
-          <button id="copyRevealToken" style="padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;">Copy</button>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:16px;">
+          <input type="password" readonly id="revealTokenInput" style="flex:1 1 100%;min-width:0;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
+          <button id="toggleReveal" style="flex:1 1 auto;flex-shrink:0;padding:10px 12px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;cursor:pointer;">Show</button>
+          <button id="copyRevealToken" style="flex:1 1 auto;flex-shrink:0;padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;">Copy</button>
         </div>
         <button id="closeRevealModal" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);font-size:14px;cursor:pointer;">Close</button>
       </div>
