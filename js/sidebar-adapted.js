@@ -7940,6 +7940,8 @@ async function openChangelogModal() {
       else if (entry.type === 'pre-sync-snapshot') iconColor = '#f59e0b';
       /* [ZeroLabs] 2026-09-08 6:50 AM - added: errors are recorded here too */
       else if (entry.type === 'error') iconColor = '#ef4444';
+      /* [ZeroLabs] 2026-09-13 - added: published notices are recorded here too */
+      else if (entry.type === 'notice') iconColor = '#3b82f6';
       else iconColor = '#f59e0b';
 
       // SVG icons for operation types
@@ -7952,6 +7954,8 @@ async function openChangelogModal() {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M14,18L12.6,16.6L15.2,14H4V12H15.2L12.6,9.4L14,8L19,13L14,18M20,6H10A2,2 0 0,0 8,8V11H10V8H20V20H10V17H8V20A2,2 0 0,0 10,22H20A2,2 0 0,0 22,20V8A2,2 0 0,0 20,6Z"/></svg>`;
       } else if (entry.type === 'undo') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12.5,8C9.85,8 7.45,9 5.6,10.6L2,7V16H11L7.38,12.38C8.77,11.22 10.54,10.5 12.5,10.5C16.04,10.5 19.05,12.81 19.56,16H22.01C21.43,12.16 17.97,9 13.9,9H12.5V8M12.5,16C10.54,16 8.77,15.28 7.38,14.12L11,10.5H2V19.5L5.6,15.9C7.45,17.5 9.85,18.5 12.5,18.5C17.1,18.5 20.95,15.4 21.9,11.2H19.38C18.77,14.16 15.76,16.34 12.5,16Z"/></svg>`;
+      } else if (entry.type === 'notice') {
+        icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/></svg>`;
       } else if (entry.type === 'error') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/></svg>`;
       } else if (entry.type === 'pre-sync-snapshot') {
@@ -7962,7 +7966,7 @@ async function openChangelogModal() {
 
       // SVG icons for item types (skip for sync snapshots)
       let itemIcon = '';
-      if (entry.type !== 'pre-sync-snapshot' && entry.type !== 'error') {
+      if (entry.type !== 'pre-sync-snapshot' && entry.type !== 'error' && entry.type !== 'notice') {
         if (entry.itemType === 'folder') {
           itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-primary);"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>`;
         } else {
@@ -7972,7 +7976,9 @@ async function openChangelogModal() {
 
       let detailsHtml = '';
       if (entry.details) {
-        if (entry.type === 'error') {
+        if (entry.type === 'notice') {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Announcement from BMZ</div>`;
+        } else if (entry.type === 'error') {
           /* [ZeroLabs] 2026-09-08 6:50 AM - added: the frame is the useful half */
           // The message says what broke; this says where. On a phone there is no
           // console, so if it is not printed here it is not available at all.

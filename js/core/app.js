@@ -3691,7 +3691,10 @@ class App {
   /**
    * Show toast notification
    */
-  showToast(message, type = 'info') {
+  /* [ZeroLabs] 2026-09-13 - edited: optional duration, for notices that need reading */
+  // The three-second default suits "Saved" and "Synced". A published notice is a
+  // sentence or two and needs longer on screen, so callers can ask for it.
+  showToast(message, type = 'info', duration = 3000) {
     // Full toast system available in error-notification-manager.js and sidebar-adapted.js
     console.log(`[Toast ${type}]:`, message);
 
@@ -3719,7 +3722,125 @@ class App {
       setTimeout(() => {
         toast.remove();
       }, 300);
-    }, 3000);
+    }, duration);
+  }
+
+  /* [ZeroLabs] 2026-09-13 - added: published notices, shown once as a toast */
+  // notices.json on the website is the message source. Publishing is editing the
+  // file and pushing; the site sends no-store on .json so the edit is live at
+  // once. Each entry has a numeric id that only ever goes up. The client keeps
+  // the highest id it has shown and toasts everything above it, so rewording or
+  // deleting an old entry never re-notifies anyone. Only a new, higher id fires.
+  //
+  // A toast auto-dismisses, so the same notice is also written to the Event Log
+  // as a notice entry. Without that, one shown while the user was not looking
+  // is gone for good.
+  //
+  // Silent on every failure. A missing or malformed file must never disturb the
+  // app; it simply tries again on the next open.
+  /* [ZeroLabs] 2026-09-13 - added: a published notice is a dialog, not a toast */
+  // A corner toast that vanishes in seconds is the wrong shape for an update
+  // message someone is meant to read. This is centred, sized to be read, and
+  // stays until the X or Escape is pressed. The backdrop does NOT close it: a
+// stray tap, easy on a phone, must not dismiss a message before it was read.
+  // It resolves when closed, so several notices arrive one after another.
+  showNoticeDialog(text) {
+    return new Promise(resolve => {
+      const overlay = document.createElement('div');
+      overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 10003; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;';
+  
+      const panel = document.createElement('div');
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      panel.setAttribute('aria-labelledby', 'bmzNoticeTitle');
+      panel.style.cssText = 'position: relative; background: var(--md-sys-color-surface, #1e1e1e); color: var(--md-sys-color-on-surface, #e0e0e0); border: 1px solid var(--md-sys-color-outline, #444); border-radius: 16px; padding: 28px 28px 20px 28px; width: 100%; max-width: 560px; max-height: 85vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.45); box-sizing: border-box;';
+  
+      const close = document.createElement('button');
+      close.setAttribute('aria-label', 'Close');
+      close.textContent = '\u00d7';
+      close.style.cssText = 'position: absolute; top: 10px; right: 12px; width: 36px; height: 36px; border: none; background: transparent; color: var(--md-sys-color-on-surface-variant, #aaa); font-size: 26px; line-height: 1; cursor: pointer; border-radius: 8px;';
+  
+      const title = document.createElement('h2');
+      title.id = 'bmzNoticeTitle';
+      title.textContent = 'A message from BMZ';
+      title.style.cssText = 'margin: 0 32px 14px 0; font-size: 18px; font-weight: 600; color: var(--md-sys-color-primary, #90caf9);';
+  
+      // textContent, never innerHTML: the text comes from a file on the web.
+      // pre-line keeps any line breaks written into the JSON.
+      const body = document.createElement('div');
+      body.textContent = text;
+      body.style.cssText = 'font-size: 15px; line-height: 1.6; white-space: pre-line; word-break: break-word;';
+  
+      const foot = document.createElement('div');
+      foot.textContent = 'You can read this again at any time in the Event Log.';
+      foot.style.cssText = 'margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--md-sys-color-outline-variant, #333); font-size: 12px; color: var(--md-sys-color-on-surface-variant, #aaa);';
+  
+      panel.appendChild(close);
+      panel.appendChild(title);
+      panel.appendChild(body);
+      panel.appendChild(foot);
+      overlay.appendChild(panel);
+  
+      const finish = () => {
+        document.removeEventListener('keydown', onKey);
+        overlay.remove();
+        resolve();
+      };
+      const onKey = (event) => {
+        if (event.key === 'Escape') finish();
+      };
+  
+      close.addEventListener('click', finish);
+      document.addEventListener('keydown', onKey);
+  
+      document.body.appendChild(overlay);
+      close.focus();
+    });
+  }
+
+  async checkNotices() {
+    if (window.__bmzShareMode) return;
+
+    let notices;
+    try {
+      const response = await fetch('https://bmzweb.absolutezero.fyi/notices.json', { cache: 'no-store' });
+      if (!response.ok) return;
+      notices = await response.json();
+    } catch (error) {
+      return;
+    }
+    if (!Array.isArray(notices)) return;
+
+    const seenId = Number(safeLocalStorage.getItem('bmz_notices_seen_id')) || 0;
+
+    const unseen = notices
+      /* [ZeroLabs] 2026-09-13 - added: only notices addressed to this client */
+      // A website or Android fix is not news to an extension user, and a Web Store
+      // update is not news to the website. Each entry names its targets; one with
+      // no targets field goes to everyone. The Android app is the website in a WebView and counts as website.
+      .filter(notice => notice && Number(notice.id) > seenId && typeof notice.text === 'string')
+      /* [ZeroLabs] 2026-09-13 - added: a draft stays in the file and goes nowhere */
+      // JSON has no comments, and a stray // would invalidate the whole file and
+      // silence every notice. This is how the template entry, and any notice
+      // written ahead of time, sits in the file without being sent.
+      .filter(notice => notice.draft !== true)
+      .filter(notice => {
+        if (!Array.isArray(notice.targets)) return true;
+        return notice.targets.includes('website');
+      })
+      .sort((a, b) => Number(a.id) - Number(b.id));
+
+    if (unseen.length === 0) return;
+
+    /* [ZeroLabs] 2026-09-13 - edited: dialog, one at a time, recorded on close */
+    // The id is stored after each dialog is CLOSED, not when it opens. A notice
+    // abandoned by closing the page is shown again next time, and only then
+    // written to the Event Log, so there is never a duplicate entry.
+    for (const notice of unseen) {
+      await this.showNoticeDialog(notice.text);
+      await addChangelogEntry('notice', 'notice', notice.text, null, {});
+      safeLocalStorage.setItem('bmz_notices_seen_id', String(notice.id));
+    }
   }
 
   /**
@@ -4414,6 +4535,11 @@ class App {
 
       await window.openShareBookmarkModal(this.shareIntent.url, this.shareIntent.title);
     }
+
+    /* [ZeroLabs] 2026-09-13 - added: look for published notices once the app is up */
+    // Not awaited. It fetches, and toasts whenever that lands. Nothing about the
+    // page depends on it, and a slow network must not hold the app.
+    this.checkNotices().catch(() => {});
   }
 
   async showPreRotationPrompt(daysLeft, token) {

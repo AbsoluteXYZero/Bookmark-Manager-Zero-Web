@@ -1,0 +1,13 @@
+[
+  {
+    "draft": true,
+    "id": 0,
+    "targets": ["chrome", "firefox", "website"],
+    "text": "TEMPLATE. Copy this entry, then: give it the next id (higher than every id below), keep only the targets it applies to, write the text, and remove the draft line. Nothing with draft true is ever shown. The Android app counts as website."
+  },
+  {
+    "id": 1,
+    "targets": ["chrome", "firefox", "website"],
+    "text": "Updates for Bookmark Manager Zero will be displayed like this going forward"
+  }
+]

@@ -6,3 +6,10 @@
 
 /*.css
   Cache-Control: no-store
+
+# [ZeroLabs] 2026-09-13 - added: notices.json must never be cached
+# The notice file is edited and pushed to publish a message. Without this the
+# Android WebView (LOAD_DEFAULT, honours cache headers) could hold an old copy
+# and never show the new entry.
+/*.json
+  Cache-Control: no-store
