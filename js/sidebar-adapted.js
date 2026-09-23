@@ -1746,7 +1746,17 @@ async function loadBookmarks() {
 
     // Convert roots object to array for sidebar rendering
     if (tree && tree.roots) {
-      bookmarkTree = Object.values(tree.roots);
+      /* [ZeroLabs] 2026-09-24 5:45 AM - edited: the fullest root folder comes first */
+      // This used Object.values(tree.roots), so the four top-level folders came
+      // out in whatever order bookmarks.json happened to list them, and that
+      // depends on which device wrote the file last. Firefox writes the menu
+      // first; Chrome, which has no menu root, adds it last. A push from Chrome
+      // therefore dropped Bookmarks Menu to the bottom on the website.
+      //
+      // Now the folder holding the most bookmarks is on top. Only the four
+      // root folders are ordered this way; everything inside them keeps its
+      // own order. It changes nothing that is saved or synced.
+      bookmarkTree = orderRootsByBookmarkCount(tree.roots);
     } else {
       bookmarkTree = [];
       console.warn('[loadBookmarks] No roots found in tree');
@@ -8033,6 +8043,33 @@ function countBookmarks(folder) {
     }
     return count;
   }, 0);
+}
+
+/* [ZeroLabs] 2026-09-24 5:45 AM - added: order the four root folders by how full they are */
+// Most bookmarks first. When two hold the same number, Firefox's own order
+// decides - Bookmarks Menu, Toolbar, Other, Mobile - so equal folders never
+// swap places from one load to the next. A root the list does not know goes
+// after the known ones.
+function orderRootsByBookmarkCount(roots) {
+  // Inside the function on purpose: loadBookmarks calls this, and a module
+  // level const declared this far down the file could be read before it exists.
+  const ROOT_TIE_ORDER = ['menu', 'bookmark_bar', 'other', 'mobile'];
+
+  const tieRank = (key) => {
+    const index = ROOT_TIE_ORDER.indexOf(key);
+    return index === -1 ? ROOT_TIE_ORDER.length : index;
+  };
+
+  const entries = Object.entries(roots)
+    .filter(([, node]) => node)
+    .map(([key, node]) => ({ key, node, count: countBookmarks(node) }));
+
+  entries.sort((a, b) => {
+    if (b.count !== a.count) return b.count - a.count;
+    return tieRank(a.key) - tieRank(b.key);
+  });
+
+  return entries.map(entry => entry.node);
 }
 
 // Get all folders recursively for start folder dropdown
