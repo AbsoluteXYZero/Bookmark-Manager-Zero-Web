@@ -4745,76 +4745,80 @@ function findParentById(nodes, childId, parent = null) {
 }
 
 // Toggle folder expanded state
+/* [ZeroLabs] 2026-09-24 2:40 AM - edited: open the folder first, fill in the statuses after */
+// For a folder scanned in the last seven days - the usual case - this used to
+// hold the folder shut until every saved status inside it had been read from
+// IndexedDB, and only then draw it. A comment asked for exactly that, so the
+// coloured dots would be right on first paint. The reads were slow enough
+// (see loadCachedStatusesForFolder) that the wait was visible, worst in the
+// Android WebView.
+//
+// The folder now opens at once, as it always has in the extensions. The saved
+// statuses are read afterwards and the list is redrawn only if any were new,
+// so the dots can appear a moment after the folder on its first opening in a
+// session. Later openings find the statuses already in memory.
 function toggleFolder(folderId, folderElement) {
   const isExpanded = expandedFolders.has(folderId);
 
   if (isExpanded) {
     expandedFolders.delete(folderId);
-  } else {
-    expandedFolders.add(folderId);
-    // When expanding a folder, check its bookmarks only if cache expired (>7 days) or never scanned
-
-    // Get folder node for logging
-    const folderNode = window.bookmarkManager?.getFolder(folderId);
-    const folderTitle = folderNode?.title || folderId;
-
-    if (shouldScanFolder(folderId)) {
-      console.log(`[Folder Scan Cache] "${folderTitle}" needs scanning (cache expired or never scanned)`);
-      setTimeout(async () => {
-        /* [ZeroLabs] 2026-08-28 - fixed: only record a scan that happened */
-        // This saved the timestamp whatever came back, so expanding a folder
-        // with checking switched off marked it scanned for seven days and it
-        // stayed blank long after checking was turned back on.
-        const scanned = await autoCheckBookmarkStatuses();
-        if (scanned) saveFolderScanTimestamp(folderId);
-      }, 100);
-    } else {
-      const lastScan = folderScanTimestamps[folderId];
-      const daysAgo = Math.floor((Date.now() - lastScan) / (24 * 60 * 60 * 1000));
-      console.log(`[Folder Scan Cache] "${folderTitle}" already scanned ${daysAgo} day(s) ago, loading cached statuses...`);
-
-      // Even though we skip scanning, we still need to load cached statuses from IndexedDB
-      // for the bookmarks that are now visible in this expanded folder
-      if (window.scannerService) {
-        // Don't use setTimeout - we need this to complete before rendering
-        try {
-          const promise = loadCachedStatusesForFolder(folderId);
-
-          // Add timeout to prevent UI hang if cache loading fails
-          const timeoutPromise = new Promise((_, reject) => {
-            setTimeout(() => reject(new Error('Cache load timeout')), 5000);
-          });
-
-          Promise.race([promise, timeoutPromise])
-            .then((result) => {
-              console.log('[Folder Toggle] Cache load complete, rendering...');
-              console.log('[Folder Toggle] Cache result:', result);
-
-              // If nothing was loaded from cache, trigger a scan
-              if (result && result.total === 0) {
-                console.log('[Folder Toggle] Cache was empty, triggering auto-scan...');
-                setTimeout(() => {
-                  autoCheckBookmarkStatuses();
-                }, 100);
-              }
-
-              renderBookmarks(); // Re-render to show the loaded statuses
-            })
-            .catch(err => {
-              console.error('[Folder Toggle] Cache load failed:', err);
-              renderBookmarks(); // Render anyway even if cache load fails
-            });
-        } catch (err) {
-          console.error('[Folder Toggle] Error calling loadCachedStatusesForFolder:', err);
-          renderBookmarks();
-        }
-        return; // Exit early, render will happen after cache load
-      }
-    }
+    renderBookmarks();
+    return;
   }
 
-  // Re-render to reflect changes (only if we didn't load cached statuses above)
+  expandedFolders.add(folderId);
   renderBookmarks();
+
+  // When expanding a folder, check its bookmarks only if cache expired (>7 days) or never scanned
+  const folderNode = window.bookmarkManager?.getFolder(folderId);
+  const folderTitle = folderNode?.title || folderId;
+
+  if (shouldScanFolder(folderId)) {
+    console.log(`[Folder Scan Cache] "${folderTitle}" needs scanning (cache expired or never scanned)`);
+    setTimeout(async () => {
+      /* [ZeroLabs] 2026-08-28 - fixed: only record a scan that happened */
+      // This saved the timestamp whatever came back, so expanding a folder
+      // with checking switched off marked it scanned for seven days and it
+      // stayed blank long after checking was turned back on.
+      const scanned = await autoCheckBookmarkStatuses();
+      if (scanned) saveFolderScanTimestamp(folderId);
+    }, 100);
+    return;
+  }
+
+  const lastScan = folderScanTimestamps[folderId];
+  const daysAgo = Math.floor((Date.now() - lastScan) / (24 * 60 * 60 * 1000));
+  console.log(`[Folder Scan Cache] "${folderTitle}" already scanned ${daysAgo} day(s) ago, loading cached statuses...`);
+
+  // Even though we skip scanning, the cached statuses still have to come out
+  // of IndexedDB for the bookmarks this folder now shows.
+  if (!window.scannerService) return;
+
+  // A stuck read must not leave a pending promise for ever
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Cache load timeout')), 5000);
+  });
+
+  Promise.race([loadCachedStatusesForFolder(folderId), timeoutPromise])
+    .then((result) => {
+      console.log('[Folder Toggle] Cache result:', result);
+
+      // If nothing was loaded from cache, trigger a scan
+      if (result && result.total === 0) {
+        console.log('[Folder Toggle] Cache was empty, triggering auto-scan...');
+        setTimeout(() => {
+          autoCheckBookmarkStatuses();
+        }, 100);
+      }
+
+      // Redraw only when something new arrived. The folder is already open,
+      // so a second full render with nothing changed would be wasted work.
+      const newlyLoaded = result ? (result.linkLoaded || 0) + (result.safetyLoaded || 0) : 0;
+      if (newlyLoaded > 0) renderBookmarks();
+    })
+    .catch(err => {
+      console.error('[Folder Toggle] Cache load failed:', err);
+    });
 }
 
 // Load cached statuses for all bookmarks in a folder
@@ -4861,7 +4865,13 @@ async function loadCachedStatusesForFolder(folderId) {
   // that as empty. A status already sitting on the node is cached data too.
   let alreadyPresent = 0;
 
-  for (const bookmark of bookmarks) {
+  /* [ZeroLabs] 2026-09-24 2:40 AM - edited: read in parallel, not one at a time */
+  // Each status is its own IndexedDB transaction, and this awaited them one
+  // after another, two per bookmark, across every subfolder. A folder holding
+  // 500 bookmarks meant 1,000 reads in a row. IndexedDB runs independent reads
+  // side by side, so each batch now goes at once. Batches keep a folder of
+  // thousands from opening thousands of transactions in the same instant.
+  const loadOne = async (bookmark) => {
     /* [ZeroLabs] 2026-08-28 - edited: 'unknown' is the ABSENCE of a status */
     // Counting any truthy value meant clearCache(), which resets every node to
     // the literal string 'unknown', left this reporting the folder as fully
@@ -4871,24 +4881,31 @@ async function loadCachedStatusesForFolder(folderId) {
     const hasSafety = bookmark.safetyStatus && bookmark.safetyStatus !== 'unknown';
     if (hasLink || hasSafety) alreadyPresent++;
 
-    // Load cached link status
-    if (!bookmark.linkStatus) {
-      const cachedLink = await window.scannerService.getCachedResult(bookmark.url, 'link');
-      if (cachedLink) {
-        bookmark.linkStatus = cachedLink;
-        linkLoaded++;
-      }
-    }
+    // A status already in memory is not read again
+    const linkRead = bookmark.linkStatus
+      ? Promise.resolve(null)
+      : window.scannerService.getCachedResult(bookmark.url, 'link');
+    const safetyRead = bookmark.safetyStatus
+      ? Promise.resolve(null)
+      : window.scannerService.getCachedResult(bookmark.url, 'safety');
 
-    // Load cached safety status
-    if (!bookmark.safetyStatus) {
-      const cachedSafety = await window.scannerService.getCachedResult(bookmark.url, 'safety');
-      if (cachedSafety) {
-        bookmark.safetyStatus = cachedSafety.status;
-        bookmark.safetySources = cachedSafety.sources || [];
-        safetyLoaded++;
-      }
+    const [cachedLink, cachedSafety] = await Promise.all([linkRead, safetyRead]);
+
+    if (cachedLink) {
+      bookmark.linkStatus = cachedLink;
+      linkLoaded++;
     }
+    if (cachedSafety) {
+      bookmark.safetyStatus = cachedSafety.status;
+      bookmark.safetySources = cachedSafety.sources || [];
+      safetyLoaded++;
+    }
+  };
+
+  const CACHE_READ_BATCH = 200;
+  for (let start = 0; start < bookmarks.length; start += CACHE_READ_BATCH) {
+    const batch = bookmarks.slice(start, start + CACHE_READ_BATCH);
+    await Promise.all(batch.map(loadOne));
   }
 
   console.log(`[Cache Load] COMPLETE - Loaded ${linkLoaded} link + ${safetyLoaded} safety statuses for "${folder.title}" (${alreadyPresent} already present)`);

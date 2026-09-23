@@ -60,6 +60,48 @@ function noticeFitsVersion(notice, appVersion) {
   return true;
 }
 
+/* [ZeroLabs] 2026-09-24 3:00 AM - added: are the two sides already the same */
+// When this device and the repository hold exactly the same bookmarks, the
+// three-way question has no answer worth asking: merging, keeping the cloud and
+// keeping this device all end in the same place. So the connect skips it.
+//
+// "The same" means every bookmark matches on URL, title and folder, with the
+// same number of copies of each. Titles are compared trimmed, as everywhere
+// else in sync, because a browser keeps a trailing space an HTML round trip
+// drops. Order inside a folder is NOT compared: it syncs separately, and the
+// repository's order is taken on the next sync.
+function snippetsMatch(localData, remoteData) {
+  const countEntries = (data) => {
+    const counts = new Map();
+    const walk = (node, rootKey, segments) => {
+      if (!node) return;
+      if (node.url) {
+        const key = [rootKey, segments.join('/'), String(node.title || '').trim(), node.url].join('\u0000');
+        counts.set(key, (counts.get(key) || 0) + 1);
+        return;
+      }
+      (node.children || []).forEach(child => {
+        const nextSegments = child.url
+          ? segments
+          : segments.concat(String(child.title || child.name || '').trim());
+        walk(child, rootKey, nextSegments);
+      });
+    };
+    Object.keys((data && data.roots) || {}).forEach(rootKey => {
+      walk(data.roots[rootKey], rootKey, []);
+    });
+    return counts;
+  };
+
+  const local = countEntries(localData);
+  const remote = countEntries(remoteData);
+  if (local.size !== remote.size) return false;
+  for (const [key, count] of local) {
+    if (remote.get(key) !== count) return false;
+  }
+  return true;
+}
+
 class App {
   constructor() {
     this.currentTheme = 'enhanced-blue';
@@ -1490,15 +1532,26 @@ class App {
         // So there was no way to say "keep the cloud". Any repository that
         // already holds BMZ bookmarks now opens one screen with all three.
         const probe = await this.storeProbe(ref);
+
+        /* [ZeroLabs] 2026-09-24 3:00 AM - added: nothing to choose when both sides match */
+        // Identical bookmarks on both sides make all three answers the same,
+        // so connect straight away with the merge, which writes nothing new.
+        let joinInstead = false;
         if (probe.hasBookmarks) {
-          button.disabled = false;
-          button.textContent = original;
-          this.renderStoreExistingChoice(ref, probe.remoteData);
-          return;
+          const localTree = await syncManager.loadLocalBookmarks();
+          if (snippetsMatch(localTree, probe.remoteData)) {
+            console.log('[StoreSetup] This device and the repository already match, connecting without asking');
+            joinInstead = true;
+          } else {
+            button.disabled = false;
+            button.textContent = original;
+            this.renderStoreExistingChoice(ref, probe.remoteData);
+            return;
+          }
         }
 
         endProgress = this.beginStoreProgress();
-        if (kind === 'join') {
+        if (kind === 'join' || joinInstead) {
           await this.storeJoinExisting(ref);
         } else {
           await this.storeUseExisting(ref);
