@@ -92,7 +92,7 @@ function generateBookmarkHTML(bookmarkTree) {
 /**
  * Export bookmarks as HTML file
  *
- * @returns {Promise<{filename: string, saved: boolean, location: string}>}
+ * @returns {Promise<{filename: string, saved: boolean, cancelled: boolean, location: string}>}
  */
 async function exportAsHTML(bookmarkTree) {
   const html = generateBookmarkHTML(bookmarkTree);
@@ -103,7 +103,7 @@ async function exportAsHTML(bookmarkTree) {
   const filename = `bookmarks-${date}.html`;
 
   const result = await saveFile(blob, filename);
-  return { filename, saved: result.saved, location: result.location };
+  return { filename, saved: result.saved, cancelled: result.cancelled, location: result.location };
 }
 
 export { exportAsHTML, generateBookmarkHTML };

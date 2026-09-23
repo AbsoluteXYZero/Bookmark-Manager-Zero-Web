@@ -8238,14 +8238,18 @@ async function exportBookmarks() {
     // This used to click an <a download> and then announce success whatever
     // happened. Inside the Android app the WebView drops that click in silence,
     // so the message was a lie and no file existed. See js/utils/file-save.js.
-    const { saved, location } = await saveFile(blob, filename);
+    const { saved, cancelled, location } = await saveFile(blob, filename);
+
+    /* [ZeroLabs] 2026-09-24 4:15 AM - added: closing the save screen is a choice */
+    // The Android app now asks where to save. Backing out is not a failure.
+    if (cancelled) return;
 
     if (!saved) {
       alert('Export failed. The file was not saved.');
       return;
     }
 
-    const where = location ? `Saved to: ${location}\n\n` : `File: ${filename}\n\n`;
+    const where = location ? `Saved as: ${location}\n\n` : `File: ${filename}\n\n`;
 
     if (format === 'html') {
       alert(

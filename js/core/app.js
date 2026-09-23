@@ -3937,15 +3937,22 @@ class App {
     const runExport = async (exporter) => {
       try {
         const tree = bookmarkManager.getTree();
-        const { filename, saved, location } = await exporter(tree);
+        const { filename, saved, cancelled, location } = await exporter(tree);
+
+        /* [ZeroLabs] 2026-09-24 4:15 AM - added: closing the save screen is a choice */
+        // The Android app now asks where to save. Backing out of that screen is
+        // not a failure, so nothing is reported and the export dialog stays
+        // open for another try.
+        if (cancelled) return;
 
         if (!saved) {
           this.showToast('Export failed. The file was not saved.', 'error');
           return;
         }
 
-        const where = location ? ` to ${location}` : '';
-        this.showToast(`Exported as ${filename}${where}`, 'success');
+        // The save screen reports the name the user chose, the older app a
+        // path in Downloads, and a browser nothing at all
+        this.showToast(`Exported as ${location || filename}`, 'success');
         modal.remove();
       } catch (error) {
         console.error('Export failed:', error);

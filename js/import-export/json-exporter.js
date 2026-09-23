@@ -11,7 +11,7 @@ import { saveFile } from '../utils/file-save.js';
 /**
  * Export bookmarks as JSON file
  *
- * @returns {Promise<{filename: string, saved: boolean, location: string}>}
+ * @returns {Promise<{filename: string, saved: boolean, cancelled: boolean, location: string}>}
  */
 async function exportAsJSON(bookmarkTree) {
   const json = JSON.stringify(bookmarkTree, null, 2);
@@ -22,7 +22,7 @@ async function exportAsJSON(bookmarkTree) {
   const filename = `bookmarks-backup-${date}.json`;
 
   const result = await saveFile(blob, filename);
-  return { filename, saved: result.saved, location: result.location };
+  return { filename, saved: result.saved, cancelled: result.cancelled, location: result.location };
 }
 
 export { exportAsJSON };

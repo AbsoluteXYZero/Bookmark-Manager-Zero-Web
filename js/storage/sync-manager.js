@@ -658,6 +658,28 @@ class SyncManager {
         addedLocally = await this.createSnippetItemsLocally(toAddLocally);
         console.log(`[Reconcile] Added ${addedLocally} item(s) from the snippet to this device`);
         local = await this.loadLocalBookmarks();
+
+        /* [ZeroLabs] 2026-09-24 5:05 AM - fixed: a merge reversed folders and loose bookmarks */
+        // createSnippetItemsLocally makes the shallowest items first and creates
+        // each folder only when its first bookmark arrives, adding everything at
+        // the end. So loose bookmarks in a folder were created before any
+        // subfolder, and every subfolder landed BELOW them. A merge into an
+        // empty device then wrote that reversed tree back to the repository,
+        // and every other device took the reversed order on its next sync.
+        //
+        // The order check at the top of this function ran before these items
+        // existed, so it had nothing to fix. Taking the cloud's order again now
+        // puts every created item where the cloud has it. Items only this
+        // device holds keep their places. Skipped when this device reordered
+        // something itself, because then its own order is the newer one.
+        if (!pushForOrder) {
+          const folders = this.applySnippetOrder(remote, local);
+          if (folders > 0) {
+            await this.saveLocalBookmarks(local);
+            console.log(`[Reconcile] Put ${folders} folder(s) of new items into the cloud's order`);
+          }
+        }
+
         this.emitEvent('localTreeChanged');
       }
 
