@@ -8158,10 +8158,12 @@ function getFaviconUrl(url) {
 }
 
 // Escape HTML
+// [ZeroLabs] 2026-09-23 11:34 PM - edited: also escape quotes, so a title with " cannot break an attribute (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js)
 function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
-  return div.innerHTML;
+  const escaped = div.innerHTML;
+  return escaped.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 // Show error message
@@ -8513,12 +8515,13 @@ function showDuplicatesModal(duplicates) {
     </div>
   `;
 
+  // [ZeroLabs] 2026-09-23 11:34 PM - edited: escape the url, titles and folder paths in the markup below
   for (const duplicate of duplicates) {
     html += `
       <div style="margin-bottom: 10px; padding: 8px; background: rgba(59, 130, 246, 0.05); border-radius: 4px; border: 1px solid rgba(59, 130, 246, 0.2);">
         <div style="margin-bottom: 6px; font-size: 9px;">
           <strong style="color: #1e40af;">URL:</strong>
-          <a href="${duplicate.url}" target="_blank" style="color: #2563eb; text-decoration: none; word-break: break-all; font-size: 9px;">${duplicate.url}</a>
+          <a href="${escapeHtml(duplicate.url)}" target="_blank" style="color: #2563eb; text-decoration: none; word-break: break-all; font-size: 9px;">${escapeHtml(duplicate.url)}</a>
         </div>
         <div style="margin-left: 8px;">
     `;
@@ -8529,12 +8532,12 @@ function showDuplicatesModal(duplicates) {
           <input type="checkbox"
                  id="dup-${bookmark.id}"
                  data-bookmark-id="${bookmark.id}"
-                 data-url="${duplicate.url}"
+                 data-url="${escapeHtml(duplicate.url)}"
                  class="duplicate-checkbox"
                  style="cursor: pointer; width: 10px; height: 10px;">
           <label for="dup-${bookmark.id}" style="cursor: pointer; flex: 1; font-size: 9px;">
-            <span style="font-weight: 500;">${bookmark.title || 'Untitled'}</span>
-            <span style="color: #666; font-size: 8px;"> - in ${bookmark.parentPath || 'Root'}</span>
+            <span style="font-weight: 500;">${escapeHtml(bookmark.title || 'Untitled')}</span>
+            <span style="color: #666; font-size: 8px;"> - in ${escapeHtml(bookmark.parentPath || 'Root')}</span>
           </label>
         </div>
       `;
@@ -8812,9 +8815,9 @@ async function openChangelogModal() {
           detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">${parts.join(' · ')}</div>`;
         } else if (entry.type === 'undo') {
           if (entry.details.undoType === 'move') {
-            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Restored to: ${entry.details.restoredToFolder}</div>`;
+            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Restored to: ${escapeHtml(entry.details.restoredToFolder)}</div>`;
           } else if (entry.details.undoType === 'update') {
-            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Reverted title from: "${entry.details.previousTitle}"</div>`;
+            detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Reverted title from: "${escapeHtml(entry.details.previousTitle)}"</div>`;
           /* [ZeroLabs] 2026-09-22 6:54 PM - added: the undo of a whole approved sync */
           } else if (entry.details.undoType === 'sync-apply') {
             const c = entry.details.counts || {};
@@ -8825,7 +8828,7 @@ async function openChangelogModal() {
             detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Undid ${entry.details.undoType} operation</div>`;
           }
         } else if (entry.details.oldTitle && entry.details.newTitle) {
-          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${entry.details.oldTitle}</div>`;
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Renamed from: ${escapeHtml(entry.details.oldTitle)}</div>`;
         } else if (entry.details.fromFolder && entry.details.toFolder) {
           detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Moved from: ${entry.details.fromFolder} → ${entry.details.toFolder}</div>`;
         } else if (entry.details.folderPath) {
@@ -8833,7 +8836,9 @@ async function openChangelogModal() {
         }
       }
 
-      const urlHtml = entry.url ? `<div class="changelog-url" data-url="${entry.url}" style="font-size: 11px; color: var(--md-sys-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline;" title="Click to copy: ${entry.url}">${entry.url}</div>` : '';
+      // [ZeroLabs] 2026-09-23 11:34 PM - edited: escape the url, the title and the details from the entry
+      const safeUrl = entry.url ? escapeHtml(entry.url) : '';
+      const urlHtml = entry.url ? `<div class="changelog-url" data-url="${safeUrl}" style="font-size: 11px; color: var(--md-sys-color-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; text-decoration: underline;" title="Click to copy: ${safeUrl}">${safeUrl}</div>` : '';
 
       let restoreButtonHtml = '';
       if (entry.type === 'pre-sync-snapshot') {
@@ -8867,7 +8872,7 @@ async function openChangelogModal() {
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 2px;">
                 <span style="font-size: 14px;">${itemIcon}</span>
-                <span style="font-size: 13px; font-weight: 600; color: var(--md-sys-color-on-surface);">${entry.title || 'Untitled'}</span>
+                <span style="font-size: 13px; font-weight: 600; color: var(--md-sys-color-on-surface);">${escapeHtml(entry.title || 'Untitled')}</span>
                 ${restoreButtonHtml}
               </div>
               ${urlHtml}

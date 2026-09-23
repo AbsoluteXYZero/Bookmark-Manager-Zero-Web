@@ -4916,6 +4916,11 @@ class App {
           { title: '✏️ Modified', items: diff.modified, color: 'var(--md-sys-color-primary)' }
         ];
 
+    // [ZeroLabs] 2026-09-23 11:34 PM - added: bookmark titles, urls and paths are escaped before they go in the markup
+    const esc = (s) => String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
     sections.forEach(section => {
       if (section.items.length > 0) {
         html += `
@@ -4926,8 +4931,8 @@ class App {
             <ul style="margin: 0; padding-left: 20px; font-size: 0.9em;">
               ${section.items.slice(0, 5).map(item => `
                 <li style="margin-bottom: 4px;">
-                  ${item.title}${item.url ? ` <span style="opacity: 0.6;">(${item.url})</span>` : ''}
-                  ${item.path ? `<br><span style="opacity: 0.6; font-size: 0.85em;">📁 ${item.path}</span>` : ''}
+                  ${esc(item.title)}${item.url ? ` <span style="opacity: 0.6;">(${esc(item.url)})</span>` : ''}
+                  ${item.path ? `<br><span style="opacity: 0.6; font-size: 0.85em;">📁 ${esc(item.path)}</span>` : ''}
                 </li>
               `).join('')}
               ${section.items.length > 5 ? `<li style="opacity: 0.6;">... and ${section.items.length - 5} more</li>` : ''}
