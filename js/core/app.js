@@ -180,6 +180,13 @@ class App {
       await dbManager.put('settings', { key: 'bmz_mode_chosen', value: true });
       safeLocalStorage.setItem('bmz_mode_chosen', 'true');
       safeLocalStorage.removeItem('bmz_local_mode');
+      /* [ZeroLabs] 2026-09-24 2:10 AM - fixed: leave local mode in IndexedDB too */
+      // showMainApp reads local mode from IndexedDB, and IndexedDB is the
+      // source of truth here. Only the localStorage copy was cleared, so after
+      // a sign-out had set it to true, logging back in with a stored token took
+      // the local-mode branch: login icon still showing, sync never started.
+      // The connect dialog's own path already wrote false here.
+      await dbManager.put('settings', { key: 'bmz_local_mode', value: false });
 
       oauthPAT.token = token;
       oauthPAT.user = user;
@@ -675,6 +682,22 @@ class App {
    * Logout user and return to login screen
    * Clears all local data but does NOT delete remote snippets
    */
+  /* [ZeroLabs] 2026-09-24 2:10 AM - added: a reload that always reloads */
+  // Sign-out and reset used location.href = the same address minus its query.
+  // Assigning an address that differs from the current one only in its #
+  // fragment, or not at all apart from one, does not reload the page: it only
+  // jumps within it, and the page carries on with its old state. This drops
+  // the query AND the fragment, then reloads outright when that is already
+  // the current address.
+  reloadClean() {
+    const cleanUrl = window.location.origin + window.location.pathname;
+    if (window.location.href === cleanUrl) {
+      window.location.reload();
+    } else {
+      window.location.replace(cleanUrl);
+    }
+  }
+
   async logout() {
     try {
       console.log('Logging out...');
@@ -728,13 +751,13 @@ class App {
       // IndexedDB commits are asynchronous even after await returns
       // Force reload to bypass cache and ensure clean state
       setTimeout(() => {
-        window.location.href = window.location.href.split('?')[0];
+        this.reloadClean();
       }, 500);
     } catch (error) {
       console.error('Logout failed:', error);
       // Even if there's an error, try to reload after a delay
       setTimeout(() => {
-        window.location.href = window.location.href.split('?')[0];
+        this.reloadClean();
       }, 500);
     }
   }
@@ -819,7 +842,7 @@ class App {
 
       // Reload page to show login screen
       setTimeout(() => {
-        window.location.href = window.location.href.split('?')[0];
+        this.reloadClean();
       }, 500);
 
     } catch (error) {
@@ -3010,13 +3033,14 @@ class App {
       dialog.querySelector('#disconnectSnippet').addEventListener('click', async () => {
         if (confirm('Are you sure you want to disconnect? This will remove your GitLab token.')) {
           modal.remove();
-          await authManager.clearToken('gitlab');
-          await supabaseManager.clearSession();
-          snippetAdapter.snippetId = null;
-          syncManager.snippetId = null;
-          await dbManager.delete('metadata', 'snippetId');
-          await dbManager.delete('settings', 'bmz_mode_chosen');
-          this.showToast('Disconnected successfully');
+          /* [ZeroLabs] 2026-09-24 2:10 AM - fixed: this was a second, partial sign-out */
+          // It cleared the token and the session and stopped there: no local
+          // mode, the repository still saved in localStorage, the reconcile poll
+          // still running, and no reload. The header kept its sync icon until
+          // the app was restarted. The header's sign-out button goes through
+          // logout(), which does all of it and reloads, so this does the same.
+          this.showToast('Disconnecting...');
+          await this.logout();
         }
       });
       dialog.querySelector('#switchTokenMode').addEventListener('click', async () => {
@@ -4909,6 +4933,14 @@ class App {
 
       const gitlabSyncSettingsBtn = document.getElementById('gitlabSyncSettingsBtn');
       if (gitlabSyncSettingsBtn) gitlabSyncSettingsBtn.style.display = '';
+
+      /* [ZeroLabs] 2026-09-24 2:10 AM - added: hide the connect icon when connected */
+      // The local-mode branch below shows it, and this branch never hid it
+      // again. After a page load that did not matter, because it starts hidden.
+      // Logging in without a reload does not start fresh, so both the connect
+      // icon and the sync icon showed at once.
+      const headerConnectGitlabBtn = document.getElementById('headerConnectGitlabBtn');
+      if (headerConnectGitlabBtn) headerConnectGitlabBtn.style.display = 'none';
 
       // Check if we have a snippet set up
       const hasSnippet = await this.checkSnippetSetup();
