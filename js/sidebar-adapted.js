@@ -13,6 +13,8 @@ import storageAdapter from './storage/storage-adapter.js';
 import scannerService from './core/scanner.js';
 import { parseHTMLBookmarks } from './import-export/html-parser.js';
 import { parseJSONBookmarks } from './import-export/json-parser.js';
+/* [ZeroLabs] 2026-09-23 5:20 PM - added: exports must survive the Android WebView */
+import { saveFile } from './utils/file-save.js';
 import { encryptApiKey, decryptApiKey } from './utils/encryption.js';
 import {
   initErrorToast,
@@ -150,6 +152,10 @@ const browser = {
 // VERSION
 // ============================================================================
 const APP_VERSION = browser.runtime.getManifest().version;
+/* [ZeroLabs] 2026-09-24 1:05 AM - added: app.js needs the version for notices */
+// The `browser` mock is scoped to this module, so app.js cannot ask it.
+// app.js falls back to showing every notice if this is ever missing.
+if (typeof window !== 'undefined') window.bmzAppVersion = APP_VERSION;
 
 /* [ZeroLabs] 2026-06-20 6:31 PM - added: re-fit header text to the space left by the (login-state-dependent) buttons */
 /* [ZeroLabs] 2026-06-20 - scale rendered pixels (transform) to fit text beside the buttons;
@@ -8197,35 +8203,37 @@ async function exportBookmarks() {
 
     // Generate filename with timestamp
     const date = new Date().toISOString().split('T')[0];
-    let filename, blob, url;
+    let filename, blob;
 
     if (format === 'html') {
       // Create HTML file
       const html = generateBookmarkHTML(data);
       blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-      url = URL.createObjectURL(blob);
       filename = `bookmarks-${date}.html`;
     } else {
       // Create JSON file
       const json = JSON.stringify(data, null, 2);
       blob = new Blob([json], { type: 'application/json' });
-      url = URL.createObjectURL(blob);
       filename = `bookmarks-backup-${date}.json`;
     }
 
-    // Create download link and trigger download
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+    /* [ZeroLabs] 2026-09-23 5:20 PM - edited: save through the helper, and tell the truth */
+    // This used to click an <a download> and then announce success whatever
+    // happened. Inside the Android app the WebView drops that click in silence,
+    // so the message was a lie and no file existed. See js/utils/file-save.js.
+    const { saved, location } = await saveFile(blob, filename);
+
+    if (!saved) {
+      alert('Export failed. The file was not saved.');
+      return;
+    }
+
+    const where = location ? `Saved to: ${location}\n\n` : `File: ${filename}\n\n`;
 
     if (format === 'html') {
       alert(
         `✓ Bookmarks exported as HTML!\n\n` +
-        `File: ${filename}\n\n` +
+        where +
         `This file can be imported into:\n` +
         `• Firefox: Bookmarks → Manage Bookmarks → Import and Backup → Import Bookmarks from HTML\n` +
         `• Chrome/Edge: Bookmarks → Import bookmarks and settings\n` +
@@ -8234,7 +8242,7 @@ async function exportBookmarks() {
     } else {
       alert(
         `✓ Bookmarks exported as JSON!\n\n` +
-        `File: ${filename}\n\n` +
+        where +
         `This backup can be imported back into Firefox via:\n` +
         `Bookmarks → Manage Bookmarks → Import and Backup → Restore → Choose File`
       );

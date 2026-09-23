@@ -510,6 +510,44 @@ class SyncManager {
       const remoteVersion = Number(remote?.version) || 0;
       let local = await this.loadLocalBookmarks();
 
+      /* [ZeroLabs] 2026-09-23 8:05 PM - added: order travels in both directions */
+      // The persisted pending flag decides which side is newer, and it survives
+      // a reload, which the in-memory hasUnsyncedChanges does not.
+      //   - pending here: this device reordered since its last push, so its order
+      //     is the newer one. It is published below, by the same push as any
+      //     other change.
+      //   - nothing pending: the snippet's order is the newer one, and is taken.
+      // Saved straight to IndexedDB, not through bookmarkManager, so taking the
+      // cloud order does not mark this device changed and push it straight back.
+      //
+      // A pending change is not enough on its own. Reorder on one device, then
+      // add a bookmark here before this device has synced, and this device has
+      // a change pending while still holding the OLD order. A move made here is
+      // recorded in snippet_local_edited, so an empty record means this device
+      // did not move anything, and it takes the cloud order instead.
+      let pushForOrder = false;
+      try {
+        if (this.orderDiffers(remote, local)) {
+          const moveRecords = await storageAdapter.get(['snippet_local_edited']);
+          const movedHere = (moveRecords.snippet_local_edited || []).length > 0;
+
+          if (movedHere && await this.hasPendingChanges()) {
+            pushForOrder = true;
+            console.log('[Reconcile] This device reordered, publishing its order');
+          } else {
+            const folders = this.applySnippetOrder(remote, local);
+            if (folders > 0) {
+              await this.saveLocalBookmarks(local);
+              this.emitEvent('localTreeChanged');
+              console.log(`[Reconcile] Took the cloud order for ${folders} folder(s)`);
+            }
+          }
+        }
+      } catch (error) {
+        // Order is cosmetic. It must never stop a sync that moves real data.
+        console.warn('[Reconcile] Could not compare the order:', error.message);
+      }
+
       const remoteEntries = this.collectSnippetEntries(remote);
       const localEntries = this.collectSnippetEntries(local);
 
@@ -676,7 +714,10 @@ class SyncManager {
       }
 
       // Outcomes 2 and 3: push when this device has something the snippet lacks.
-      if (!hasLocalAdditions && addedLocally === 0 && !hasLocalEdits) {
+      /* [ZeroLabs] 2026-09-23 8:05 PM - edited: a reorder is something the snippet lacks */
+      // Without pushForOrder a pure reorder landed here, was called "already in
+      // sync", had its pending flag cleared, and was never published.
+      if (!hasLocalAdditions && addedLocally === 0 && !hasLocalEdits && !pushForOrder) {
         await this.setLocalVersion(remoteVersion);
         await this.markPendingChanges(false);
         this.hasUnsyncedChanges = false;
@@ -910,9 +951,29 @@ class SyncManager {
         if (destRoot) {
           if (!Array.isArray(destRoot.children)) destRoot.children = [];
           let parent = destRoot;
-          for (const segment of item.remoteSegments) {
+
+          /* [ZeroLabs] 2026-09-23 6:10 PM - edited: a renamed folder keeps its place */
+          // A folder rename cannot travel as a rename. The snippet has no folder
+          // objects at all - a folder exists only as segments on the bookmarks it
+          // holds - so this device sees every bookmark in that folder move from
+          // one path to another, creates the new folder here, and prunes the old
+          // one once it is empty.
+          //
+          // The new folder used to be pushed onto the end of its parent, so a
+          // renamed folder landed at the BOTTOM of the tree on every other device
+          // while the original sat wherever the user had put it.
+          //
+          // When the folder the bookmark is LEAVING is a sibling of the folder
+          // being created, the new one is spliced in at its position instead.
+          // The old folder is pruned moments later, so the new one ends up in
+          // exactly the old one's slot. `indexOf` compares object identity, so it
+          // is also the sibling test: a bookmark moved into a genuinely new
+          // folder elsewhere gives -1 and still appends.
+          for (let i = 0; i < item.remoteSegments.length; i++) {
+            const segment = item.remoteSegments[i];
             let next = parent.children.find(child =>
               child.type === 'folder' && (child.title || child.name) === segment);
+
             if (!next) {
               next = {
                 id: this.generateLocalId(),
@@ -922,8 +983,19 @@ class SyncManager {
                 dateAdded: Date.now(),
                 children: []
               };
-              parent.children.push(next);
+
+              // Only the LAST segment is the folder the bookmarks move into. A
+              // missing parent above it is a folder nobody had, so it appends.
+              const isLastSegment = i === item.remoteSegments.length - 1;
+              const oldFolderAt = isLastSegment ? parent.children.indexOf(hit.parent) : -1;
+
+              if (oldFolderAt !== -1) {
+                parent.children.splice(oldFolderAt, 0, next);
+              } else {
+                parent.children.push(next);
+              }
             }
+
             if (!Array.isArray(next.children)) next.children = [];
             parent = next;
           }
@@ -1941,6 +2013,129 @@ class SyncManager {
   /**
    * Mark pending changes flag
    */
+  /* [ZeroLabs] 2026-09-23 8:05 PM - added: the order of a folder's contents syncs now */
+  // Reordering was the one change that never travelled, and on the website it
+  // failed in BOTH directions. A reorder produces no added, removed or edited
+  // entry, so the reconcile read it as "already in sync", cleared the pending
+  // flag and never pushed. And nothing read an order back from the snippet.
+  //
+  // The comparison is per FOLDER, not per bookmark, so one drag is one
+  // difference rather than one for every bookmark that shifted below it.
+  //
+  // Items the snippet does not have never move. They keep their exact slots,
+  // and the matched items are dealt back into the slots that remain.
+  //
+  // There is no merge and no prompt. The last device to write decides the order,
+  // which is the model this project uses everywhere else.
+
+  /**
+   * The key that identifies a child inside one folder. Two bookmarks can share
+   * a URL, so repeats are numbered.
+   */
+  orderKeysOf(children) {
+    const seen = new Map();
+    return (children || []).map(child => {
+      const title = (child.title || child.name || '').trim();
+      const base = child.url ? `b:${child.url}` : `f:${title}`;
+      const count = seen.get(base) || 0;
+      seen.set(base, count + 1);
+      return count === 0 ? base : `${base}\u0000#${count}`;
+    });
+  }
+
+  /**
+   * The order this folder's children SHOULD be in, or null when it already is.
+   */
+  targetFolderOrder(localChildren, remoteChildren) {
+    if (!Array.isArray(localChildren) || localChildren.length < 2) return null;
+
+    const desired = this.orderKeysOf(remoteChildren);
+    const localKeys = this.orderKeysOf(localChildren);
+
+    const rank = new Map();
+    desired.forEach((key, index) => {
+      if (!rank.has(key)) rank.set(key, index);
+    });
+
+    const matched = [];
+    localChildren.forEach((child, index) => {
+      if (rank.has(localKeys[index])) {
+        matched.push({ node: child, index, rankValue: rank.get(localKeys[index]) });
+      }
+    });
+    if (matched.length < 2) return null;
+
+    const slots = matched.map(entry => entry.index);
+    const wanted = matched.slice().sort((a, b) => a.rankValue - b.rankValue);
+
+    const target = localChildren.slice();
+    wanted.forEach((entry, position) => {
+      target[slots[position]] = entry.node;
+    });
+
+    const unchanged = target.every((node, index) => node === localChildren[index]);
+    return unchanged ? null : target;
+  }
+
+  /**
+   * Walk both trees and call `visit(localFolder, target)` for every folder whose
+   * order differs. Folders are matched by title, as they are everywhere in sync.
+   */
+  forEachOrderDifference(remoteTree, localTree, visit) {
+    const walk = (remoteNode, localNode) => {
+      if (!remoteNode || !localNode) return;
+      const remoteChildren = remoteNode.children || [];
+      const localChildren = localNode.children || [];
+      if (remoteChildren.length === 0 || localChildren.length === 0) return;
+
+      const target = this.targetFolderOrder(localChildren, remoteChildren);
+      if (target) visit(localNode, target);
+
+      const remoteFolders = new Map();
+      remoteChildren.forEach(child => {
+        if (child.url) return;
+        const title = (child.title || child.name || '').trim();
+        if (!remoteFolders.has(title)) remoteFolders.set(title, child);
+      });
+
+      // Read the children again, because visit may have replaced the array
+      for (const child of (localNode.children || [])) {
+        if (child.url) continue;
+        const match = remoteFolders.get((child.title || child.name || '').trim());
+        if (match) walk(match, child);
+      }
+    };
+
+    const remoteRoots = (remoteTree && remoteTree.roots) || {};
+    const localRoots = (localTree && localTree.roots) || {};
+    Object.keys(remoteRoots).forEach(key => walk(remoteRoots[key], localRoots[key]));
+  }
+
+  /**
+   * True when any folder here is in a different order from the snippet.
+   */
+  orderDiffers(remoteTree, localTree) {
+    let differs = false;
+    this.forEachOrderDifference(remoteTree, localTree, () => {
+      differs = true;
+    });
+    return differs;
+  }
+
+  /**
+   * Put every folder that differs into the snippet's order, in place.
+   *
+   * @returns {number} how many folders changed
+   */
+  applySnippetOrder(remoteTree, localTree) {
+    let folders = 0;
+    this.forEachOrderDifference(remoteTree, localTree, (localFolder, target) => {
+      localFolder.children = target;
+      folders++;
+    });
+    return folders;
+  }
+
   async markPendingChanges(hasPending) {
     await dbManager.put('metadata', { key: 'hasPendingChanges', value: hasPending });
   }

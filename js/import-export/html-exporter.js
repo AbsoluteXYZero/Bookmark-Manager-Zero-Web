@@ -3,6 +3,8 @@
  * Exports bookmarks to Netscape Bookmark Format (compatible with all browsers)
  */
 
+import { saveFile } from '../utils/file-save.js';
+
 /**
  * Convert bookmark nodes to HTML format (recursive)
  */
@@ -84,28 +86,24 @@ function generateBookmarkHTML(bookmarkTree) {
   return html;
 }
 
+/* [ZeroLabs] 2026-09-23 5:20 PM - edited: saving goes through one helper now */
+// The anchor download this used to do is dropped without an error inside the
+// Android app's WebView. See js/utils/file-save.js.
 /**
  * Export bookmarks as HTML file
+ *
+ * @returns {Promise<{filename: string, saved: boolean, location: string}>}
  */
-function exportAsHTML(bookmarkTree) {
+async function exportAsHTML(bookmarkTree) {
   const html = generateBookmarkHTML(bookmarkTree);
   const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
 
   // Generate filename with timestamp
   const date = new Date().toISOString().split('T')[0];
   const filename = `bookmarks-${date}.html`;
 
-  // Create download link and trigger download
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  URL.revokeObjectURL(url);
-
-  return filename;
+  const result = await saveFile(blob, filename);
+  return { filename, saved: result.saved, location: result.location };
 }
 
 export { exportAsHTML, generateBookmarkHTML };

@@ -22,6 +22,44 @@ import touchHandler from '../mobile/touch-handler.js';
 import { safeLocalStorage, addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
 import supabaseManager from '../auth/supabase-manager.js';
 
+/* [ZeroLabs] 2026-09-24 1:35 AM - added: a notice body that copies up to 5.8 cannot see */
+// Every copy of BMZ up to and including 5.8 keeps a notice only when its
+// `text` is a string, and nothing older reads notices at all. So an entry
+// whose body is in `message` instead is skipped by those copies in silence,
+// with nothing to deploy to them. This copy reads `message` first and still
+// accepts `text`, so the entries written before this change keep working.
+//
+// Returns the notice with its body in `text`, which is what the dialog and
+// the Event Log read, or null when it has no body at all.
+function noticeWithBody(notice) {
+  if (!notice) return null;
+  if (typeof notice.message === 'string') return { ...notice, text: notice.message };
+  if (typeof notice.text === 'string') return notice;
+  return null;
+}
+
+/* [ZeroLabs] 2026-09-24 1:05 AM - added: does this copy run the version a notice is about */
+// Versions are compared number by number, so 5.10 is correctly newer than 5.9,
+// which a plain string comparison gets wrong. A missing part counts as 0, so
+// "5.9" and "5.9.0" are equal. An entry with no `version` is for everyone, and
+// so is every entry when this copy's own version cannot be read, which keeps
+// the behaviour from before this check existed.
+function noticeFitsVersion(notice, appVersion) {
+  if (!notice.version || !appVersion) return true;
+
+  const have = String(appVersion).split('.').map(part => parseInt(part, 10) || 0);
+  const need = String(notice.version).split('.').map(part => parseInt(part, 10) || 0);
+  const length = Math.max(have.length, need.length);
+
+  for (let index = 0; index < length; index++) {
+    const mine = have[index] || 0;
+    const wanted = need[index] || 0;
+    if (mine > wanted) return true;
+    if (mine < wanted) return false;
+  }
+  return true;
+}
+
 class App {
   constructor() {
     this.currentTheme = 'enhanced-blue';
@@ -1042,6 +1080,74 @@ class App {
     box.style.display = 'none';
   }
 
+  /* [ZeroLabs] 2026-09-24 12:20 AM - added: setup reports what it is doing (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+  // Connecting to a repository showed only "Connecting..." on a disabled button
+  // for the whole of it, which reads as frozen. A panel under the dialog's
+  // content now names each step. On the website every step is a wait on GitLab
+  // or one write to IndexedDB, so it shows a moving stripe with the step name
+  // rather than a count. reportStoreProgress does nothing when no panel is up.
+  beginStoreProgress() {
+    this.clearStoreSetupError();
+    const errorBox = document.getElementById('snippetSetupError');
+    if (!errorBox) return () => {};
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'margin-top: 16px;';
+    panel.innerHTML = `
+      <p class="setup-progress-phase" style="margin: 0 0 8px 0; font-size: 13px; color: var(--md-sys-color-on-surface);"></p>
+      <div style="height: 8px; border-radius: 999px; background: var(--md-sys-color-surface-variant); overflow: hidden;">
+        <div class="setup-progress-bar" style="width: 40%; height: 100%; border-radius: 999px; background: var(--md-sys-color-primary);"></div>
+      </div>
+    `;
+    errorBox.insertAdjacentElement('beforebegin', panel);
+
+    const phaseLine = panel.querySelector('.setup-progress-phase');
+    const bar = panel.querySelector('.setup-progress-bar');
+
+    // The Web Animations API needs no stylesheet entry for the stripe
+    const stripe = bar.animate(
+      [{ transform: 'translateX(-100%)' }, { transform: 'translateX(250%)' }],
+      { duration: 1200, iterations: Infinity, easing: 'ease-in-out' }
+    );
+
+    const reporter = (phase) => {
+      phaseLine.textContent = phase;
+    };
+    this._storeProgressReporter = reporter;
+    reporter('Starting');
+
+    return () => {
+      stripe.cancel();
+      if (this._storeProgressReporter === reporter) this._storeProgressReporter = null;
+      panel.remove();
+    };
+  }
+
+  reportStoreProgress(phase) {
+    if (!this._storeProgressReporter) return;
+    try {
+      this._storeProgressReporter(phase);
+    } catch (error) {
+      // A progress display must never break the work it is describing
+      console.warn('[StoreSetup] Progress display failed:', error);
+    }
+  }
+
+  /* [ZeroLabs] 2026-09-24 12:20 AM - added: count the bookmarks in a stored tree */
+  countTreeBookmarks(tree) {
+    let count = 0;
+    const walk = (node) => {
+      if (!node) return;
+      if (node.url) {
+        count++;
+        return;
+      }
+      (node.children || []).forEach(walk);
+    };
+    Object.values((tree && tree.roots) || {}).forEach(walk);
+    return count;
+  }
+
   // Step one of a migration. The snippet is read one last time so anything on it
   // that never reached this device comes along, because the new repository is
   // seeded from here. The export is offered, never required.
@@ -1080,8 +1186,12 @@ class App {
       const button = document.getElementById('storeMigrateStart');
       button.disabled = true;
       button.textContent = 'Reading your snippet...';
+      /* [ZeroLabs] 2026-09-24 12:20 AM - added: show the pull as it happens */
+      const endProgress = this.beginStoreProgress();
+      this.reportStoreProgress('Reading your cloud bookmarks and merging them here');
       try {
         const pulled = await this.pullEverythingFromCurrentStore();
+        endProgress();
         if (pulled.added > 0) console.log(`[StoreSetup] Brought ${pulled.added} item(s) off the old store`);
         /* [ZeroLabs] 2026-09-07 4:33 PM - added: say when the old store still wants a decision */
         // The new repository is seeded from this device, so a deferral here means
@@ -1094,6 +1204,7 @@ class App {
           this.storeSetupError('Your snippet has changes still waiting for your approval. You can continue, but anything you have not approved will not come across.');
         }
       } catch (error) {
+        endProgress();
         console.error('[StoreSetup] Could not read the old store:', error);
         this.storeSetupError('Could not read your snippet: ' + (error.message || '') + ' You can continue, but anything only on the snippet would be left behind.');
         button.disabled = false;
@@ -1141,7 +1252,7 @@ class App {
     // across two stores.
     section.innerHTML = `
       ${choice('storeOptJoin', 'Connect to a repository that already has my bookmarks',
-        'Another device set this up. Nothing here is written over it. The two are merged instead.')}
+        'Another device set this up. You then choose: merge both, keep the cloud\'s bookmarks, or keep this device\'s.')}
       ${choice('storeOptEmpty', 'Use an empty repository I already made',
         'You made one yourself and it has nothing in it yet. This device\'s bookmarks go into it.')}
       ${choice('storeOptCreate', 'Create a repository for me',
@@ -1269,9 +1380,13 @@ class App {
       const button = document.getElementById('storeDoCreate');
       button.disabled = true;
       button.textContent = 'Creating...';
+      /* [ZeroLabs] 2026-09-24 12:20 AM - added: show the create as it happens */
+      const endProgress = this.beginStoreProgress();
       try {
         await this.storeCreateNew(name);
+        endProgress();
       } catch (error) {
+        endProgress();
         console.error('[StoreSetup] Could not create the repository:', error);
         this.storeSetupError('Could not create it: ' + (error.message || ''));
         button.disabled = false;
@@ -1283,6 +1398,7 @@ class App {
   renderStoreHowTo(section, migrating) {
     this.clearStoreSetupError();
     this.setStoreChooserBack(false);
+    this._storeMigrating = migrating;
     section.innerHTML = `
       <ol class="bmz-store-steps">
         <li><a href="https://gitlab.com/users/sign_in" target="_blank" rel="noopener noreferrer">Sign in to your GitLab account</a> first.</li>
@@ -1308,6 +1424,8 @@ class App {
   renderStorePointAt(section, kind, migrating) {
     this.clearStoreSetupError();
     this.setStoreChooserBack(false);
+    /* [ZeroLabs] 2026-09-24 12:20 AM - added: the three-way screen needs to know where Back goes */
+    this._storeMigrating = migrating;
     const joining = kind === 'join';
     section.innerHTML = `
       ${this.storeRepoPickerMarkup()}
@@ -1315,11 +1433,11 @@ class App {
       <input id="storeRepoRef" type="text" placeholder="https://gitlab.com/you/bmz-bookmarks" class="bmz-store-field">
       <div class="bmz-store-hint">
         ${joining
-          ? 'Its bookmarks are read first and merged with the ones on this device. Nothing is removed without asking you.'
-          : 'This device\'s bookmarks are written into it. Pick the other option if it already holds bookmarks.'}
+          ? 'Its bookmarks are read first. You then choose to merge both, keep the cloud\'s, or keep this device\'s.'
+          : 'This device\'s bookmarks are written into it. If it already holds bookmarks, you are asked what to do with them first.'}
       </div>
       <div style="display: flex; gap: 12px; margin-top: 20px; flex-wrap: wrap;">
-        <button id="storeDoPoint" class="bmz-store-primary">${joining ? 'Connect and merge' : 'Start syncing'}</button>
+        <button id="storeDoPoint" class="bmz-store-primary">${joining ? 'Continue' : 'Start syncing'}</button>
         <button id="storeBack" class="bmz-store-plain">Back</button>
       </div>
     `;
@@ -1341,13 +1459,30 @@ class App {
       }
       button.disabled = true;
       button.textContent = 'Connecting...';
+      let endProgress = () => {};
       try {
+        /* [ZeroLabs] 2026-09-24 12:20 AM - added: a repository with bookmarks gets a real choice */
+        // The join option always merged, and the empty-repository option's only
+        // answer to "it already has bookmarks" was a confirm that REPLACED them.
+        // So there was no way to say "keep the cloud". Any repository that
+        // already holds BMZ bookmarks now opens one screen with all three.
+        const probe = await this.storeProbe(ref);
+        if (probe.hasBookmarks) {
+          button.disabled = false;
+          button.textContent = original;
+          this.renderStoreExistingChoice(ref, probe.remoteData);
+          return;
+        }
+
+        endProgress = this.beginStoreProgress();
         if (kind === 'join') {
           await this.storeJoinExisting(ref);
         } else {
           await this.storeUseExisting(ref);
         }
+        endProgress();
       } catch (error) {
+        endProgress();
         /* [ZeroLabs] 2026-09-08 12:40 AM - added: declining is not an error */
         // The non-empty and already-has-bookmarks guards cancel by throwing, so
         // the rollback runs. A red error box on top of that would report the
@@ -1508,9 +1643,198 @@ class App {
     }
   }
 
+  /* [ZeroLabs] 2026-09-24 12:20 AM - added: look inside a repository without adopting it */
+  // Points the adapter at the repository only for the duration of the look, and
+  // ALWAYS puts the previous store back, success or failure. storeWithRollback
+  // restores only on failure, which is right for a connect and wrong for a look.
+  //
+  // A bookmarks.json that is not BMZ data is refused here, with the same
+  // messages the join uses, so every option on the three-way screen starts from
+  // bookmarks known to be BMZ's own.
+  async storeProbe(ref) {
+    const previous = this.captureStore();
+
+    snippetAdapter.setProjectStore(ref, 'main');
+    try {
+      const existing = await snippetAdapter.projectListFiles();
+      if (!existing.includes('bookmarks.json')) return { hasBookmarks: false };
+
+      const content = await snippetAdapter.projectReadFile('bookmarks.json');
+      let parsed = null;
+      try {
+        parsed = JSON.parse(content);
+      } catch (error) {
+        throw new Error('That repository has a bookmarks.json, but it is not readable as BMZ data. Pick a different repository.');
+      }
+      if (!parsed || !parsed.roots || typeof parsed.roots !== 'object') {
+        throw new Error('That repository has a bookmarks.json, but it was not written by BMZ. Pick a different repository.');
+      }
+      return { hasBookmarks: true, remoteData: parsed };
+    } finally {
+      this.restoreStore(previous);
+    }
+  }
+
+  /* [ZeroLabs] 2026-09-24 12:40 AM - added: put the previous store back, storage included */
+  // setProjectStore writes the repository into localStorage as well as memory.
+  // Restoring only the memory left a first-time device, which had no previous
+  // store, with the repository still saved. After a reload it would believe it
+  // was connected to a repository it had only looked at, or had failed to
+  // connect to. With no previous store, the saved keys are removed.
+  captureStore() {
+    return {
+      id: snippetAdapter.getSnippetId(),
+      kind: snippetAdapter.storeKind,
+      branch: snippetAdapter.branch
+    };
+  }
+
+  restoreStore(previous) {
+    snippetAdapter.snippetId = previous.id;
+    snippetAdapter.storeKind = previous.kind;
+    snippetAdapter.branch = previous.branch;
+
+    if (previous.kind === 'project') {
+      snippetAdapter.setProjectStore(previous.id, previous.branch || 'main');
+    } else if (previous.id) {
+      snippetAdapter.setSnippetId(previous.id);
+    } else {
+      safeLocalStorage.removeItem('bmz_snippet_id');
+      safeLocalStorage.removeItem('bmz_store_kind');
+      safeLocalStorage.removeItem('bmz_store_branch');
+    }
+  }
+
+  /* [ZeroLabs] 2026-09-24 12:20 AM - added: the three answers for a repository that has bookmarks */
+  // Merge first, because it is the only one that loses nothing, and the two
+  // replaces spell out their numbers so the cost is visible before choosing.
+  // Each replace still asks once more before it acts.
+  async renderStoreExistingChoice(ref, remoteData) {
+    const section = document.getElementById('storeSetupSection');
+    if (!section) return;
+    this.clearStoreSetupError();
+    this.setStoreChooserBack(false);
+
+    const cloudCount = this.countTreeBookmarks(remoteData);
+    const localTree = await syncManager.loadLocalBookmarks();
+    const localCount = this.countTreeBookmarks(localTree);
+    const plural = (count) => `${count} bookmark${count === 1 ? '' : 's'}`;
+
+    const choice = (id, title, detail) => `
+      <button id="${id}" class="bmz-store-choice">
+        <div class="bmz-store-choice-title">${title}</div>
+        <div class="bmz-store-choice-detail">${detail}</div>
+      </button>
+    `;
+
+    section.innerHTML = `
+      <p style="margin: 0 0 14px 0; font-size: 14px; line-height: 1.5; color: var(--md-sys-color-on-surface);">
+        That repository already holds ${plural(cloudCount)}. This device has ${plural(localCount)}.
+      </p>
+      ${choice('storeOptMergeBoth', 'Merge both (recommended)',
+        'Keeps everything. Anything only in the cloud comes to this device, anything only here goes to the cloud, and nothing is removed from either.')}
+      ${choice('storeOptCloudWins', 'Replace this device\'s bookmarks with the cloud',
+        `This device ends up with exactly the cloud's ${plural(cloudCount)}. Its own ${plural(localCount)} are removed. A snapshot is saved in the Event Log first, so this can be undone.`)}
+      ${choice('storeOptDeviceWins', 'Replace the cloud with this device\'s bookmarks',
+        `The repository ends up with exactly this device's ${plural(localCount)}. Anything only in the cloud is removed, on every device that uses it.`)}
+      <div style="margin-top: 8px;"><button id="storeBack" class="bmz-store-plain">Back</button></div>
+    `;
+
+    document.getElementById('storeBack')?.addEventListener('click', () => {
+      this.renderStoreChooser(section, this._storeMigrating);
+    });
+
+    // One runner for all three, so each gets the progress panel, the same error
+    // handling, and the same finish. The methods below finish the setup
+    // themselves, which closes the dialog.
+    const run = async (work) => {
+      const buttons = section.querySelectorAll('button');
+      buttons.forEach(button => { button.disabled = true; });
+      const endProgress = this.beginStoreProgress();
+      try {
+        const finished = await work();
+        endProgress();
+        if (finished === false) {
+          // The user said no to a confirmation. Nothing changed; stay here.
+          buttons.forEach(button => { button.disabled = false; });
+        }
+      } catch (error) {
+        endProgress();
+        console.error('[StoreSetup] Could not connect to the repository:', error);
+        this.storeSetupError(error.message || 'Could not connect to that repository.');
+        buttons.forEach(button => { button.disabled = false; });
+      }
+    };
+
+    document.getElementById('storeOptMergeBoth')?.addEventListener('click', () => {
+      run(() => this.storeJoinExisting(ref));
+    });
+
+    document.getElementById('storeOptCloudWins')?.addEventListener('click', () => {
+      run(() => this.storeReplaceLocalFromCloud(ref, remoteData, localCount, cloudCount));
+    });
+
+    document.getElementById('storeOptDeviceWins')?.addEventListener('click', () => {
+      run(async () => {
+        const proceed = confirm(
+          `Replace the repository's ${plural(cloudCount)} with this device's ${plural(localCount)}?\n\n` +
+          'Anything only in the cloud is removed, on every device that uses this repository.'
+        );
+        if (!proceed) return false;
+        await this.storeUseExisting(ref, { replaceConfirmed: true });
+        return true;
+      });
+    });
+  }
+
+  /* [ZeroLabs] 2026-09-24 12:20 AM - added: connect, keeping the cloud's bookmarks */
+  // Asks first, then saves this device's whole tree as a pre-sync snapshot in the
+  // Event Log, which the Event Log already knows how to restore. Only then is the
+  // repository adopted and its tree written over this device's. The website's
+  // tree is one IndexedDB record, so the replace is a single write and nothing
+  // can observe it half done.
+  //
+  // Saved with saveLocalBookmarks, not through bookmarkManager, so taking the
+  // cloud's tree does not mark this device changed and push it straight back.
+  // Both sides then match, so the attribution records are cleared.
+  //
+  // @returns {Promise<boolean>} false when the user cancelled
+  async storeReplaceLocalFromCloud(ref, remoteData, localCount, cloudCount) {
+    const proceed = confirm(
+      `Replace this device's ${localCount} bookmark${localCount === 1 ? '' : 's'} with the cloud's ${cloudCount}?\n\n` +
+      'A snapshot of this device\'s bookmarks is saved in the Event Log first, and its "Restore Pre-Sync Bookmarks" button puts them back.'
+    );
+    if (!proceed) return false;
+
+    this.reportStoreProgress('Saving a snapshot of this device\'s bookmarks');
+    const snapshot = await syncManager.loadLocalBookmarks();
+    // Same as the extensions: the older entries point at bookmark ids that are
+    // about to stop existing, so their restore buttons would fail.
+    await clearChangelog();
+    await addChangelogEntry('pre-sync-snapshot', 'sync', 'Replace Local with Cloud', null, {
+      snapshot,
+      timestamp: Date.now(),
+      operation: 'Replace Local with Cloud'
+    });
+
+    await this.storeWithRollback(ref, async () => {
+      this.reportStoreProgress('Replacing this device\'s bookmarks with the cloud\'s');
+      await syncManager.saveLocalBookmarks(remoteData);
+    });
+
+    await bookmarkManager.reload();
+    if (window.reloadBookmarkUI) await window.reloadBookmarkUI();
+
+    this.reportStoreProgress('Connecting this device to the repository');
+    await this.storeFinishSetup(Number(remoteData.version) || 0, { clearRecords: true });
+    return true;
+  }
+
   async storeCreateNew(name) {
+    this.reportStoreProgress('Creating the repository');
     const created = await snippetAdapter.createProject(name);
     snippetAdapter.setProjectStore(created.id, 'main');
+    this.reportStoreProgress('Uploading this device\'s bookmarks to the repository');
     await this.storeSeedFromLocal([]);
     await this.storeFinishSetup(1);
   }
@@ -1518,28 +1842,25 @@ class App {
   // Restores the previous store on failure, so a bad address leaves this device
   // pointed where it was rather than at nothing.
   async storeWithRollback(ref, work) {
-    const previousId = snippetAdapter.getSnippetId();
-    const previousKind = snippetAdapter.storeKind;
-    const previousBranch = snippetAdapter.branch;
+    /* [ZeroLabs] 2026-09-24 12:40 AM - edited: the rollback clears storage too (see restoreStore) */
+    const previous = this.captureStore();
 
     snippetAdapter.setProjectStore(ref, 'main');
     try {
       return await work();
     } catch (error) {
-      snippetAdapter.snippetId = previousId;
-      snippetAdapter.storeKind = previousKind;
-      snippetAdapter.branch = previousBranch;
-      if (previousKind === 'project') {
-        snippetAdapter.setProjectStore(previousId, previousBranch || 'main');
-      } else if (previousId) {
-        snippetAdapter.setSnippetId(previousId);
-      }
+      this.restoreStore(previous);
       throw error;
     }
   }
 
-  async storeUseExisting(ref) {
+  /* [ZeroLabs] 2026-09-24 12:20 AM - edited: the three-way screen has already asked */
+  // `replaceConfirmed` comes from "Replace the cloud with this device's
+  // bookmarks", which has just shown both counts and had its own answer. The
+  // old warning below is kept as a safety net for any other way in.
+  async storeUseExisting(ref, { replaceConfirmed = false } = {}) {
     await this.storeWithRollback(ref, async () => {
+      this.reportStoreProgress('Reading the repository');
       const entries = await snippetAdapter.projectListEntries();
       const existing = entries.filter(entry => entry.type === 'blob').map(entry => entry.path);
 
@@ -1557,7 +1878,7 @@ class App {
       const alreadyHasBookmarks = existing.includes('bookmarks.json');
       const otherContent = snippetAdapter.contentEntries(entries);
 
-      if (alreadyHasBookmarks) {
+      if (alreadyHasBookmarks && !replaceConfirmed) {
         const proceed = confirm(
           'That repository already contains bookmarks.\n\n' +
           'Continuing REPLACES them with this device\'s bookmarks, on every device using it.\n\n' +
@@ -1565,7 +1886,7 @@ class App {
           '"Connect to a repository that already has my bookmarks" instead.\n\nReplace them?'
         );
         if (!proceed) throw new Error('CANCELLED');
-      } else if (otherContent.length > 0) {
+      } else if (!alreadyHasBookmarks && otherContent.length > 0) {
         const sample = otherContent.slice(0, 3).map(entry => entry.path).join(', ');
         const more = otherContent.length > 3 ? `, and ${otherContent.length - 3} more` : '';
         const proceed = confirm(
@@ -1578,6 +1899,7 @@ class App {
         if (!proceed) throw new Error('CANCELLED');
       }
 
+      this.reportStoreProgress('Uploading this device\'s bookmarks to the repository');
       await this.storeSeedFromLocal(existing);
     });
     await this.storeFinishSetup(1);
@@ -1588,6 +1910,7 @@ class App {
   async storeJoinExisting(ref) {
     let existing = [];
     await this.storeWithRollback(ref, async () => {
+      this.reportStoreProgress('Reading the repository');
       existing = await snippetAdapter.projectListFiles();
       if (!existing.includes('bookmarks.json')) {
         throw new Error('That repository has no bookmarks.json in it yet. Use the empty repository option instead.');
@@ -1623,6 +1946,7 @@ class App {
     await syncManager.setSnippetId(snippetAdapter.getSnippetId());
     await syncManager.setLocalVersion(0);
 
+    this.reportStoreProgress('Merging the cloud\'s bookmarks with this device');
     const outcome = await this.pullEverythingFromCurrentStore();
     if (outcome.added > 0) console.log(`[StoreSetup] Brought ${outcome.added} item(s) down from the repository`);
 
@@ -1643,6 +1967,7 @@ class App {
 
     // Local now holds both sides, so writing it back adds this device's extras
     // without removing anything that was already there.
+    this.reportStoreProgress('Uploading the merged bookmarks to the repository');
     await this.storeSeedFromLocal(existing);
     await this.storeFinishSetup(0, { clearRecords: false });
   }
@@ -3527,30 +3852,38 @@ class App {
 
     document.body.appendChild(modal);
 
-    // Export HTML
-    modal.querySelector('#exportHTMLBtn').addEventListener('click', () => {
+    /* [ZeroLabs] 2026-09-23 5:20 PM - edited: report what actually happened */
+    // Both exporters are async now, and both report whether the file was
+    // really written. The old code called them synchronously and announced
+    // success either way, which is how a failed export in the Android app
+    // still produced "Exported as bookmarks-2026-09-23.html".
+    const runExport = async (exporter) => {
       try {
         const tree = bookmarkManager.getTree();
-        const filename = exportAsHTML(tree);
-        this.showToast(`Exported as ${filename}`, 'success');
+        const { filename, saved, location } = await exporter(tree);
+
+        if (!saved) {
+          this.showToast('Export failed. The file was not saved.', 'error');
+          return;
+        }
+
+        const where = location ? ` to ${location}` : '';
+        this.showToast(`Exported as ${filename}${where}`, 'success');
         modal.remove();
       } catch (error) {
         console.error('Export failed:', error);
         this.showToast(`Export failed: ${error.message}`, 'error');
       }
+    };
+
+    // Export HTML
+    modal.querySelector('#exportHTMLBtn').addEventListener('click', () => {
+      runExport(exportAsHTML);
     });
 
     // Export JSON
     modal.querySelector('#exportJSONBtn').addEventListener('click', () => {
-      try {
-        const tree = bookmarkManager.getTree();
-        const filename = exportAsJSON(tree);
-        this.showToast(`Exported as ${filename}`, 'success');
-        modal.remove();
-      } catch (error) {
-        console.error('Export failed:', error);
-        this.showToast(`Export failed: ${error.message}`, 'error');
-      }
+      runExport(exportAsJSON);
     });
 
     // Cancel
@@ -3948,21 +4281,35 @@ class App {
 
     const seenId = Number(safeLocalStorage.getItem('bmz_notices_seen_id')) || 0;
 
-    const unseen = notices
-      /* [ZeroLabs] 2026-09-13 - added: only notices addressed to this client */
-      // A website or Android fix is not news to an extension user, and a Web Store
-      // update is not news to the website. Each entry names its targets; one with
-      // no targets field goes to everyone. The Android app is the website in a WebView and counts as website.
-      .filter(notice => notice && Number(notice.id) > seenId && typeof notice.text === 'string')
+    /* [ZeroLabs] 2026-09-24 1:05 AM - edited: one list of what this client may show, used twice */
+    // The headline and the collapsed history used to repeat the same filters,
+    // and a filter added to one and not the other would let them disagree.
+    const forThisClient = notices
+      /* [ZeroLabs] 2026-09-24 1:35 AM - edited: read `message`, fall back to `text` */
+      .map(noticeWithBody)
+      .filter(notice => notice !== null)
       /* [ZeroLabs] 2026-09-13 - added: a draft stays in the file and goes nowhere */
       // JSON has no comments, and a stray // would invalidate the whole file and
       // silence every notice. This is how the template entry, and any notice
       // written ahead of time, sits in the file without being sent.
       .filter(notice => notice.draft !== true)
+      /* [ZeroLabs] 2026-09-13 - added: only notices addressed to this client */
+      // A website or Android fix is not news to an extension user, and a Web Store
+      // update is not news to the website. Each entry names its targets; one with
+      // no targets field goes to everyone. The Android app is the website in a WebView and counts as website.
       .filter(notice => {
         if (!Array.isArray(notice.targets)) return true;
         return notice.targets.includes('website');
       })
+      /* [ZeroLabs] 2026-09-24 1:05 AM - added: never announce a version this copy does not run */
+      // An entry with a `version` waits until this copy runs that version or
+      // newer, and is not marked seen while it waits. The website updates the
+      // moment it is deployed, but a browser can keep an older copy cached, and
+      // the rule is the same in all three clients.
+      .filter(notice => noticeFitsVersion(notice, window.bmzAppVersion));
+
+    const unseen = forThisClient
+      .filter(notice => Number(notice.id) > seenId)
       .sort((a, b) => Number(a.id) - Number(b.id));
 
     if (unseen.length === 0) return;
@@ -3978,13 +4325,8 @@ class App {
     // somebody curious read back through what changed.
     const newest = unseen[unseen.length - 1];
 
-    const earlier = notices
-      .filter(item => item && typeof item.text === 'string' && item.draft !== true)
+    const earlier = forThisClient
       .filter(item => Number(item.id) < Number(newest.id))
-      .filter(item => {
-        if (!Array.isArray(item.targets)) return true;
-        return item.targets.includes('website');
-      })
       .sort((a, b) => Number(b.id) - Number(a.id));
 
     await this.showNoticeDialog(newest, earlier);
