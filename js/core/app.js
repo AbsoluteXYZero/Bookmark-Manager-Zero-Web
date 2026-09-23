@@ -3744,11 +3744,81 @@ class App {
   // stays until the X or Escape is pressed. The backdrop does NOT close it: a
 // stray tap, easy on a phone, must not dismiss a message before it was read.
   // It resolves when closed, so several notices arrive one after another.
-  showNoticeDialog(text) {
+  /* [ZeroLabs] 2026-09-23 4:40 PM - added: bullets in a notice become a real list */
+  // A notice is plain text in a JSON file, and it used to render as one block
+  // with white-space: pre-line. That was fine for paragraphs and wrong for a
+  // list: the second and later lines of a long bullet wrapped back to the left
+  // margin, under the bullet character instead of under the text, which on a
+  // phone turned a tidy list into a slab.
+  //
+  // A line that begins with a bullet character now becomes a real <li>, so the
+  // browser does the hanging indent. Everything else stays a paragraph. Still
+  // textContent on every node, never innerHTML: the text comes from a file on
+  // the web and must never be able to inject markup.
+  //
+  // The accepted markers are the bullet, the hyphen and the asterisk, so a
+  // notice can be written with whichever is convenient. The pattern lives
+  // inside the method because a class body cannot hold a bare const.
+  renderNoticeText(container, text) {
+    const bulletPattern = /^[•\-*]\s+/;
+    const lines = String(text).split('\n');
+    let list = null;
+
+    const closeList = () => {
+      list = null;
+    };
+
+    lines.forEach(line => {
+      const trimmed = line.trim();
+
+      // A blank line only separates blocks. The margins below do the spacing.
+      if (trimmed === '') {
+        closeList();
+        return;
+      }
+
+      if (bulletPattern.test(trimmed)) {
+        if (!list) {
+          list = document.createElement('ul');
+          list.style.cssText = 'margin: 0 0 12px 0; padding-left: 22px;';
+          container.appendChild(list);
+        }
+        const item = document.createElement('li');
+        item.textContent = trimmed.replace(bulletPattern, '');
+        item.style.cssText = 'margin-bottom: 8px; line-height: 1.5;';
+        list.appendChild(item);
+        return;
+      }
+
+      closeList();
+      const paragraph = document.createElement('p');
+      paragraph.textContent = trimmed;
+      paragraph.style.cssText = 'margin: 0 0 12px 0;';
+      container.appendChild(paragraph);
+    });
+
+    // The last block does not need the gap under it
+    const last = container.lastElementChild;
+    if (last) last.style.marginBottom = '0';
+  }
+
+  /* [ZeroLabs] 2026-09-23 4:05 PM - edited: one dialog, never a queue of them */
+  // It used to open one dialog per unseen notice, one after another. That is
+  // fine for somebody who missed one message, and awful for a new install:
+  // with seventeen entries in the file, a first run meant seventeen dialogs to
+  // close.
+  //
+  // Now the NEWEST unseen notice is the dialog, and every older notice for this
+  // client sits behind one collapsed row that opens in place, whether or not it
+  // was seen before, so somebody curious can read back through what changed.
+  //
+  // `notice.date` is optional and is only a heading. An entry without one still
+  // renders, so the entries already published do not have to be rewritten.
+  showNoticeDialog(notice, earlier = []) {
     return new Promise(resolve => {
       const overlay = document.createElement('div');
       overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.6); backdrop-filter: blur(3px); z-index: 10003; display: flex; align-items: center; justify-content: center; padding: 16px; box-sizing: border-box;';
-  
+
       const panel = document.createElement('div');
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
@@ -3765,19 +3835,84 @@ class App {
       title.textContent = 'A message from BMZ';
       title.style.cssText = 'margin: 0 32px 14px 0; font-size: 18px; font-weight: 600; color: var(--md-sys-color-primary, #90caf9);';
   
-      // textContent, never innerHTML: the text comes from a file on the web.
-      // pre-line keeps any line breaks written into the JSON.
       const body = document.createElement('div');
-      body.textContent = text;
-      body.style.cssText = 'font-size: 15px; line-height: 1.6; white-space: pre-line; word-break: break-word;';
-  
+      body.style.cssText = 'font-size: 15px; line-height: 1.6; word-break: break-word;';
+      this.renderNoticeText(body, notice.text);
+
+      panel.appendChild(close);
+      panel.appendChild(title);
+
+      if (notice.date) {
+        const stamp = document.createElement('div');
+        stamp.textContent = notice.date;
+        stamp.style.cssText = 'margin-bottom: 10px; font-size: 12px; color: var(--md-sys-color-on-surface-variant, #aaa);';
+        panel.appendChild(stamp);
+      }
+
+      panel.appendChild(body);
+
+      /* [ZeroLabs] 2026-09-23 4:05 PM - added: every older notice, collapsed */
+      // This is the whole archive for this client, not only the unseen ones, so
+      // somebody curious about what changed before can read back through it. It
+      // is drawn whenever anything older exists, and only a file holding a
+      // single notice leaves it out.
+      if (earlier.length > 0) {
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.setAttribute('aria-expanded', 'false');
+        toggle.style.cssText = 'display: flex; align-items: center; gap: 8px; width: 100%; margin-top: 18px; padding: 10px 12px; background: var(--md-sys-color-surface-variant, #2a2a2a); color: var(--md-sys-color-on-surface, #e0e0e0); border: 1px solid var(--md-sys-color-outline-variant, #333); border-radius: 10px; font-size: 13px; font-weight: 500; cursor: pointer; text-align: left;';
+
+        const caret = document.createElement('span');
+        caret.textContent = '▶';
+        caret.style.cssText = 'font-size: 10px; transition: transform 0.15s ease;';
+
+        const label = document.createElement('span');
+        const plural = earlier.length === 1 ? 'update' : 'updates';
+        label.textContent = `${earlier.length} earlier ${plural}`;
+
+        toggle.appendChild(caret);
+        toggle.appendChild(label);
+
+        const history = document.createElement('div');
+        history.hidden = true;
+        history.style.cssText = 'margin-top: 10px;';
+
+        earlier.forEach((older, index) => {
+          const entry = document.createElement('div');
+          entry.style.cssText = index === 0
+            ? 'padding-top: 4px;'
+            : 'margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--md-sys-color-outline-variant, #333);';
+
+          if (older.date) {
+            const olderStamp = document.createElement('div');
+            olderStamp.textContent = older.date;
+            olderStamp.style.cssText = 'margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--md-sys-color-on-surface-variant, #aaa);';
+            entry.appendChild(olderStamp);
+          }
+
+          const olderBody = document.createElement('div');
+          olderBody.style.cssText = 'font-size: 14px; line-height: 1.55; word-break: break-word; color: var(--md-sys-color-on-surface-variant, #ccc);';
+          this.renderNoticeText(olderBody, older.text);
+          entry.appendChild(olderBody);
+
+          history.appendChild(entry);
+        });
+
+        toggle.addEventListener('click', () => {
+          const opening = history.hidden;
+          history.hidden = !opening;
+          toggle.setAttribute('aria-expanded', String(opening));
+          caret.style.transform = opening ? 'rotate(90deg)' : '';
+        });
+
+        panel.appendChild(toggle);
+        panel.appendChild(history);
+      }
+
       const foot = document.createElement('div');
       foot.textContent = 'You can read this again at any time in the Event Log.';
       foot.style.cssText = 'margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--md-sys-color-outline-variant, #333); font-size: 12px; color: var(--md-sys-color-on-surface-variant, #aaa);';
-  
-      panel.appendChild(close);
-      panel.appendChild(title);
-      panel.appendChild(body);
+
       panel.appendChild(foot);
       overlay.appendChild(panel);
   
@@ -3832,15 +3967,37 @@ class App {
 
     if (unseen.length === 0) return;
 
-    /* [ZeroLabs] 2026-09-13 - edited: dialog, one at a time, recorded on close */
-    // The id is stored after each dialog is CLOSED, not when it opens. A notice
-    // abandoned by closing the page is shown again next time, and only then
-    // written to the Event Log, so there is never a duplicate entry.
-    for (const notice of unseen) {
-      await this.showNoticeDialog(notice.text);
-      await addChangelogEntry('notice', 'notice', notice.text, null, {});
-      safeLocalStorage.setItem('bmz_notices_seen_id', String(notice.id));
+    /* [ZeroLabs] 2026-09-23 4:05 PM - edited: one dialog holding the newest, with the rest behind it */
+    // Was a loop opening one dialog per unseen notice. A new install starting
+    // at id 0 therefore had to close one dialog per entry in the file, which
+    // does not scale: seventeen entries meant seventeen dialogs.
+    //
+    // The newest unseen notice is now the message, and EVERY older notice for
+    // this client sits behind a collapsed row, whether or not it was seen
+    // before. That keeps the dialog to one for everybody and still lets
+    // somebody curious read back through what changed.
+    const newest = unseen[unseen.length - 1];
+
+    const earlier = notices
+      .filter(item => item && typeof item.text === 'string' && item.draft !== true)
+      .filter(item => Number(item.id) < Number(newest.id))
+      .filter(item => {
+        if (!Array.isArray(item.targets)) return true;
+        return item.targets.includes('website');
+      })
+      .sort((a, b) => Number(b.id) - Number(a.id));
+
+    await this.showNoticeDialog(newest, earlier);
+
+    /* [ZeroLabs] 2026-09-23 4:05 PM - edited: record on close, as before */
+    // Everything unseen goes to the Event Log, including the entries the user
+    // never expanded, so choosing not to read the history loses nothing. The
+    // stored id moves only after the dialog is CLOSED, so a dialog abandoned by
+    // closing the page comes back next time and is written once, not twice.
+    for (const item of unseen) {
+      await addChangelogEntry('notice', 'notice', item.text, null, {});
     }
+    safeLocalStorage.setItem('bmz_notices_seen_id', String(newest.id));
   }
 
   /**
@@ -4064,22 +4221,59 @@ class App {
       });
     });
 
+    /* [ZeroLabs] 2026-09-22 6:54 PM - added: the apply runs in view, not behind a closed modal */
+    // The dialog used to close on click and the work ran with no indicator at
+    // all. An approved folder rename can carry thousands of bookmarks. The
+    // dialog stays open and becomes the progress surface, which also stops a
+    // second click starting the same work twice.
+    const startApplyProgress = () => {
+      dialog.innerHTML = `
+        <h2 style="margin:0 0 16px 0;font-size:18px;color:#ff9800;text-align:center;">Applying sync changes</h2>
+        <p id="heldApplyCount" style="margin:0 0 6px 0;font-size:14px;font-weight:600;"></p>
+        <p id="heldApplyPhase" style="margin:0 0 16px 0;font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);"></p>
+        <div style="height:8px;border-radius:999px;background:var(--md-sys-color-surface-variant,#2a2a2a);overflow:hidden;">
+          <div id="heldApplyBar" style="width:0%;height:100%;background:#f59e0b;transition:width 0.15s linear;"></div>
+        </div>
+      `;
+      const countLine = dialog.querySelector('#heldApplyCount');
+      const phaseLine = dialog.querySelector('#heldApplyPhase');
+      const bar = dialog.querySelector('#heldApplyBar');
+
+      return (done, total, phase) => {
+        countLine.textContent = total > 0 ? `${done} of ${total}` : 'Finishing';
+        phaseLine.textContent = phase;
+        bar.style.width = total > 0 ? `${Math.round((done / total) * 100)}%` : '100%';
+      };
+    };
+
     dialog.querySelector('#heldPushConfirm').addEventListener('click', async () => {
-      modal.remove();
+      const setProgress = startApplyProgress();
+      const totalOps = fromDevice.length + overwrites.length;
+      setProgress(0, totalOps, 'Preparing the approved changes.');
+
       try {
         // Applying the local side first is what makes the push carry the other
         // device's deletion and the other device's rename.
         if (fromDevice.length > 0 || overwrites.length > 0) {
-          await syncManager.applyHeldResolution({ fromDevice, overwrites });
+          await syncManager.applyHeldResolution({
+            fromDevice,
+            overwrites,
+            /* [ZeroLabs] 2026-09-22 6:54 PM - added: the apply drives the bar */
+            onProgress: (done, total, phase) => setProgress(done, total, phase)
+          });
           await bookmarkManager.reload();
           if (window.reloadBookmarkUI) await window.reloadBookmarkUI();
         }
 
+        setProgress(totalOps, totalOps, 'Saving to your cloud bookmarks.');
         await syncManager.pushLocalToSnippet();
+        modal.remove();
         /* [ZeroLabs] 2026-08-27 - edited: one result, not the push's pair */
         this.showToast('Sync approved and applied.', 'success');
       } catch (error) {
         console.error('[HeldPush] Approval failed:', error);
+        /* [ZeroLabs] 2026-09-22 6:54 PM - edited: the modal must not outlive a throw */
+        modal.remove();
         this.showToast(`Sync failed: ${error.message}`, 'error');
       }
     });

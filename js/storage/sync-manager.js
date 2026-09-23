@@ -193,8 +193,12 @@ class SyncManager {
         otherList.delete(url);
       });
 
+      /* [ZeroLabs] 2026-09-23 1:48 AM - removed: the 2000 entry cap */
+      // Same reasoning as the edited list: these are cleared on every clean
+      // sync, so an eviction can only lose a real attribution for no benefit.
+      // Deleting a folder of 3000 bookmarks is exactly when that would happen.
       await storageAdapter.set({
-        [key]: Array.from(list).slice(-2000),
+        [key]: Array.from(list),
         [opposite]: Array.from(otherList)
       });
     } catch (error) {
@@ -204,19 +208,53 @@ class SyncManager {
 
   async recordLocalBookmarkEdit(id, explicitUrl) {
     try {
+      /* [ZeroLabs] 2026-09-23 1:48 AM - edited: a folder is recorded through its contents (see also: Bookmark-Manager-Zero-Chrome/background.js) */
+      // This used to stop here for anything without a URL, which is every
+      // folder. One 'changed' event arrives for a renamed folder and none for
+      // the bookmarks inside it, so a folder rename was recorded nowhere.
+      //
+      // The next reconcile compares every bookmark by title, root and folder
+      // path, finds that all of them moved, sees nothing in the edited list,
+      // and concludes another device did it. That is Outcome 4: sync stops and
+      // offers to put them BACK under the old name, and the rename never
+      // reaches the cloud.
+      const urls = [];
       let url = explicitUrl;
+      let node = null;
+
       if (!url) {
         // A move carries only parent ids, so the URL has to be looked up.
         const tree = await this.loadLocalBookmarks();
-        const found = this.findNodeInTree(tree, id);
-        url = found && found.url;
+        node = this.findNodeInTree(tree, id);
+        url = node && node.url;
       }
-      if (!url) return; // Folders are represented by the bookmarks inside them
 
+      if (url) {
+        urls.push(url);
+      } else if (node) {
+        const walk = (current) => {
+          if (!current) return;
+          if (current.url) {
+            urls.push(current.url);
+            return;
+          }
+          (current.children || []).forEach(walk);
+        };
+        walk(node);
+      }
+
+      if (urls.length === 0) return;
+
+      /* [ZeroLabs] 2026-09-23 1:48 AM - removed: the 2000 entry cap */
+      // The list is wiped by clearLocalBookmarkEvents on every clean sync, so
+      // it only holds what happened since the last one. Nothing could add
+      // thousands of entries at once until now; a folder rename can, and an
+      // eviction would silently turn one of this device's own edits into a
+      // deferral.
       const stored = await storageAdapter.get('snippet_local_edited');
       const list = new Set(stored.snippet_local_edited || []);
-      list.add(url);
-      await storageAdapter.set({ snippet_local_edited: Array.from(list).slice(-2000) });
+      urls.forEach(entry => list.add(entry));
+      await storageAdapter.set({ snippet_local_edited: Array.from(list) });
     } catch (error) {
       console.error('[Reconcile] Could not record local edit:', error);
     }
@@ -589,7 +627,14 @@ class SyncManager {
       // Additions never need consent and are already applied by this point, but a
       // dialog appearing while bookmarks quietly arrive should account for them.
       // Approve also pushes, so this device's own additions travel with it.
-      const addedHereItems = toAddLocally.slice(0, 200).map(e => ({
+      /* [ZeroLabs] 2026-09-22 6:54 PM - edited: store every item, cap only the display */
+      // These lists used to be cut at 200. The dialog has its own cap of 50 rows
+      // plus an "and N more" line, so the 200 protected nothing and made the
+      // counts in the sentences wrong. Worse, the same list is what
+      // applyHeldResolution iterates, so a folder rename touching more than 200
+      // bookmarks had the rest silently dropped and then pushed back at the old
+      // path.
+      const addedHereItems = toAddLocally.map(e => ({
         url: e.url, title: e.title, path: pathOf(e)
       }));
       const pendingPushItems = [];
@@ -603,11 +648,11 @@ class SyncManager {
       if (removesFromSnippet.length > 0 || removesFromDevice.length > 0 || overwritesOnDevice.length > 0) {
         await storageAdapter.set({
           snippet_push_held: true,
-          snippet_push_held_items: removesFromSnippet.slice(0, 200),
-          snippet_pull_held_items: removesFromDevice.slice(0, 200),
-          snippet_overwrite_held_items: overwritesOnDevice.slice(0, 200),
+          snippet_push_held_items: removesFromSnippet,
+          snippet_pull_held_items: removesFromDevice,
+          snippet_overwrite_held_items: overwritesOnDevice,
           snippet_added_here_items: addedHereItems,
-          snippet_pending_push_items: pendingPushItems.slice(0, 200),
+          snippet_pending_push_items: pendingPushItems,
         });
         await this.setSnippetNeedsReconcile(true);
         console.warn('[Reconcile] Deferred for consent', {
@@ -724,9 +769,24 @@ class SyncManager {
   // Removals from this device and renames made elsewhere both change local data,
   // which is exactly why they waited. Applied here, then pushed, so the snippet
   // ends up carrying the other device's deletion as well.
-  async applyHeldResolution({ fromDevice = [], overwrites = [] }) {
+  /* [ZeroLabs] 2026-09-22 6:54 PM - edited: one changelog entry, and it reports progress */
+  // It used to write up to two entries per bookmark. MAX_CHANGELOG_ENTRIES is
+  // 1000, so approving a large sync rolled the entire event log off the end and
+  // took the fullData snapshots that make earlier deletions restorable with it.
+  // One entry now holds every operation and is restorable as a unit.
+  //
+  // onProgress is optional and is what the approve dialog shows while this runs.
+  async applyHeldResolution({ fromDevice = [], overwrites = [], onProgress = null }) {
     const tree = await this.loadLocalBookmarks();
     if (!tree || !tree.roots) return { removed: 0, applied: 0 };
+
+    const syncOps = { removed: [], renamed: [], moved: [], prunedFolders: [] };
+    const totalOps = fromDevice.length + overwrites.length;
+    let done = 0;
+    const report = (phase) => {
+      if (typeof onProgress === 'function') onProgress(done, totalOps, phase);
+    };
+    report('Preparing the approved changes.');
 
     const byUrl = new Map();
     /* [ZeroLabs] 2026-08-28 - added: parent chain, for pruning folders left empty */
@@ -785,8 +845,16 @@ class SyncManager {
         const at = parent.children.indexOf(node);
         if (at === -1) return;
         parent.children.splice(at, 1);
-        await addChangelogEntry('delete', 'folder',
-          node.title || node.name || 'Unnamed Folder', null, { fullData: node });
+        /* [ZeroLabs] 2026-09-22 6:54 PM - edited: collected, not written per folder */
+        // The parent id and index are what put it back. The node keeps its own
+        // id, so a bookmark recorded against this folder still resolves after a
+        // restore.
+        syncOps.prunedFolders.push({
+          title: node.title || node.name || 'Unnamed Folder',
+          fullData: node,
+          parentId: parent.id || null,
+          index: at
+        });
         node = parent;
       }
     };
@@ -794,22 +862,36 @@ class SyncManager {
     let removed = 0;
     for (const item of fromDevice) {
       const hit = byUrl.get(item.url);
-      if (!hit) continue;
-      const at = hit.parent.children.indexOf(hit.node);
-      if (at !== -1) {
-        hit.parent.children.splice(at, 1);
-        vacated.add(hit.parent);
-        removed++;
-        // Logged so an approved deletion stays as undoable as any other
-        await addChangelogEntry('delete', 'bookmark', hit.node.title || 'Untitled',
-          hit.node.url || null, { fullData: hit.node });
+      if (hit) {
+        const at = hit.parent.children.indexOf(hit.node);
+        if (at !== -1) {
+          hit.parent.children.splice(at, 1);
+          vacated.add(hit.parent);
+          removed++;
+          /* [ZeroLabs] 2026-09-22 6:54 PM - edited: collected, not written per bookmark */
+          // Still as undoable as any other deletion, just as part of one event.
+          syncOps.removed.push({
+            title: hit.node.title || 'Untitled',
+            url: hit.node.url || null,
+            fullData: hit.node,
+            parentId: hit.parent.id || null,
+            index: at
+          });
+        }
       }
+      done++;
+      report('Removing bookmarks from this device.');
     }
 
     let applied = 0;
     for (const item of overwrites) {
       const hit = byUrl.get(item.url);
-      if (!hit) continue;
+      if (!hit) {
+        /* [ZeroLabs] 2026-09-22 6:54 PM - added: a skipped item still counts as handled */
+        done++;
+        report('Renaming and moving bookmarks to match your cloud bookmarks.');
+        continue;
+      }
 
       /* [ZeroLabs] 2026-08-27 - added: log approved renames and moves */
       // A rename made in BMZ's own edit dialog writes an 'update' entry and is
@@ -819,10 +901,8 @@ class SyncManager {
       const oldTitle = hit.node.title;
       if (item.remoteTitle && hit.node.title !== item.remoteTitle) {
         hit.node.title = item.remoteTitle;
-        await addChangelogEntry('update', 'bookmark', item.remoteTitle, item.url || null, {
-          oldTitle,
-          newTitle: item.remoteTitle
-        });
+        /* [ZeroLabs] 2026-09-22 6:54 PM - edited: collected, not written per bookmark */
+        syncOps.renamed.push({ url: item.url || null, oldTitle, newTitle: item.remoteTitle });
       }
 
       if (item.localPath !== item.remotePath && Array.isArray(item.remoteSegments)) {
@@ -854,19 +934,30 @@ class SyncManager {
             vacated.add(hit.parent);
           }
           parent.children.push(hit.node);
-          await addChangelogEntry('move', 'bookmark', item.remoteTitle || oldTitle, item.url || null, {
+          /* [ZeroLabs] 2026-09-22 6:54 PM - edited: collected, with where it came from */
+          // The parent id and index are what move it back. The path strings are
+          // kept for what the user reads, and are not used to resolve a folder:
+          // a bookmark title holding a slash makes that string ambiguous.
+          syncOps.moved.push({
+            url: item.url || null,
+            title: item.remoteTitle || oldTitle,
             fromFolder: item.localPath,
-            toFolder: item.remotePath
+            toFolder: item.remotePath,
+            fromParentId: hit.parent.id || null,
+            fromIndex: at
           });
         }
       }
 
       applied++;
+      done++;
+      report('Renaming and moving bookmarks to match your cloud bookmarks.');
     }
 
     /* [ZeroLabs] 2026-08-28 - added: run the prune once everything has moved */
     // Deferred to here rather than done inline, because a folder emptied by a
     // removal can be refilled by a move later in the same resolution.
+    if (vacated.size > 0) report('Removing folders left empty.');
     for (const folder of vacated) {
       await pruneEmptyAncestors(folder);
     }
@@ -874,6 +965,15 @@ class SyncManager {
     tree.lastModified = Date.now();
     await this.saveLocalBookmarks(tree);
     this.emitEvent('localTreeChanged');
+
+    /* [ZeroLabs] 2026-09-22 6:54 PM - added: the whole apply is one event */
+    // Written after the tree is saved, so the entry can never describe a change
+    // that did not survive.
+    const appliedCount = syncOps.removed.length + syncOps.renamed.length +
+      syncOps.moved.length + syncOps.prunedFolders.length;
+    if (appliedCount > 0) {
+      await addChangelogEntry('sync-apply', 'sync', 'Approved sync changes', null, syncOps);
+    }
 
     // The approved changes came FROM the snippet, so they must not be recorded
     // as this device's own or the next reconcile would try to push them back.
