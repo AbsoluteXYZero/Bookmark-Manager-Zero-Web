@@ -1,6 +1,13 @@
 ## Changelog
 
-### v5.9 (Current)
+### v6.0 (Current)
+
+**Bug Fixes:**
+- **Choosing a folder works again** - Since 5.9, the folder you picked in the folder tree was lost when adding a folder, in the move dialog and when moving a selection, so the item did not go where you chose. Every folder picker now keeps the folder you choose. Thank you to everyone who reported it.
+- **"Add bookmark here" and "Add subfolder" start on that folder** - They opened the form on the last folder you used and only then switched, so the picker highlighted a different folder from the one that was used.
+- **Titles with quotes or symbols display correctly** - A bookmark whose title or address held a quote, a `<` or an `&` could show broken text in the duplicates list, the changelog and the sync change summary, and a quote in a title could break the markup around it.
+
+### v5.9
 
 **Changes:**
 - **Dragging bookmarks is now BMZ's own, and the scroll wheel works while you drag** - The browser's built-in drag would not let the wheel scroll the list, would not start from a touch at all, and drew its own "you cannot drop here" cursor over places where you plainly could. BMZ now handles the drag itself: the wheel scrolls the list with an item in hand, the item follows the pointer without lagging behind it, and Escape cancels a drag part way.
