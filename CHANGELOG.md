@@ -1,6 +1,26 @@
 ## Changelog
 
-### v6.0 (Current)
+### v6.2 (Current)
+
+**Changes:**
+- **Token events are in the Event Log** - Renewing your GitLab token, a failed renewal, a token picked up from Supabase, a token you enter by hand, and every change of token storage between Local and Supabase now each leave an entry, with the reason. The token itself is never written there.
+- **The renewal message says why other devices need the new token** - When the new token stays on this device, the message now says whether that is because this device uses Local token storage or because the save to Supabase did not happen, and what to do about it.
+
+**Bug Fixes:**
+- **Signing in through Supabase now sets Supabase token storage** - Signing in with GitLab through Supabase, or loading your token from Supabase in the token form, used the Supabase token but left this device on Local token storage. A renewal on that device then saved the new token here only, and your other devices kept the old one, which no longer worked.
+- **A renewal no longer claims success it did not have** - If this device's Supabase sign-in had expired, the message said your other devices would pick up the new token, although nothing was saved to Supabase. It now shows what really happened.
+
+### v6.1
+
+**Changes:**
+- **Your GitLab token is renewed earlier** - BMZ now offers to renew your token when 65 days are left, not 30. The renewal now comes before GitLab's first "your token will expire" email, which GitLab sends at 60 days.
+
+**Bug Fixes:**
+- **Renewing your token waits for your answer again** - When the page loaded, BMZ renewed the token without asking, then showed the "Token Expiring Soon" prompt behind the result. It now renews only when you press Renew Token Now. If saving the new token to Supabase fails, a message now tells you so.
+- **A token renewed on another device is picked up at once** - Renewing the token on one device stops the old token working everywhere. In Supabase mode, the first time GitLab refuses the old token, BMZ now gets the new token from Supabase and repeats the request. Before, sync failed until you reloaded the page.
+- **A refused token is reported as one** - When GitLab refused the token, sync said "Repository does not contain bookmarks.json". It now shows the real error. A failed read of your pinned items also no longer looks like an empty pins list.
+
+### v6.0
 
 **Bug Fixes:**
 - **Choosing a folder works again** - Since 5.9, the folder you picked in the folder tree was lost when adding a folder, in the move dialog and when moving a selection, so the item did not go where you chose. Every folder picker now keeps the folder you choose. Thank you to everyone who reported it.

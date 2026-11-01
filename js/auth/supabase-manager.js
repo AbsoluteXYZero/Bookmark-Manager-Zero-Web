@@ -5,6 +5,8 @@
  */
 
 import dbManager from '../storage/indexeddb.js';
+/* [ZeroLabs] 2026-10-31 11:33 PM - added: token events go to the Event Log */
+import { addChangelogEntry } from '../utils/storage-utils.js';
 
 const SUPABASE_URL = 'https://zkwmxywegwgqcgssgfqv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inprd214eXdlZ3dncWNnc3NnZnF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY3OTE5MjIsImV4cCI6MjA5MjM2NzkyMn0.-fvMiySTdda2ACXvFXk2Y0Dlu2tXhgxd94UzYvqPx8I';
@@ -225,8 +227,41 @@ class SupabaseManager {
     return record?.value || 'local';
   }
 
-  async setTokenMode(mode) {
+  /* [ZeroLabs] 2026-10-31 11:33 PM - edited: a mode change is logged with the reason (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js, Bookmark-Manager-Zero-Firefox/sidebar.js) */
+  // A device that silently ended up on Local storage renewed the token and left
+  // Supabase holding a revoked one, and nothing recorded how it got there.
+  // Every caller now says why, and a real change writes an Event Log entry.
+  async setTokenMode(mode, reason = '') {
+    const previous = await this.getTokenMode();
     await dbManager.put('settings', { key: 'bmz_token_mode', value: mode });
+    if (previous === mode) return;
+
+    const previousLabel = this.tokenModeLabel(previous);
+    const summary = reason ? `${reason} (was ${previousLabel}).` : `Was ${previousLabel}.`;
+    await this.logTokenEvent(`Token storage set to ${this.tokenModeLabel(mode)}`, summary);
+  }
+
+  tokenModeLabel(mode) {
+    if (mode === 'supabase') return 'Supabase';
+    return 'Local';
+  }
+
+  /* [ZeroLabs] 2026-10-31 11:33 PM - added: token events in the Event Log */
+  // Renewals, refreshes, hand-entered tokens and storage mode changes. The token
+  // itself, or any part of it, is never written here.
+  logTokenEvent(title, summary) {
+    return addChangelogEntry('token', 'token', title, null, { summary });
+  }
+
+  describeRenewalOutcome(expiresAt, outcome, failureReason) {
+    const expiry = expiresAt ? `New expiry ${expiresAt}.` : 'New token issued.';
+    if (outcome === 'supabase') {
+      return `${expiry} Saved to Supabase for your other devices.`;
+    }
+    if (outcome === 'supabase-failed') {
+      return `${expiry} Not saved to Supabase. ${failureReason} Your other devices still have the old token.`;
+    }
+    return `${expiry} Saved on this device only, because token storage here is Local.`;
   }
 
   async checkAndRotateIfNeeded(currentToken) {

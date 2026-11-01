@@ -251,6 +251,12 @@ class App {
         if (wasCallback) {
           const patData = await supabaseManager.loadGitLabToken();
           if (patData) {
+            /* [ZeroLabs] 2026-10-31 11:33 PM - added: a token from Supabase means Supabase mode */
+            // Signing in through Supabase loaded the token from there but left the
+            // mode at its default, Local. A renewal on that device then saved the
+            // new token on the device only and left Supabase with the revoked one.
+            // Set before _authenticateWithPAT, which goes on into the app.
+            await supabaseManager.setTokenMode('supabase', 'Signed in through Supabase, and the token was loaded from there');
             const authenticated = await this._authenticateWithPAT(patData.token);
             if (authenticated) return;
           }
@@ -680,6 +686,8 @@ class App {
           await authManager.storeToken(authResult.access_token, null, 'gitlab');
 
           // If signed in with Supabase and token mode is supabase, also save PAT to Supabase
+          /* [ZeroLabs] 2026-10-31 11:33 PM - edited: reason for the mode, and the entry itself is logged */
+          let savedToSupabase = false;
           if (supabaseManager.isSignedIn) {
             const tokenMode = await supabaseManager.getTokenMode();
             const saveToSupabase = document.getElementById('saveToSupabaseCheck');
@@ -687,12 +695,16 @@ class App {
             if (shouldSaveToSupabase) {
               try {
                 await supabaseManager.saveGitLabToken(authResult.access_token, null);
-                await supabaseManager.setTokenMode('supabase');
+                savedToSupabase = true;
+                await supabaseManager.setTokenMode('supabase', 'Token entered on the sign-in screen and saved to Supabase');
               } catch (e) {
                 console.warn('Failed to save PAT to Supabase:', e.message);
               }
             }
           }
+          await supabaseManager.logTokenEvent('GitLab token entered', savedToSupabase
+            ? 'Entered by hand on the sign-in screen. Saved to Supabase and on this device.'
+            : 'Entered by hand on the sign-in screen. Saved on this device only.');
 
           // Store provider preference
           await authManager.storePreference('syncProvider', 'gitlab');
@@ -2962,7 +2974,8 @@ class App {
         modal.remove();
         if (currentMode === 'supabase') {
           await supabaseManager.deleteGitLabToken();
-          await supabaseManager.setTokenMode('local');
+          /* [ZeroLabs] 2026-10-31 11:33 PM - edited: say why the mode changed */
+          await supabaseManager.setTokenMode('local', 'Switched with the button in the sync settings');
           this.showToast('Switched to local token storage');
         } else {
           if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
@@ -2980,7 +2993,8 @@ class App {
           try {
             const token = await authManager.getToken('gitlab');
             await supabaseManager.saveGitLabToken(token, expiresAt);
-            await supabaseManager.setTokenMode('supabase');
+            /* [ZeroLabs] 2026-10-31 11:33 PM - edited: say why the mode changed */
+            await supabaseManager.setTokenMode('supabase', 'Switched with the button in the sync settings; this device\'s token was uploaded');
             this.showToast('Switched to Supabase token storage');
           } catch (e) {
             this.showToast('Failed: ' + e.message, 'error');
@@ -3027,6 +3041,10 @@ class App {
             this.showToast('Signed in! No token stored yet. Enter your PAT below.', 'info');
             return;
           }
+          /* [ZeroLabs] 2026-10-31 11:33 PM - added: a token from Supabase means Supabase mode */
+          // Same gap as the sign-in path: the token came from Supabase and the mode
+          // stayed Local. Chrome and Firefox already set it in this button.
+          await supabaseManager.setTokenMode('supabase', 'Token loaded from Supabase in the token form');
           await this._authenticateWithPAT(patData.token);
           modal.remove();
           await this.showSnippetSetup();
@@ -3043,20 +3061,26 @@ class App {
         }
         modal.remove();
         await this._authenticateWithPAT(token);
+        /* [ZeroLabs] 2026-10-31 11:33 PM - edited: reasons for the mode, and the entry itself is logged */
+        let savedToSupabase = false;
         if (selectedMode === 'supabase') {
           if (!supabaseManager.isSignedIn) await supabaseManager.loadSession();
           if (supabaseManager.isSignedIn) {
             try {
               await supabaseManager.saveGitLabToken(token, null);
-              await supabaseManager.setTokenMode('supabase');
+              savedToSupabase = true;
+              await supabaseManager.setTokenMode('supabase', 'Token entered in the token form with Supabase chosen');
             } catch (e) {
               this.showToast('Saved locally (Supabase save failed: ' + e.message + ')', 'warning');
-              await supabaseManager.setTokenMode('local');
+              await supabaseManager.setTokenMode('local', `Saving the entered token to Supabase failed: ${e.message}`);
             }
           } else {
-            await supabaseManager.setTokenMode('local');
+            await supabaseManager.setTokenMode('local', 'Supabase chosen in the token form, but this device was not signed in to Supabase');
           }
         }
+        await supabaseManager.logTokenEvent('GitLab token entered', savedToSupabase
+          ? 'Entered by hand. Saved to Supabase and on this device.'
+          : 'Entered by hand. Saved on this device only.');
         await this.showSnippetSetup();
       });
     }
@@ -3271,18 +3295,24 @@ class App {
         await authManager.storePreference('syncProvider', 'gitlab');
 
         // Save to Supabase if supabase mode selected
+        /* [ZeroLabs] 2026-10-31 11:33 PM - edited: reasons for the mode, and the entry itself is logged */
+        let savedToSupabase = false;
         if (selectedMode === 'supabase') {
           try {
             await supabaseManager.saveGitLabToken(authResult.access_token, expiresAt);
-            await supabaseManager.setTokenMode('supabase');
+            savedToSupabase = true;
+            await supabaseManager.setTokenMode('supabase', 'Token entered in the connect dialog with Supabase chosen');
           } catch (e) {
             console.warn('[ConnectModal] Supabase save failed — using local:', e);
-            await supabaseManager.setTokenMode('local');
+            await supabaseManager.setTokenMode('local', `Saving the token from the connect dialog to Supabase failed: ${e.message}`);
             this.showToast('Failed to save to Supabase — saved locally instead.', 'error');
           }
         } else {
-          await supabaseManager.setTokenMode('local');
+          await supabaseManager.setTokenMode('local', 'Local chosen in the connect dialog');
         }
+        await supabaseManager.logTokenEvent('GitLab token entered', savedToSupabase
+          ? 'Entered by hand in the connect dialog. Saved to Supabase and on this device.'
+          : 'Entered by hand in the connect dialog. Saved on this device only.');
 
         oauthPAT.provider = 'gitlab';
         oauthPAT.token = authResult.access_token;
@@ -5076,6 +5106,8 @@ class App {
       } catch (e) {
         rotateNowBtn.disabled = false;
         this.showToast(e.message, 'error');
+        /* [ZeroLabs] 2026-10-31 11:33 PM - added: a failed renewal goes in the Event Log */
+        await supabaseManager.logTokenEvent('GitLab token renewal failed', e.message);
         return;
       }
       cleanup();
@@ -5083,16 +5115,30 @@ class App {
       await authManager.storeToken(rotated.token, null, 'gitlab');
       oauthPAT.token = rotated.token;
 
-      if (isSupabase && supabaseManager.isSignedIn) {
-        try {
-          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
-        } catch (e) {
-          console.warn('[TokenRotation] Supabase save failed:', e);
-          this.showToast('Token renewed, but saving it to Supabase failed. Copy it now and enter it on your other devices.', 'error');
+      /* [ZeroLabs] 2026-10-31 11:33 PM - edited: three outcomes, each logged (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js, Bookmark-Manager-Zero-Firefox/sidebar.js) */
+      // Supabase mode with an expired Supabase session used to show the green
+      // "picked up automatically" box although nothing was saved there.
+      let outcome = 'local';
+      let failureReason = '';
+      if (isSupabase) {
+        if (!supabaseManager.isSignedIn) {
+          outcome = 'supabase-failed';
+          failureReason = 'This device is not signed in to Supabase.';
+        } else {
+          try {
+            await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
+            outcome = 'supabase';
+          } catch (e) {
+            console.warn('[TokenRotation] Supabase save failed:', e);
+            outcome = 'supabase-failed';
+            failureReason = `Saving to Supabase failed: ${e.message}`;
+          }
         }
       }
 
-      this.showPostRotationModal(rotated.token, isSupabase ? 'supabase' : 'local');
+      await supabaseManager.logTokenEvent('GitLab token renewed',
+        supabaseManager.describeRenewalOutcome(rotated.expires_at, outcome, failureReason));
+      this.showPostRotationModal(rotated.token, outcome, failureReason);
     });
 
     modal.querySelector('#snoozeDayBtn').addEventListener('click', async () => {
@@ -5108,15 +5154,28 @@ class App {
     });
   }
 
-  showPostRotationModal(newToken, mode = 'local') {
-    const isSupabase = mode === 'supabase';
-    const actionBox = isSupabase
-      ? `<div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:12px;margin-bottom:12px;">
+  /* [ZeroLabs] 2026-10-31 11:33 PM - edited: three outcomes, and the red box names the cause (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js, Bookmark-Manager-Zero-Firefox/sidebar.js) */
+  // outcome is 'supabase' (saved there), 'local' (this device uses Local token
+  // storage) or 'supabase-failed' (Supabase mode, but the save did not happen).
+  // The red box used to say only "your old token is now invalid", which hid that
+  // this device was on Local storage and left Supabase with the revoked token.
+  // The failure reason is filled in with textContent below, never as markup.
+  showPostRotationModal(newToken, outcome = 'local', failureReason = '') {
+    const redBox = 'padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;margin-bottom:12px;';
+    let actionBox;
+    if (outcome === 'supabase') {
+      actionBox = `<div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:12px;margin-bottom:12px;">
            Your other BMZ devices will pick up the new token automatically on their next sync.
-         </div>`
-      : `<div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;margin-bottom:12px;">
-           Your old token is now invalid. If you use BMZ on other devices, update the token on each one.
          </div>`;
+    } else if (outcome === 'supabase-failed') {
+      actionBox = `<div style="${redBox}">
+           <strong>The new token did not reach Supabase.</strong> <span id="rotationFailureReason"></span> Your other devices still have the old token, which no longer works. To upload this one, open the GitLab sync settings on this device, switch token storage to Local, then back to Supabase.
+         </div>`;
+    } else {
+      actionBox = `<div style="${redBox}">
+           <strong>This device uses Local token storage.</strong> The new token was saved on this device only, and your old token no longer works. Open BMZ on each of your other browsers and devices, go to the GitLab sync settings, and paste this new token. Until you do, sync is broken on those devices.
+         </div>`;
+    }
 
     const modal = document.createElement('div');
     modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
@@ -5134,6 +5193,9 @@ class App {
     `;
     document.body.appendChild(modal);
     modal.querySelector('#rotatedTokenDisplay').value = newToken;
+    /* [ZeroLabs] 2026-10-31 11:33 PM - added: the reason as text, never markup */
+    const failureReasonSpan = modal.querySelector('#rotationFailureReason');
+    if (failureReasonSpan) failureReasonSpan.textContent = failureReason;
     modal.querySelector('#copyRotatedToken').addEventListener('click', () => {
       navigator.clipboard.writeText(newToken).then(() => {
         const btn = modal.querySelector('#copyRotatedToken');

@@ -72,7 +72,8 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    getManifest: () => ({ version: '6.0' }),
+    /* [ZeroLabs] 2026-10-31 11:33 PM - edited: version 6.1 to 6.2 */
+    getManifest: () => ({ version: '6.2' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -8767,6 +8768,8 @@ async function openChangelogModal() {
       else if (entry.type === 'error') iconColor = '#ef4444';
       /* [ZeroLabs] 2026-09-13 - added: published notices are recorded here too */
       else if (entry.type === 'notice') iconColor = '#3b82f6';
+      /* [ZeroLabs] 2026-10-31 11:33 PM - added: GitLab token events */
+      else if (entry.type === 'token') iconColor = '#06b6d4';
       else iconColor = '#f59e0b';
 
       // SVG icons for operation types
@@ -8783,6 +8786,9 @@ async function openChangelogModal() {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M21,19V20H3V19L5,17V11C5,7.9 7.03,5.17 10,4.29C10,4.19 10,4.1 10,4A2,2 0 0,1 12,2A2,2 0 0,1 14,4C14,4.1 14,4.19 14,4.29C16.97,5.17 19,7.9 19,11V17L21,19M14,21A2,2 0 0,1 12,23A2,2 0 0,1 10,21"/></svg>`;
       } else if (entry.type === 'error') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M13,14H11V9H13M13,18H11V16H13M1,21H23L12,2L1,21Z"/></svg>`;
+      /* [ZeroLabs] 2026-10-31 11:33 PM - added: a key for token events */
+      } else if (entry.type === 'token') {
+        icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M7,14A2,2 0 0,1 5,12A2,2 0 0,1 7,10A2,2 0 0,1 9,12A2,2 0 0,1 7,14M12.65,10C11.83,7.67 9.61,6 7,6A6,6 0 0,0 1,12A6,6 0 0,0 7,18C9.61,18 11.83,16.33 12.65,14H17V18H21V14H23V10H12.65Z"/></svg>`;
       } else if (entry.type === 'pre-sync-snapshot') {
         icon = `<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24" style="color: ${iconColor};"><path d="M12,18A6,6 0 0,1 6,12C6,11 6.25,10.03 6.7,9.2L5.24,7.74C4.46,8.97 4,10.43 4,12A8,8 0 0,0 12,20V23L16,19L12,15M12,4V1L8,5L12,9V6A6,6 0 0,1 18,12C18,13 17.75,13.97 17.3,14.8L18.76,16.26C19.54,15.03 20,13.57 20,12A8,8 0 0,0 12,4Z"/></svg>`;
       /* [ZeroLabs] 2026-09-22 6:54 PM - added: the approved-sync event */
@@ -8795,8 +8801,10 @@ async function openChangelogModal() {
       // SVG icons for item types (skip for sync snapshots)
       let itemIcon = '';
       /* [ZeroLabs] 2026-09-22 6:54 PM - edited: a sync event is not one item */
+      /* [ZeroLabs] 2026-10-31 11:33 PM - edited: a token event is not an item either */
       if (entry.type !== 'pre-sync-snapshot' && entry.type !== 'error' &&
-          entry.type !== 'notice' && entry.type !== 'sync-apply' && entry.itemType !== 'sync') {
+          entry.type !== 'notice' && entry.type !== 'sync-apply' && entry.itemType !== 'sync' &&
+          entry.type !== 'token') {
         if (entry.itemType === 'folder') {
           itemIcon = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" style="color: var(--md-sys-color-primary);"><path d="M10,4H4C2.89,4 2,4.89 2,6V18A2,2 0 0,0 4,20H20A2,2 0 0,0 22,18V8C22,6.89 21.1,6 20,6H12L10,4Z"/></svg>`;
         } else {
@@ -8808,6 +8816,9 @@ async function openChangelogModal() {
       if (entry.details) {
         if (entry.type === 'notice') {
           detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">Announcement from BMZ</div>`;
+        /* [ZeroLabs] 2026-10-31 11:33 PM - added: what happened to the token, and why */
+        } else if (entry.type === 'token') {
+          detailsHtml = `<div style="font-size: 11px; color: var(--md-sys-color-on-surface-variant); margin-top: 4px;">${escapeHtml(entry.details.summary || '')}</div>`;
         } else if (entry.type === 'error') {
           /* [ZeroLabs] 2026-09-08 6:50 AM - added: the frame is the useful half */
           // The message says what broke; this says where. On a phone there is no

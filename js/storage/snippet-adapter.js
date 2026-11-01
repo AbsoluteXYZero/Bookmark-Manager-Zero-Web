@@ -4,6 +4,9 @@
  */
 
 import authManager from '../auth/auth-manager.js';
+/* [ZeroLabs] 2026-10-31 11:01 PM - added: Supabase holds the newest token after a rotation */
+import supabaseManager from '../auth/supabase-manager.js';
+import oauthPAT from '../auth/oauth-pat.js';
 import GitLabErrorHandler from '../utils/gitlab-error-handler.js';
 import { safeLocalStorage } from '../utils/storage-utils.js';
 
@@ -29,6 +32,9 @@ class SnippetAdapter {
     };
     this.userCache = null;
     this.userCacheExpiry = 0;
+    /* [ZeroLabs] 2026-10-31 11:01 PM - added: shared state for the 401 token refresh */
+    this.tokenRefresh = null;
+    this.lastReplacedToken = null;
   }
 
 
@@ -62,7 +68,73 @@ class SnippetAdapter {
    * repeating it produces the same result whether or not the first attempt
    * reached GitLab.
    */
+  /* [ZeroLabs] 2026-10-31 11:01 PM - edited: a revoked token gets one retry with Supabase's copy (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js, Bookmark-Manager-Zero-Firefox/sidebar.js) */
+  // A rotation on another device revokes this device's token at once. In
+  // Supabase mode the new token is already in Supabase, so a 401 asks for it and
+  // repeats the request one time. Only a request that carried this device's
+  // stored token is retried, so a token being tested is never swapped.
   async fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+    const response = await this.fetchOnceWithTimeout(url, options, timeoutMs);
+    if (response.status !== 401) return response;
+
+    const sentAuth = options.headers && options.headers['Authorization'];
+    if (!sentAuth || !sentAuth.startsWith('Bearer ')) return response;
+
+    const staleToken = sentAuth.slice('Bearer '.length);
+    const freshToken = await this.refreshTokenFromSupabase(staleToken);
+    if (!freshToken) return response;
+
+    const retryHeaders = { ...options.headers, 'Authorization': `Bearer ${freshToken}` };
+    return await this.fetchOnceWithTimeout(url, { ...options, headers: retryHeaders }, timeoutMs);
+  }
+
+  /* [ZeroLabs] 2026-10-31 11:01 PM - added: replace a revoked token with Supabase's copy */
+  // Returns the token to retry with, or null when there is nothing better to
+  // try. Requests that fail together share one Supabase read, and a request that
+  // was in flight when the token changed is handed the new one directly. A
+  // failure here never clears the stored token.
+  async refreshTokenFromSupabase(staleToken) {
+    if (this.tokenRefresh && this.tokenRefresh.staleToken === staleToken) {
+      return await this.tokenRefresh.promise;
+    }
+
+    const storedToken = await authManager.getToken('gitlab');
+    if (staleToken === this.lastReplacedToken && storedToken && storedToken !== staleToken) {
+      return storedToken;
+    }
+    if (staleToken !== storedToken) return null;
+
+    const promise = this.readNewerTokenFromSupabase(staleToken);
+    this.tokenRefresh = { staleToken, promise };
+    try {
+      return await promise;
+    } finally {
+      this.tokenRefresh = null;
+    }
+  }
+
+  async readNewerTokenFromSupabase(staleToken) {
+    try {
+      if (await supabaseManager.getTokenMode() !== 'supabase') return null;
+      if (!supabaseManager.isSignedIn) return null;
+
+      const patData = await supabaseManager.loadGitLabToken();
+      if (!patData || !patData.token || patData.token === staleToken) return null;
+
+      this.lastReplacedToken = staleToken;
+      await authManager.storeToken(patData.token, null, 'gitlab');
+      oauthPAT.token = patData.token;
+      console.log('[TokenRefresh] Supabase holds a newer GitLab token. Retrying with it.');
+      /* [ZeroLabs] 2026-10-31 11:33 PM - added: log the refresh */
+      await supabaseManager.logTokenEvent('GitLab token updated from Supabase', 'GitLab refused this device\'s token, and Supabase held a newer one. Another device probably renewed it.');
+      return patData.token;
+    } catch (error) {
+      console.warn('[TokenRefresh] Could not read the token from Supabase:', error);
+      return null;
+    }
+  }
+
+  async fetchOnceWithTimeout(url, options = {}, timeoutMs = 30000) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -494,7 +566,14 @@ class SnippetAdapter {
     const url = `${this.apiBase}/projects/${this.storeRef()}/repository/files/${encodeURIComponent(filePath)}/raw?ref=${encodeURIComponent(this.branch || 'main')}`;
     const response = await this.fetchWithTimeout(url, { headers });
     this.updateRateLimitFromResponse(response);
-    if (!response.ok) return null;
+    /* [ZeroLabs] 2026-10-31 11:01 PM - edited: only a 404 means the file is absent */
+    // Every failure used to come back as null, so a revoked token (401) was
+    // reported as a missing bookmarks.json, and a failed pins read looked like
+    // an empty pins file. Any other status now throws with its real code.
+    if (response.status === 404) return null;
+    if (!response.ok) {
+      throw new Error(`Failed to read ${filePath}: ${response.status}`);
+    }
     return await response.text();
   }
 
