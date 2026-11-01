@@ -108,7 +108,7 @@ class App {
     this.isAuthenticated = false;
     this.isInitialized = false;
     this.currentUser = null;
-    this._rotationPromptActive = false;
+    /* [ZeroLabs] 2026-10-31 10:53 PM - removed: _rotationPromptActive (supabaseManager owns it) */
   }
 
   /**
@@ -2531,169 +2531,29 @@ class App {
     }
   }
 
+  /* [ZeroLabs] 2026-10-31 10:53 PM - edited: page-load check only asks, never rotates (see also: supabase-manager.js) */
+  // Same check as the sync poll: threshold, cached expiry, 24-hour snooze and the
+  // one-prompt-at-a-time flag all live in supabaseManager. Nothing rotates here;
+  // showPreRotationPrompt rotates only when the user clicks Renew Token Now.
   async checkAndRotateIfNeeded() {
-    if (this._rotationPromptActive) return;
     try {
       const token = await authManager.getToken('gitlab');
       if (!token) return;
 
-      /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotate before GitLab's 60-day email (see also: sidepanel.js, sidebar.js, supabase-manager.js) */
-      // Fast-path: skip API call if cached expiry shows > 65 days remaining
-      const cachedExpiry = safeLocalStorage.getItem('gitlab_token_expires');
-      if (cachedExpiry) {
-        const cachedDaysLeft = (new Date(cachedExpiry) - Date.now()) / (1000 * 60 * 60 * 24);
-        if (cachedDaysLeft > 65) return;
-      }
-
-      const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      if (res.status === 401) {
+      const result = await supabaseManager.checkAndRotateIfNeeded(token);
+      if (result.tokenInvalid) {
         this.showToast('GitLab token is invalid or expired. Please re-enter it in sync settings.', 'error');
         return;
       }
-      if (!res.ok) return;
+      if (!result.needsRotation) return;
 
-      const info = await res.json();
-      if (!info.expires_at) return;
-
-      safeLocalStorage.setItem('gitlab_token_expires', info.expires_at);
-
-      const daysLeft = (new Date(info.expires_at) - Date.now()) / (1000 * 60 * 60 * 24);
-      /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotation threshold 30 to 65 days */
-      if (daysLeft > 65) return;
-
-      // Check 24-hour snooze
-      const snoozeTime = safeLocalStorage.getItem('bmz_rotation_snooze');
-      if (snoozeTime) {
-        const snoozeAge = Date.now() - parseInt(snoozeTime, 10);
-        if (snoozeAge < 24 * 60 * 60 * 1000) return;
-      }
-
-      this._rotationPromptActive = true;
-      const choice = await this.showPreRotationPrompt(daysLeft);
-      if (choice === 'snooze') {
-        safeLocalStorage.setItem('bmz_rotation_snooze', Date.now());
-        return;
-      }
-
-      const newExpiry = new Date();
-      newExpiry.setDate(newExpiry.getDate() + 350);
-      const newExpiryStr = newExpiry.toISOString().split('T')[0];
-
-      const rotateRes = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self/rotate', {
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ expires_at: newExpiryStr })
-      });
-      if (!rotateRes.ok) {
-        if (rotateRes.status === 403) {
-          this.showToast('Token renewal failed: insufficient scopes. Your token needs the "api" scope. Please create a new token manually.', 'error');
-        } else if (rotateRes.status === 429) {
-          this.showToast('Token renewal failed: GitLab rate limit hit. It will be retried on the next sync.', 'error');
-        } else {
-          this.showToast(`Token renewal failed (${rotateRes.status}). Please try again later.`, 'error');
-        }
-        return;
-      }
-
-      const rotated = await rotateRes.json();
-      const mode = await supabaseManager.getTokenMode();
-
-      if (mode === 'supabase' && supabaseManager.isSignedIn) {
-        try {
-          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
-        } catch (e) {
-          console.warn('[TokenRotation] Supabase save failed:', e);
-        }
-      }
-
-      await authManager.storeToken(rotated.token, null, 'gitlab');
-      oauthPAT.token = rotated.token;
-      safeLocalStorage.removeItem('bmz_rotation_snooze');
-      safeLocalStorage.setItem('gitlab_token_expires', rotated.expires_at);
-
-      this.showPostRotationModal(rotated.token, mode);
+      await this.showPreRotationPrompt(result.daysLeft, result.currentToken);
     } catch (err) {
-      this._rotationPromptActive = false;
       console.error('[TokenRotation] Failed:', err);
     }
   }
 
-  showPreRotationPrompt(daysLeft) {
-    return new Promise((resolve) => {
-      const modal = document.createElement('div');
-      modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
-      modal.innerHTML = `
-        <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:420px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
-          <h2 style="margin:0 0 12px 0;font-size:18px;">🔑 GitLab Token Expiring Soon</h2>
-          <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 16px 0;">Your GitLab Personal Access Token expires in <strong style="color:var(--md-sys-color-on-surface,#e0e0e0);">${Math.floor(daysLeft)} day${Math.floor(daysLeft) !== 1 ? 's' : ''}</strong>. BMZ can renew it automatically right now.</p>
-          <div style="padding:10px 12px;background:rgba(245,158,11,0.12);border:1px solid rgba(245,158,11,0.35);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
-            ⚠️ Renewing creates a <strong>new token</strong> and immediately invalidates the old one. If you use BMZ on other browsers, the extension, or Android, you will need to enter the new token on each of those clients to maintain sync.
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;">
-            <button id="rotateNowBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">Renew Token Now</button>
-            <button id="snoozeDayBtn" style="padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface-variant,#aaa);font-size:14px;cursor:pointer;">Remind me tomorrow</button>
-          </div>
-        </div>
-      `;
-      document.body.appendChild(modal);
-      const dismiss = (result) => {
-        modal.remove();
-        this._rotationPromptActive = false;
-        resolve(result);
-      };
-      modal.querySelector('#rotateNowBtn').addEventListener('click', () => dismiss('rotate'));
-      modal.querySelector('#snoozeDayBtn').addEventListener('click', () => dismiss('snooze'));
-      modal.addEventListener('click', (e) => { if (e.target === modal) dismiss('snooze'); });
-      const onKey = (e) => { if (e.key === 'Escape') { document.removeEventListener('keydown', onKey); dismiss('snooze'); } };
-      document.addEventListener('keydown', onKey);
-    });
-  }
-
-  showPostRotationModal(newToken, mode = 'local') {
-    const isSupabase = mode === 'supabase';
-    const actionBox = isSupabase
-      ? `<div style="padding:12px;background:rgba(34,197,94,0.1);border:1px solid rgba(34,197,94,0.3);border-radius:8px;font-size:12px;margin-bottom:12px;">
-           ✅ <strong>Your other BMZ clients will pick up the new token automatically</strong> on their next sync — no action needed on other devices.
-         </div>`
-      : `<div style="padding:12px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.35);border-radius:8px;font-size:12px;margin-bottom:12px;">
-           🚨 <strong>Your old token is now invalid.</strong> If you use BMZ on other browsers, the extension, or Android, open each one, go to the GitLab sync settings, and paste this new token. Until you do, sync will be broken on those clients.
-         </div>`;
-    const hintBox = isSupabase
-      ? `<div style="padding:10px 12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
-           💡 You can always retrieve your current token from <strong>Settings → Reveal GitLab Token</strong> in BMZ if you ever need it.
-         </div>`
-      : `<div style="padding:10px 12px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);border-radius:8px;font-size:12px;color:var(--md-sys-color-on-surface-variant,#aaa);margin-bottom:16px;">
-           💡 You can always retrieve your current token from <strong>Settings → Reveal GitLab Token</strong> in BMZ. Want renewals to sync automatically across all devices? Switch to <strong>Supabase storage</strong> in GitLab Sync Settings.
-         </div>`;
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:10002;display:flex;align-items:center;justify-content:center;';
-    modal.innerHTML = `
-      <div style="background:var(--md-sys-color-surface,#1e1e1e);padding:24px;border-radius:12px;max-width:480px;width:90%;color:var(--md-sys-color-on-surface,#e0e0e0);">
-        <h2 style="margin:0 0 12px 0;font-size:18px;">✅ Token Renewed Successfully</h2>
-        <p style="font-size:13px;color:var(--md-sys-color-on-surface-variant,#aaa);margin:0 0 8px 0;">Your new GitLab Personal Access Token is shown below. <strong style="color:var(--md-sys-color-error,#ef4444);">Copy it now</strong> — GitLab will never show this token again once you leave this screen.</p>
-        <div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;">
-          <input type="text" readonly id="rotatedTokenDisplay" style="flex:1;padding:10px;border-radius:8px;border:1px solid var(--md-sys-color-outline,#444);background:var(--md-sys-color-surface-variant,#2a2a2a);color:var(--md-sys-color-on-surface,#e0e0e0);font-size:12px;font-family:monospace;box-sizing:border-box;">
-          <button id="copyRotatedToken" style="padding:10px 14px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:13px;cursor:pointer;white-space:nowrap;">Copy</button>
-        </div>
-        ${actionBox}
-        ${hintBox}
-        <button id="closeRotationModal" style="width:100%;padding:12px;border-radius:8px;border:none;background:var(--md-sys-color-primary,#818cf8);color:var(--md-sys-color-on-primary,#fff);font-size:14px;cursor:pointer;font-weight:500;">I've copied my token</button>
-      </div>
-    `;
-    document.body.appendChild(modal);
-    modal.querySelector('#rotatedTokenDisplay').value = newToken;
-    modal.querySelector('#rotatedTokenDisplay').addEventListener('click', (e) => e.target.select());
-    modal.querySelector('#copyRotatedToken').addEventListener('click', () => {
-      navigator.clipboard.writeText(newToken).then(() => {
-        const btn = modal.querySelector('#copyRotatedToken');
-        btn.textContent = 'Copied!';
-        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
-      });
-    });
-    modal.querySelector('#closeRotationModal').addEventListener('click', () => modal.remove());
-  }
+  /* [ZeroLabs] 2026-10-31 10:53 PM - removed: duplicate rotation modals (the later App copies won) */
 
   async showGitLabDisconnectDialog() {
     const isSupabase = (await supabaseManager.getTokenMode()) === 'supabase';
@@ -5203,18 +5063,36 @@ class App {
       supabaseManager._rotationPromptActive = false;
     };
 
-    modal.querySelector('#rotateNowBtn').addEventListener('click', async () => {
+    /* [ZeroLabs] 2026-10-31 10:53 PM - edited: one click, local token saved first */
+    // The rotation revokes the old token at once, so the new one is stored on this
+    // device before anything else can fail. A Supabase failure is reported, never
+    // allowed to skip the local save or the token display.
+    const rotateNowBtn = modal.querySelector('#rotateNowBtn');
+    rotateNowBtn.addEventListener('click', async () => {
+      rotateNowBtn.disabled = true;
+      let rotated;
       try {
-        const rotated = await supabaseManager.rotateToken(token);
-        cleanup();
-        if (isSupabase) {
-          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
-        }
-        await authManager.storeToken(rotated.token, null, 'gitlab');
-        this.showPostRotationModal(rotated.token, isSupabase ? 'supabase' : 'local');
+        rotated = await supabaseManager.rotateToken(token);
       } catch (e) {
+        rotateNowBtn.disabled = false;
         this.showToast(e.message, 'error');
+        return;
       }
+      cleanup();
+
+      await authManager.storeToken(rotated.token, null, 'gitlab');
+      oauthPAT.token = rotated.token;
+
+      if (isSupabase && supabaseManager.isSignedIn) {
+        try {
+          await supabaseManager.saveGitLabToken(rotated.token, rotated.expires_at);
+        } catch (e) {
+          console.warn('[TokenRotation] Supabase save failed:', e);
+          this.showToast('Token renewed, but saving it to Supabase failed. Copy it now and enter it on your other devices.', 'error');
+        }
+      }
+
+      this.showPostRotationModal(rotated.token, isSupabase ? 'supabase' : 'local');
     });
 
     modal.querySelector('#snoozeDayBtn').addEventListener('click', async () => {

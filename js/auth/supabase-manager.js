@@ -243,7 +243,8 @@ class SupabaseManager {
       const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
         headers: { 'Authorization': `Bearer ${currentToken}` }
       });
-      if (res.status === 401) return { needsRotation: false, currentToken };
+      /* [ZeroLabs] 2026-10-31 10:53 PM - edited: report a dead token to the caller (see also: app.js) */
+      if (res.status === 401) return { needsRotation: false, tokenInvalid: true, currentToken };
       if (!res.ok) return { needsRotation: false, currentToken };
 
       const info = await res.json();
