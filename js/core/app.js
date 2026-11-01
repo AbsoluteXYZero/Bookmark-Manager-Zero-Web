@@ -2537,11 +2537,12 @@ class App {
       const token = await authManager.getToken('gitlab');
       if (!token) return;
 
-      // Fast-path: skip API call if cached expiry shows > 30 days remaining
+      /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotate before GitLab's 60-day email (see also: sidepanel.js, sidebar.js, supabase-manager.js) */
+      // Fast-path: skip API call if cached expiry shows > 65 days remaining
       const cachedExpiry = safeLocalStorage.getItem('gitlab_token_expires');
       if (cachedExpiry) {
         const cachedDaysLeft = (new Date(cachedExpiry) - Date.now()) / (1000 * 60 * 60 * 24);
-        if (cachedDaysLeft > 30) return;
+        if (cachedDaysLeft > 65) return;
       }
 
       const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
@@ -2559,7 +2560,8 @@ class App {
       safeLocalStorage.setItem('gitlab_token_expires', info.expires_at);
 
       const daysLeft = (new Date(info.expires_at) - Date.now()) / (1000 * 60 * 60 * 24);
-      if (daysLeft > 30) return;
+      /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotation threshold 30 to 65 days */
+      if (daysLeft > 65) return;
 
       // Check 24-hour snooze
       const snoozeTime = safeLocalStorage.getItem('bmz_rotation_snooze');

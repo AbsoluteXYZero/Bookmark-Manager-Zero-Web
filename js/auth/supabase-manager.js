@@ -236,7 +236,8 @@ class SupabaseManager {
       const cached = await dbManager.get('settings', 'bmz_token_expires');
       if (cached?.value) {
         const cachedDaysLeft = (new Date(cached.value) - Date.now()) / (1000 * 60 * 60 * 24);
-        if (cachedDaysLeft > 30) return { needsRotation: false, currentToken };
+        /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotate before GitLab's 60-day email (see also: sidepanel.js, sidebar.js, app.js) */
+        if (cachedDaysLeft > 65) return { needsRotation: false, currentToken };
       }
 
       const res = await fetch('https://gitlab.com/api/v4/personal_access_tokens/self', {
@@ -251,7 +252,8 @@ class SupabaseManager {
       await dbManager.put('settings', { key: 'bmz_token_expires', value: info.expires_at });
 
       const daysLeft = (new Date(info.expires_at) - Date.now()) / (1000 * 60 * 60 * 24);
-      if (daysLeft > 30) return { needsRotation: false, currentToken };
+      /* [ZeroLabs] 2026-10-31 10:41 PM - edited: rotation threshold 30 to 65 days */
+      if (daysLeft > 65) return { needsRotation: false, currentToken };
 
       const snooze = await dbManager.get('settings', 'bmz_rotation_snooze');
       if (snooze?.value) {
