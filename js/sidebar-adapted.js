@@ -71,8 +71,8 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    /* [ZeroLabs] 2026-11-04 1:06 PM - edited: version 6.3 to 6.4 */
-    getManifest: () => ({ version: '6.4' }),
+    /* [ZeroLabs] 2026-11-04 1:30 PM - edited: version 6.4 to 6.5 */
+    getManifest: () => ({ version: '6.5' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -571,14 +571,8 @@ let displayOptions = {
 // The sort reorders the copies that filterAndSearchBookmarks builds for a render.
 // It never changes bookmarkTree or the stored bookmarks, so turning it off draws
 // the real order again and nothing reaches sync.
-const SORT_STEPS = ['off', 'title-asc', 'title-desc', 'date-new', 'date-old'];
-const SORT_LABELS = {
-  'off': 'Sort',
-  'title-asc': 'A-Z',
-  'title-desc': 'Z-A',
-  'date-new': 'Newest',
-  'date-old': 'Oldest'
-};
+/* [ZeroLabs] 2026-11-04 1:30 PM - edited: modes are chips, not cycle steps (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+const SORT_MODES = ['off', 'title-asc', 'title-desc', 'date-new', 'date-old'];
 const SORT_VIEW_ONLY_MESSAGE = 'Sort is view only. Turn off the sort to change the real bookmark order.';
 const SORT_DATE_MESSAGE = 'Dates show when a bookmark was added to this device. Synced or imported bookmarks may show that date, not the original date.';
 const sortTitleCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
@@ -632,21 +626,20 @@ function isOrderChangingDrop(target, payload) {
   return Boolean(parent) && String(parent.id) === String(target.id);
 }
 
-function updateSortChip() {
-  const chip = document.getElementById('sortChip');
-  if (!chip) return;
-
-  const label = chip.querySelector('span');
-  if (label) label.textContent = SORT_LABELS[displayOptions.sortMode];
-  chip.classList.toggle('active', isSortActive());
-  chip.title = isDateSort() ? SORT_DATE_MESSAGE : 'Change the display order. This does not change your real bookmark order.';
+/* [ZeroLabs] 2026-11-04 1:30 PM - edited: one active chip per sort row (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+function updateSortChips() {
+  document.querySelectorAll('.sort-chip').forEach(chip => {
+    const isCurrent = chip.dataset.sort === displayOptions.sortMode;
+    chip.classList.toggle('active', isCurrent);
+    chip.setAttribute('aria-pressed', String(isCurrent));
+  });
 }
 
-function cycleSortMode() {
-  const nextIndex = (SORT_STEPS.indexOf(displayOptions.sortMode) + 1) % SORT_STEPS.length;
-  displayOptions.sortMode = SORT_STEPS[nextIndex];
+function setSortMode(mode) {
+  if (mode === displayOptions.sortMode) return;
+  displayOptions.sortMode = mode;
 
-  updateSortChip();
+  updateSortChips();
   safeLocalStorage.setItem('sortMode', displayOptions.sortMode);
   renderBookmarks();
 
@@ -1810,8 +1803,8 @@ function loadDisplayOptions() {
   displayOptions.expandResults = savedExpandResults !== null ? savedExpandResults === 'true' : true;
   /* [ZeroLabs] 2026-11-04 12:44 PM - added: restore the sort mode */
   const savedSortMode = safeLocalStorage.getItem('sortMode');
-  if (SORT_STEPS.includes(savedSortMode)) displayOptions.sortMode = savedSortMode;
-  updateSortChip();
+  if (SORT_MODES.includes(savedSortMode)) displayOptions.sortMode = savedSortMode;
+  updateSortChips();
 
   // Update previewPopupEnabled variable (default to true if not set)
   previewPopupEnabled = savedPreviewPopup !== null ? savedPreviewPopup === 'true' : true;
@@ -10351,11 +10344,10 @@ function setupEventListeners() {
     });
   }
 
-  /* [ZeroLabs] 2026-11-04 12:44 PM - added: sort chip (see also: Chrome sidepanel.js, Firefox sidebar.js) */
-  const sortChip = document.getElementById('sortChip');
-  if (sortChip) {
-    sortChip.addEventListener('click', cycleSortMode);
-  }
+  /* [ZeroLabs] 2026-11-04 1:30 PM - edited: a chip per sort mode (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  document.querySelectorAll('.sort-chip').forEach(chip => {
+    chip.addEventListener('click', () => setSortMode(chip.dataset.sort));
+  });
 
   // Filter chips
   /* [ZeroLabs] 2026-11-04 12:44 PM - edited: the sort chip is not a filter (see also: Chrome sidepanel.js, Firefox sidebar.js) */
