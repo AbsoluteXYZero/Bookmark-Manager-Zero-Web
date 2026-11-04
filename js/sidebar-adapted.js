@@ -12,7 +12,6 @@ import snippetAdapter from './storage/snippet-adapter.js';
 import storageAdapter from './storage/storage-adapter.js';
 import scannerService from './core/scanner.js';
 import { parseHTMLBookmarks } from './import-export/html-parser.js';
-import { parseJSONBookmarks } from './import-export/json-parser.js';
 /* [ZeroLabs] 2026-09-23 5:20 PM - added: exports must survive the Android WebView */
 import { saveFile } from './utils/file-save.js';
 import { encryptApiKey, decryptApiKey } from './utils/encryption.js';
@@ -72,8 +71,8 @@ const browser = {
     // The website reached feature parity with the Chrome and Firefox extensions,
     // so it now shares their version number rather than carrying a separate line
     // that made the same release look like different software on each platform.
-    /* [ZeroLabs] 2026-10-31 11:33 PM - edited: version 6.1 to 6.2 */
-    getManifest: () => ({ version: '6.2' }),
+    /* [ZeroLabs] 2026-11-04 1:06 PM - edited: version 6.3 to 6.4 */
+    getManifest: () => ({ version: '6.4' }),
     getURL: (path) => path,
     sendMessage: async (message) => {
       // Web version doesn't have background scripts
@@ -561,8 +560,98 @@ let displayOptions = {
   quickAccess: true,
   recent: true,
   expandAll: true,
-  expandResults: true
+  expandResults: true,
+  sortMode: 'off'
 };
+
+/* [ZeroLabs] 2026-11-04 12:44 PM - added: view-only title and date sort (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+// ============================================================================
+// VIEW-ONLY SORT
+// ============================================================================
+// The sort reorders the copies that filterAndSearchBookmarks builds for a render.
+// It never changes bookmarkTree or the stored bookmarks, so turning it off draws
+// the real order again and nothing reaches sync.
+const SORT_STEPS = ['off', 'title-asc', 'title-desc', 'date-new', 'date-old'];
+const SORT_LABELS = {
+  'off': 'Sort',
+  'title-asc': 'A-Z',
+  'title-desc': 'Z-A',
+  'date-new': 'Newest',
+  'date-old': 'Oldest'
+};
+const SORT_VIEW_ONLY_MESSAGE = 'Sort is view only. Turn off the sort to change the real bookmark order.';
+const SORT_DATE_MESSAGE = 'Dates show when a bookmark was added to this device. Synced or imported bookmarks may show that date, not the original date.';
+const sortTitleCollator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
+function isSortActive() {
+  return displayOptions.sortMode !== 'off';
+}
+
+function isDateSort() {
+  return displayOptions.sortMode === 'date-new' || displayOptions.sortMode === 'date-old';
+}
+
+function getSortTitle(node) {
+  return (node.title || node.name || node.url || '').trim();
+}
+
+function compareForSort(a, b) {
+  const mode = displayOptions.sortMode;
+
+  if (isDateSort()) {
+    const difference = (a.dateAdded || 0) - (b.dateAdded || 0);
+    if (difference !== 0) {
+      return mode === 'date-old' ? difference : -difference;
+    }
+  }
+
+  const titleOrder = sortTitleCollator.compare(getSortTitle(a), getSortTitle(b));
+  return mode === 'title-desc' ? -titleOrder : titleOrder;
+}
+
+// Folders stay ahead of bookmarks, and each group sorts inside itself.
+function sortChildrenForDisplay(children) {
+  if (!isSortActive()) return children;
+
+  return children.slice().sort((a, b) => {
+    const aIsFolder = Boolean(a.children);
+    const bIsFolder = Boolean(b.children);
+    if (aIsFolder !== bIsFolder) return aIsFolder ? -1 : 1;
+    return compareForSort(a, b);
+  });
+}
+
+// True when a drop would change a position the sorted view cannot show. A drop
+// into the folder that already holds the item would only move it to the end.
+function isOrderChangingDrop(target, payload) {
+  if (!isSortActive() || !target) return false;
+  if (target.mode === 'before' || target.mode === 'after' || target.mode === 'root') return true;
+  if (target.mode !== 'into') return false;
+
+  const parent = findParentById(bookmarkTree, payload);
+  return Boolean(parent) && String(parent.id) === String(target.id);
+}
+
+function updateSortChip() {
+  const chip = document.getElementById('sortChip');
+  if (!chip) return;
+
+  const label = chip.querySelector('span');
+  if (label) label.textContent = SORT_LABELS[displayOptions.sortMode];
+  chip.classList.toggle('active', isSortActive());
+  chip.title = isDateSort() ? SORT_DATE_MESSAGE : 'Change the display order. This does not change your real bookmark order.';
+}
+
+function cycleSortMode() {
+  const nextIndex = (SORT_STEPS.indexOf(displayOptions.sortMode) + 1) % SORT_STEPS.length;
+  displayOptions.sortMode = SORT_STEPS[nextIndex];
+
+  updateSortChip();
+  safeLocalStorage.setItem('sortMode', displayOptions.sortMode);
+  renderBookmarks();
+
+  if (isDateSort()) app.showToast(SORT_DATE_MESSAGE, 'info', 6000);
+}
 
 /* [ZeroLabs] 2026-11-04 11:54 AM - added: temporary folder views (see also: Chrome sidepanel.js, Firefox sidebar.js) */
 // ============================================================================
@@ -1719,6 +1808,10 @@ function loadDisplayOptions() {
   /* [ZeroLabs] 2026-11-04 11:54 AM - added: apply the expand settings */
   displayOptions.expandAll = savedExpandAll !== null ? savedExpandAll === 'true' : true;
   displayOptions.expandResults = savedExpandResults !== null ? savedExpandResults === 'true' : true;
+  /* [ZeroLabs] 2026-11-04 12:44 PM - added: restore the sort mode */
+  const savedSortMode = safeLocalStorage.getItem('sortMode');
+  if (SORT_STEPS.includes(savedSortMode)) displayOptions.sortMode = savedSortMode;
+  updateSortChip();
 
   // Update previewPopupEnabled variable (default to true if not set)
   previewPopupEnabled = savedPreviewPopup !== null ? savedPreviewPopup === 'true' : true;
@@ -4334,6 +4427,8 @@ function bmzResolveDropTarget(x, y) {
     if (!folderDiv) return null;
     // Dropping a folder onto itself does nothing
     if (bmzDrag.sourceEl && folderDiv === bmzDrag.sourceEl.closest('.folder-item')) return null;
+    /* [ZeroLabs] 2026-11-04 12:44 PM - added: a sorted folder row only accepts into (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+    if (isSortActive()) return { el: folderDiv, mode: 'into', id: folderDiv.dataset.id };
     return { el: folderDiv, mode: half(header) ? 'before' : 'into', id: folderDiv.dataset.id };
   }
 
@@ -4352,6 +4447,8 @@ function bmzResolveDropTarget(x, y) {
 function bmzPaintDropTarget(target) {
   bmzClearDropIndicators();
   if (!target) return;
+  /* [ZeroLabs] 2026-11-04 12:44 PM - added: no indicator for a refused drop (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  if (isOrderChangingDrop(target, bmzDrag.payload)) return;
 
   if (target.mode === 'before') target.el.classList.add('drop-before');
   else if (target.mode === 'after') target.el.classList.add('drop-after');
@@ -4436,6 +4533,12 @@ async function bmzFinishDrag() {
 
   bmzEndDrag();
   if (!target || !payload) return;
+
+  /* [ZeroLabs] 2026-11-04 12:44 PM - added: refuse order changes while sorted (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  if (kind !== 'quick-access' && isOrderChangingDrop(target, payload)) {
+    app.showToast(SORT_VIEW_ONLY_MESSAGE, 'info', 4000);
+    return;
+  }
 
   try {
     if (kind === 'quick-access') {
@@ -8140,9 +8243,10 @@ function filterAndSearchBookmarks(nodes) {
     if (node.type === 'folder') {
       const filteredChildren = filterAndSearchBookmarks(node.children || []);
       if (filteredChildren.length > 0 || (!searchTerm && activeFilters.length === 0)) {
+        /* [ZeroLabs] 2026-11-04 12:44 PM - edited: apply the view-only sort (see also: Chrome sidepanel.js, Firefox sidebar.js) */
         acc.push({
           ...node,
-          children: filteredChildren
+          children: sortChildrenForDisplay(filteredChildren)
         });
       }
     } else if (node.url) {
@@ -8416,38 +8520,32 @@ function generateBookmarkHTML(bookmarkTree) {
   return html;
 }
 
-// SAFETY: Export bookmarks as JSON or HTML backup
-async function exportBookmarks() {
+/* [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML only, Cancel now cancels (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+// SAFETY: Export bookmarks as an HTML backup. Returns true when the file was
+// saved. A caller whose user already chose a backup passes false to skip the
+// question, because Cancel there would continue with no backup.
+async function exportBookmarks(askFirst = true) {
   try {
-    // Ask user for format preference
-    const format = confirm(
-      'Choose export format:\n\n' +
-      'OK = HTML (compatible with all browsers)\n' +
-      'Cancel = JSON (Firefox native format)\n\n' +
-      'HTML format can be imported into any browser.\n' +
-      'JSON format preserves all Firefox bookmark metadata.'
-    ) ? 'html' : 'json';
-
-    let data;
+    if (askFirst) {
+      const confirmed = confirm(
+        'Export your bookmarks as an HTML file?\n\n' +
+        'The file can be imported into any browser.\n\n' +
+        'OK = Download the file\n' +
+        'Cancel = Do not export'
+      );
+      if (!confirmed) return false;
+    }
 
     // Export bookmark tree from bookmarkManager
-    data = bookmarkManager.getTree();
+    const data = bookmarkManager.getTree();
 
     // Generate filename with timestamp
     const date = new Date().toISOString().split('T')[0];
-    let filename, blob;
 
-    if (format === 'html') {
-      // Create HTML file
-      const html = generateBookmarkHTML(data);
-      blob = new Blob([html], { type: 'text/html;charset=utf-8' });
-      filename = `bookmarks-${date}.html`;
-    } else {
-      // Create JSON file
-      const json = JSON.stringify(data, null, 2);
-      blob = new Blob([json], { type: 'application/json' });
-      filename = `bookmarks-backup-${date}.json`;
-    }
+    // Create HTML file
+    const html = generateBookmarkHTML(data);
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+    const filename = `bookmarks-${date}.html`;
 
     /* [ZeroLabs] 2026-09-23 5:20 PM - edited: save through the helper, and tell the truth */
     // This used to click an <a download> and then announce success whatever
@@ -8457,39 +8555,35 @@ async function exportBookmarks() {
 
     /* [ZeroLabs] 2026-09-24 4:15 AM - added: closing the save screen is a choice */
     // The Android app now asks where to save. Backing out is not a failure.
-    if (cancelled) return;
+    if (cancelled) return false;
 
     if (!saved) {
       alert('Export failed. The file was not saved.');
-      return;
+      return false;
     }
 
     const where = location ? `Saved as: ${location}\n\n` : `File: ${filename}\n\n`;
 
-    if (format === 'html') {
-      alert(
-        `✓ Bookmarks exported as HTML!\n\n` +
-        where +
-        `This file can be imported into:\n` +
-        `• Firefox: Bookmarks → Manage Bookmarks → Import and Backup → Import Bookmarks from HTML\n` +
-        `• Chrome/Edge: Bookmarks → Import bookmarks and settings\n` +
-        `• Any browser that supports Netscape bookmark format`
-      );
-    } else {
-      alert(
-        `✓ Bookmarks exported as JSON!\n\n` +
-        where +
-        `This backup can be imported back into Firefox via:\n` +
-        `Bookmarks → Manage Bookmarks → Import and Backup → Restore → Choose File`
-      );
-    }
+    alert(
+      `✓ Bookmarks exported as HTML!\n\n` +
+      where +
+      `This file can be imported into:\n` +
+      `• Firefox: Bookmarks → Manage Bookmarks → Import and Backup → Import Bookmarks from HTML\n` +
+      `• Chrome/Edge: Bookmarks → Import bookmarks and settings\n` +
+      `• Any browser that supports Netscape bookmark format`
+    );
+    return true;
   } catch (error) {
     console.error('Error exporting bookmarks:', error);
     alert('Failed to export bookmarks. Please try again.');
+    return false;
   }
 }
 
-// IMPORT BOOKMARKS: Import bookmarks from HTML or JSON files
+/* [ZeroLabs] 2026-11-04 1:06 PM - added: app.js backup flows call this (see also: js/core/app.js) */
+window.exportBookmarks = exportBookmarks;
+
+// IMPORT BOOKMARKS: Import bookmarks from HTML files
 async function importBookmarks() {
   try {
     const fileInput = document.getElementById('importFileInput');
@@ -8514,13 +8608,12 @@ async function importBookmarks() {
         const content = await file.text();
         let parsedTree;
 
+        /* [ZeroLabs] 2026-11-04 12:53 PM - removed: JSON import (see also: core/app.js) */
         // Parse based on file extension
         if (file.name.endsWith('.html')) {
           parsedTree = parseHTMLBookmarks(content);
-        } else if (file.name.endsWith('.json')) {
-          parsedTree = parseJSONBookmarks(content);
         } else {
-          alert('Unsupported file format. Please select an HTML or JSON bookmark file.');
+          alert('Unsupported file format. Please select an HTML bookmark file.');
           fileInput.value = ''; // Reset input
           return;
         }
@@ -10258,8 +10351,15 @@ function setupEventListeners() {
     });
   }
 
+  /* [ZeroLabs] 2026-11-04 12:44 PM - added: sort chip (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  const sortChip = document.getElementById('sortChip');
+  if (sortChip) {
+    sortChip.addEventListener('click', cycleSortMode);
+  }
+
   // Filter chips
-  document.querySelectorAll('.filter-chip').forEach(chip => {
+  /* [ZeroLabs] 2026-11-04 12:44 PM - edited: the sort chip is not a filter (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  document.querySelectorAll('.filter-chip[data-filter]').forEach(chip => {
     chip.addEventListener('click', () => {
       const filter = chip.dataset.filter;
 

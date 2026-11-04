@@ -15,9 +15,7 @@ import bookmarkManager from './bookmarks.js';
 import blocklistService from './blocklist-service.js';
 import scannerService from './scanner.js';
 import { exportAsHTML } from '../import-export/html-exporter.js';
-import { exportAsJSON } from '../import-export/json-exporter.js';
 import { importFromHTML } from '../import-export/html-parser.js';
-import { importFromJSON } from '../import-export/json-parser.js';
 import touchHandler from '../mobile/touch-handler.js';
 import { safeLocalStorage, addChangelogEntry, clearChangelog } from '../utils/storage-utils.js';
 import supabaseManager from '../auth/supabase-manager.js';
@@ -451,12 +449,11 @@ class App {
           // const text = await file.text();
           let bookmarks;
 
-          if (file.name.endsWith('.json')) {
-            bookmarks = await importFromJSON(file);
-          } else if (file.name.endsWith('.html')) {
+          /* [ZeroLabs] 2026-11-04 12:53 PM - removed: JSON import (see also: js/sidebar-adapted.js) */
+          if (file.name.endsWith('.html')) {
             bookmarks = await importFromHTML(file);
           } else {
-            throw new Error('Unsupported file format. Please use .html or .json files.');
+            throw new Error('Unsupported file format. Please use an .html file.');
           }
 
           // Store bookmarks in local storage
@@ -1242,10 +1239,11 @@ class App {
 
     document.getElementById('storeExportFirst')?.addEventListener('click', async () => {
       try {
+        /* [ZeroLabs] 2026-11-04 1:06 PM - edited: the user already chose the backup (see also: js/sidebar-adapted.js) */
         if (typeof this.exportBookmarks === 'function') {
-          await this.exportBookmarks();
+          await this.exportBookmarks(false);
         } else if (window.exportBookmarks) {
-          await window.exportBookmarks();
+          await window.exportBookmarks(false);
         }
       } catch (error) {
         console.error('[StoreSetup] Export failed:', error);
@@ -2145,7 +2143,12 @@ class App {
           if (shouldBackup === 'backup') {
             // User wants to backup first
             console.log('[UseRemoteStorage] Exporting backup before replace...');
-            await window.exportBookmarks();
+            /* [ZeroLabs] 2026-11-04 1:06 PM - edited: no file means no replace (see also: js/sidebar-adapted.js) */
+            const backupSaved = await window.exportBookmarks(false);
+            if (!backupSaved) {
+              console.log('[UseRemoteStorage] Backup was not saved, stopping the replace');
+              return;
+            }
           }
 
           // Clear all local bookmarks to avoid diff conflicts
@@ -3729,7 +3732,8 @@ class App {
     // Create a file input for import
     const input = document.createElement('input');
     input.type = 'file';
-    input.accept = '.html,.json';
+    /* [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML import only (see also: index.html) */
+    input.accept = '.html';
 
     input.onchange = async (e) => {
       const file = e.target.files[0];
@@ -3742,11 +3746,8 @@ class App {
         if (fileName.endsWith('.html') || fileName.endsWith('.htm')) {
           this.showToast('Importing HTML bookmarks...', 'info');
           bookmarkTree = await importFromHTML(file);
-        } else if (fileName.endsWith('.json')) {
-          this.showToast('Importing JSON bookmarks...', 'info');
-          bookmarkTree = await importFromJSON(file);
         } else {
-          this.showToast('Unsupported file format. Please use HTML or JSON.', 'error');
+          this.showToast('Unsupported file format. Please use HTML.', 'error');
           return;
         }
 
@@ -3796,7 +3797,8 @@ class App {
    * Show export modal
    */
   showExportModal() {
-    // Create a simple modal to choose export format
+    /* [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML is the only export format */
+    // Create a simple modal to confirm the export
     const modal = document.createElement('div');
     modal.className = 'modal';
     modal.style.display = 'flex';
@@ -3804,13 +3806,10 @@ class App {
     modal.innerHTML = `
       <div class="modal-content" style="max-width: 400px;">
         <h2>Export Bookmarks</h2>
-        <p>Choose export format:</p>
+        <p>Export your bookmarks as an HTML file? The file can be imported into any browser.</p>
         <div style="display: flex; gap: 10px; margin-top: 20px;">
           <button id="exportHTMLBtn" class="btn btn-primary" style="flex: 1;">
             Export as HTML
-          </button>
-          <button id="exportJSONBtn" class="btn btn-primary" style="flex: 1;">
-            Export as JSON
           </button>
         </div>
         <button id="cancelExportBtn" class="btn" style="margin-top: 10px; width: 100%;">
@@ -3822,8 +3821,8 @@ class App {
     document.body.appendChild(modal);
 
     /* [ZeroLabs] 2026-09-23 5:20 PM - edited: report what actually happened */
-    // Both exporters are async now, and both report whether the file was
-    // really written. The old code called them synchronously and announced
+    // The exporter is async now, and it reports whether the file was
+    // really written. The old code called it synchronously and announced
     // success either way, which is how a failed export in the Android app
     // still produced "Exported as bookmarks-2026-09-23.html".
     const runExport = async (exporter) => {
@@ -3855,11 +3854,6 @@ class App {
     // Export HTML
     modal.querySelector('#exportHTMLBtn').addEventListener('click', () => {
       runExport(exportAsHTML);
-    });
-
-    // Export JSON
-    modal.querySelector('#exportJSONBtn').addEventListener('click', () => {
-      runExport(exportAsJSON);
     });
 
     // Cancel

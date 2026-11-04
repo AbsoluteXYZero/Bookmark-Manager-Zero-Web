@@ -7,7 +7,7 @@
 **A fully static web application for managing bookmarks with GitLab repository synchronization.**
 
 <!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
-![Version](https://img.shields.io/badge/version-6.2-blue)
+![Version](https://img.shields.io/badge/version-6.4-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -67,6 +67,9 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 - **Advanced Search** - Real-time search across titles and URLs
 - **Folder Management** - Create, edit, move, and organize folders
 - **Smart Filters** - Filter by link status and safety with multi-select support
+- **Expand Results** - Search and filter results open their folders automatically, and clearing them restores your folders
+- **Expand All / Collapse All** - One button opens or closes every folder, or only the results during a search or filter
+- **View-Only Sort** - Sort folder contents A-Z, Z-A, newest, or oldest without changing your real bookmark order
 - **List & Grid Views** - Choose your preferred layout
 - **Drag & Drop** - Reorder bookmarks and folders with visual drop indicators
 - **Multi-Select Mode** - Bulk operations toolbar with Select All/Deselect All
@@ -133,7 +136,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 -️ **Website Previews** - Screenshot thumbnails with lazy loading and low-priority fetch
 - **URL Tooltips** - Hover over bookmark title/URL to see full URL
-- **Import/Export** - HTML (Netscape format with ADD_DATE) and JSON bookmark files
+- **Import/Export** - HTML bookmark files (Netscape format with ADD_DATE)
 - **Undo System** - Toast notifications with 10-second countdown timer to restore deletions
 - **Event Log with Full Restore** - View complete operation history with restore buttons, plus any errors BMZ runs into:
   - Tracks all bookmark operations (add, edit, delete, move, recheck)
@@ -183,7 +186,7 @@ Bookmark Manager Zero offers two ways to get started - visit [https://bmzweb.abs
 1. Click **"Use Local Mode"** to work entirely offline
 2. Choose to:
 
-   - **Import from File** - Upload HTML/JSON bookmarks
+   - **Import from File** - Upload an HTML bookmarks file
    - **Start Fresh** - Create empty bookmark list
    - **Continue with Existing** - Load previously saved local bookmarks
 3. All bookmarks stay on your device with no cloud sync
@@ -201,7 +204,7 @@ Bookmark Manager Zero offers two ways to get started - visit [https://bmzweb.abs
 
    - Token is encrypted with AES-256-GCM before storage
 3. Choose how to set up your repository from the four options below
-4. Start from scratch or import existing bookmarks (HTML/JSON)
+4. Start from scratch or import existing bookmarks (HTML)
 5. Your bookmarks sync automatically across all devices via a private GitLab repository
 
 **Adding Sync to Existing Local Bookmarks**
@@ -260,11 +263,11 @@ Earlier versions stored bookmarks in a GitLab Snippet. A snippet has a storage l
 
 - **Import Bookmarks:**
   - Settings → Import Bookmarks
-  - Supports HTML (Netscape format) and JSON
+  - Supports HTML (Netscape format)
   - Works with exports from Chrome, Firefox, Edge, Safari
 - **Export Bookmarks:**
   - Settings → Export Bookmarks
-  - Choose HTML (cross-browser) or JSON (BMZ cloud format)
+  - Saves an HTML file that any browser can import
 
 ### Mobile Support
 
@@ -657,9 +660,7 @@ Bookmark-Manager-Zero-Website/
 │   │   └── storage-adapter.js  # Storage interface
 │   ├── import-export/           # Bookmark import/export
 │   │   ├── html-exporter.js    # Netscape HTML export
-│   │   ├── html-parser.js      # Netscape HTML import
-│   │   ├── json-exporter.js    # JSON backup export
-│   │   └── json-parser.js      # JSON import
+│   │   └── html-parser.js      # Netscape HTML import
 │   ├── utils/                   # Utilities
 │   │   ├── encryption.js       # AES-256-GCM crypto
 │   │   ├── theme-settings-manager.js # Theme preferences

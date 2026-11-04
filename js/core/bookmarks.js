@@ -589,16 +589,7 @@ class BookmarkManager {
     }
   }
 
-  /**
-   * Export bookmark tree as JSON
-   */
-  exportToJSON() {
-    if (!this.tree) {
-      throw new Error('No bookmarks to export');
-    }
-
-    return JSON.stringify(this.tree, null, 2);
-  }
+  /* [ZeroLabs] 2026-11-04 12:53 PM - removed: unused exportToJSON */
 
   /**
    * Clear all bookmarks and reset to empty tree

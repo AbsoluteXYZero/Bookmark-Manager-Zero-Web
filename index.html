@@ -3882,7 +3882,8 @@
                 <path d="M14,2L20,8V20A2,2 0 0,1 18,22H6A2,2 0 0,1 4,20V4A2,2 0 0,1 6,2H14M18,20V9H13V4H6V20H18M12,11L16,15H13.5V18H10.5V15H8L12,11Z"/>
               </svg>
             </span>
-            <span>Import Bookmarks (HTML/JSON)</span>
+            <!-- [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML import only (see also: js/core/app.js) -->
+            <span>Import Bookmarks (HTML)</span>
           </button>
           <button class="action-btn" id="viewChangelogBtn">
             <span class="icon">
@@ -4473,6 +4474,13 @@
       </svg>
       <span>Trusted</span>
     </button>
+    <!-- [ZeroLabs] 2026-11-04 12:44 PM - added: view-only sort chip (see also: Chrome sidepanel.html, Firefox sidebar.html) -->
+    <button type="button" id="sortChip" class="filter-chip" title="Change the display order. This does not change your real bookmark order.">
+      <svg width="12" height="12" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3,13H15V11H3M3,6V8H21V6M3,18H9V16H3V18Z"/>
+      </svg>
+      <span>Sort</span>
+    </button>
   </div>
 
   <div id="displayBar" class="filters hidden">
@@ -4611,14 +4619,16 @@
         <div style="background: var(--md-sys-color-surface-variant); padding: 20px; border-radius: 12px; margin-bottom: 16px;">
           <h3 style="font-size: 16px; margin-bottom: 12px; color: var(--md-sys-color-on-surface-variant);">Import Your Bookmarks</h3>
           <p style="font-size: 14px; line-height: 1.5; color: var(--md-sys-color-on-surface-variant); margin-bottom: 16px;">
-            Choose a bookmarks file (HTML or JSON format) exported from your browser or another bookmark manager.
+            <!-- [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML import only -->
+            Choose an HTML bookmarks file exported from your browser or another bookmark manager.
           </p>
           <div style="position: relative; width: 100%;">
             <button id="selectFileBtn"
                     style="width: 100%; padding: 12px 24px; background: var(--md-sys-color-primary); color: var(--md-sys-color-on-primary); border: none; border-radius: 8px; font-size: 16px; font-weight: 500; cursor: pointer;">
               Select Bookmarks File
             </button>
-            <input type="file" id="localModeFileInput" accept=".html,.json" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
+            <!-- [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML import only -->
+            <input type="file" id="localModeFileInput" accept=".html" style="position: absolute; top: 0; left: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer;">
           </div>
           <div style="text-align: center; margin: 16px 0; color: var(--md-sys-color-on-surface-variant);">or</div>
           <button id="startFreshBtn"
@@ -5116,8 +5126,9 @@
     </div>
   </div>
 
+  <!-- [ZeroLabs] 2026-11-04 12:53 PM - edited: HTML import only -->
   <!-- Hidden file input for importing bookmarks -->
-  <input type="file" id="importFileInput" accept=".html,.json" style="display: none;" />
+  <input type="file" id="importFileInput" accept=".html" style="display: none;" />
 
   <script src="js/lib/qrcode-lib.js"></script>
 
