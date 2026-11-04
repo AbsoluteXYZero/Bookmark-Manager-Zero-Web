@@ -925,15 +925,18 @@
       margin-bottom: 8px;
     }
 
-    /* Both headers share one row, each taking half of it. A single visible
-       section takes the whole row instead. */
+    /* Both headers share one row. A single visible section takes the whole row
+       instead. */
     .bmz-section-tabs {
       display: flex;
       gap: 4px;
     }
 
+    /* [ZeroLabs] 2026-11-04 12:12 PM - edited: equal label-to-count gap in both tabs (see also: index.html, Chrome sidepanel.html, Firefox sidebar.html) */
+    /* Each tab sizes to its content and takes an equal share of the free space,
+       so a shorter title does not push its count farther away. */
     .bmz-section-tabs.split > .bmz-section-header {
-      flex: 1 1 50%;
+      flex: 1 1 auto;
       min-width: 0;
     }
 
@@ -942,15 +945,19 @@
       min-width: 0;
     }
 
-    /* [ZeroLabs] 2026-11-04 11:54 AM - added: Expand All button (see also: index.html, Chrome sidepanel.html, Firefox sidebar.html) */
-    /* margin-left:auto holds it at the right end when the row has no tabs */
+    /* [ZeroLabs] 2026-11-04 12:13 PM - edited: icon centered over folder menu dots (see also: index.html, Chrome sidepanel.html, Firefox sidebar.html) */
+    /* margin-left:auto holds it at the right end when the row has no tabs.
+       The 48px width and 4px right margin match the folder menu button, which
+       is 48px wide inside the folder row's 4px header padding. */
     .bmz-expand-all-btn {
       flex: 0 0 auto;
       display: flex;
       align-items: center;
       justify-content: center;
+      width: 48px;
       margin-left: auto;
-      padding: 6px 8px;
+      margin-right: 4px;
+      padding: 6px 0;
       cursor: pointer;
       background: transparent;
       border-radius: 10px;
