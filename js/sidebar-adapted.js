@@ -550,7 +550,7 @@ let folderScanTimestamps = {}; // Track when each folder was last scanned
 const FOLDER_SCAN_CACHE_DURATION = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 let theme = 'enhanced-blue';
 let viewMode = 'list';
-/* [ZeroLabs] 2026-08-18 12:32 AM - edited: added quickAccess/recent display flags (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
+/* [ZeroLabs] 2026-11-04 11:54 AM - edited: added expand button and results flags (see also: Chrome sidepanel.js, Firefox sidebar.js) */
 let displayOptions = {
   title: true,
   url: true,
@@ -559,8 +559,125 @@ let displayOptions = {
   preview: true,
   favicon: true,
   quickAccess: true,
-  recent: true
+  recent: true,
+  expandAll: true,
+  expandResults: true
 };
+
+/* [ZeroLabs] 2026-11-04 11:54 AM - added: temporary folder views (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+// ============================================================================
+// TEMPORARY FOLDER VIEWS
+// ============================================================================
+// A view shows every folder open or every folder closed, and "exceptions" holds
+// the folders the user clicked to the other state. A view stores no folder list,
+// so a new result set needs no walk of the tree.
+//
+// Views never write to expandedFolders. That set is the user's saved layout, and
+// autoCheckBookmarkStatuses scans every bookmark inside it. Keeping views apart
+// means that clearing a search restores the layout, and that Expand All shows
+// cached statuses without queueing a scan of the whole library.
+let treeFolderView = null;
+let searchFolderView = null;
+let searchFolderViewKey = '';
+
+function createFolderView(open) {
+  return { open: open, exceptions: new Set() };
+}
+
+function isNarrowingView() {
+  return searchTerm.length > 0 || activeFilters.length > 0;
+}
+
+function getActiveFolderView() {
+  if (isNarrowingView()) return searchFolderView;
+  return treeFolderView;
+}
+
+function isFolderOpen(folderId) {
+  const view = getActiveFolderView();
+  if (!view) return expandedFolders.has(folderId);
+
+  const isException = view.exceptions.has(folderId);
+  if (view.open) return !isException;
+  return isException;
+}
+
+function areAllFoldersShownOpen() {
+  const view = getActiveFolderView();
+  if (!view) return false;
+  return view.open && view.exceptions.size === 0;
+}
+
+// Runs at the start of each render. New search text or a filter change is a new
+// result set, so the Expand Results setting applies again.
+function syncSearchFolderView() {
+  let key = '';
+  if (isNarrowingView()) {
+    key = JSON.stringify([searchTerm, activeFilters]);
+  }
+  if (key === searchFolderViewKey) return;
+
+  searchFolderViewKey = key;
+  if (key && displayOptions.expandResults) {
+    searchFolderView = createFolderView(true);
+  } else {
+    searchFolderView = null;
+  }
+}
+
+// Website statuses load per folder from IndexedDB when a folder opens, so a view
+// that opens folders has to read them. This only reads the cache. It never scans.
+async function loadCachedStatusesForAllFolders() {
+  let newlyLoaded = 0;
+
+  for (const node of bookmarkTree) {
+    if (!node.children) continue;
+    try {
+      const result = await loadCachedStatusesForFolder(node.id);
+      if (result) {
+        newlyLoaded += (result.linkLoaded || 0) + (result.safetyLoaded || 0);
+      }
+    } catch (error) {
+      console.error('[Cache Load] Error loading cached statuses:', error);
+    }
+  }
+
+  if (newlyLoaded > 0) renderBookmarks();
+}
+
+function toggleAllFolders() {
+  const collapsing = areAllFoldersShownOpen();
+
+  if (isNarrowingView()) {
+    searchFolderView = createFolderView(!collapsing);
+  } else if (collapsing) {
+    treeFolderView = null;
+    expandedFolders.clear();
+  } else {
+    treeFolderView = createFolderView(true);
+  }
+
+  renderBookmarks();
+
+  if (!collapsing) loadCachedStatusesForAllFolders();
+}
+
+function buildExpandAllButton() {
+  const collapsing = areAllFoldersShownOpen();
+  const label = collapsing ? 'Collapse All Folders' : 'Expand All Folders';
+  const unfoldLess = 'M16.59,5.41L15.17,4L12,7.17L8.83,4L7.41,5.41L12,10M7.41,18.59L8.83,20L12,16.83L15.17,20L16.58,18.59L12,14L7.41,18.59Z';
+  const unfoldMore = 'M12,18.17L8.83,15L7.41,16.41L12,21L16.59,16.41L15.17,15M12,5.83L15.17,9L16.58,7.59L12,3L7.41,7.59L8.83,9L12,5.83Z';
+  const iconPath = collapsing ? unfoldLess : unfoldMore;
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'bmz-expand-all-btn';
+  button.title = label;
+  button.setAttribute('aria-label', label);
+  button.innerHTML = `<svg width="16" height="16" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path d="${iconPath}"/></svg>`;
+  button.addEventListener('click', toggleAllFolders);
+  return button;
+}
 
 /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access and recently opened state (see also: Bookmark-Manager-Zero-Chrome/sidepanel.js) */
 // ============================================================================
@@ -1585,6 +1702,9 @@ function loadDisplayOptions() {
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: section visibility options */
   const savedQuickAccess = safeLocalStorage.getItem('displayQuickAccess');
   const savedRecent = safeLocalStorage.getItem('displayRecent');
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: read the expand settings */
+  const savedExpandAll = safeLocalStorage.getItem('displayExpandAll');
+  const savedExpandResults = safeLocalStorage.getItem('displayExpandResults');
 
   // Update displayOptions object (default to true if not set)
   displayOptions.title = savedTitle !== null ? savedTitle === 'true' : true;
@@ -1595,6 +1715,9 @@ function loadDisplayOptions() {
   displayOptions.preview = savedPreview !== null ? savedPreview === 'true' : true;
   displayOptions.quickAccess = savedQuickAccess !== null ? savedQuickAccess === 'true' : true;
   displayOptions.recent = savedRecent !== null ? savedRecent === 'true' : true;
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: apply the expand settings */
+  displayOptions.expandAll = savedExpandAll !== null ? savedExpandAll === 'true' : true;
+  displayOptions.expandResults = savedExpandResults !== null ? savedExpandResults === 'true' : true;
 
   // Update previewPopupEnabled variable (default to true if not set)
   previewPopupEnabled = savedPreviewPopup !== null ? savedPreviewPopup === 'true' : true;
@@ -1621,6 +1744,12 @@ function loadDisplayOptions() {
   const recentCheckbox = document.getElementById('displayRecent');
   if (quickAccessCheckbox) quickAccessCheckbox.checked = displayOptions.quickAccess;
   if (recentCheckbox) recentCheckbox.checked = displayOptions.recent;
+
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: restore the expand checkboxes */
+  const expandAllCheckbox = document.getElementById('displayExpandAll');
+  const expandResultsCheckbox = document.getElementById('displayExpandResults');
+  if (expandAllCheckbox) expandAllCheckbox.checked = displayOptions.expandAll;
+  if (expandResultsCheckbox) expandResultsCheckbox.checked = displayOptions.expandResults;
 
   // Pins, recents and the open-section choice load alongside the display flags
   // so the first render already has them.
@@ -2272,6 +2401,9 @@ async function openBookmarkUrl(url, openInNewTab = false) {
 
 // Render bookmarks
 function renderBookmarks() {
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: apply expansion to new results (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  syncSearchFolderView();
+
   const filtered = filterAndSearchBookmarks(bookmarkTree);
   const isSearching = searchTerm.length > 0;
 
@@ -2401,10 +2533,8 @@ function renderBookmarks() {
   /* [ZeroLabs] 2026-08-18 12:32 AM - added: quick access and recent sections */
   // Hidden while searching or filtering: the tree is already showing matches
   // from everywhere, so mirrored rows would just duplicate the results.
-  const isNarrowing = searchTerm.length > 0 || activeFilters.length > 0;
-  if (!isNarrowing) {
-    renderSections(bookmarkList);
-  }
+  /* [ZeroLabs] 2026-11-04 11:54 AM - edited: renderSections now handles narrowing itself (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  renderSections(bookmarkList);
 
   renderNodes(filtered, bookmarkList);
 
@@ -2787,10 +2917,14 @@ window.addEventListener('sync:needsReconcile', async (e) => {
 
 // One row split in two, with the open section's contents below it. If a display
 // option hides one section, the other takes the full row rather than half.
+/* [ZeroLabs] 2026-11-04 11:54 AM - edited: expand button shares the section row (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+// During a search or filter the tabs stay hidden and the row holds only the button.
 function renderSections(container) {
-  const showQuickAccess = displayOptions.quickAccess;
-  const showRecent = displayOptions.recent;
-  if (!showQuickAccess && !showRecent) return;
+  const isNarrowing = isNarrowingView();
+  const showQuickAccess = displayOptions.quickAccess && !isNarrowing;
+  const showRecent = displayOptions.recent && !isNarrowing;
+  const showExpandAll = displayOptions.expandAll;
+  if (!showQuickAccess && !showRecent && !showExpandAll) return;
 
   // A hidden section cannot be the active one.
   let active = activeSection;
@@ -2821,6 +2955,11 @@ function renderSections(container) {
       stateKey: 'recent',
       iconPath: 'M13,3A9,9 0 0,0 4,12H1L4.89,15.89L4.96,16.03L9,12H6A7,7 0 0,1 13,5A7,7 0 0,1 20,12A7,7 0 0,1 13,19C11.07,19 9.32,18.21 8.06,16.94L6.64,18.36C8.27,20 10.51,21 13,21A9,9 0 0,0 22,12A9,9 0 0,0 13,3M12,8V13L16.28,15.54L17,14.33L13.5,12.25V8H12Z'
     }, recentResolved.length, active === 'recent'));
+  }
+
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: button at the end of the row (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  if (showExpandAll) {
+    tabs.appendChild(buildExpandAllButton());
   }
 
   wrapper.appendChild(tabs);
@@ -3186,7 +3325,8 @@ function createFolderElement(folder) {
   folderDiv.dataset.id = folder.id;
   // Don't make the entire folderDiv draggable - only the header will be draggable
 
-  const isExpanded = expandedFolders.has(folder.id) || (searchTerm && folder.children && folder.children.length > 0);
+  /* [ZeroLabs] 2026-11-04 11:54 AM - edited: open state honors temporary views (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  const isExpanded = isFolderOpen(folder.id);
   const childCount = countBookmarks(folder);
 
   const folderTitle = folder.title || folder.name || 'Unnamed Folder';
@@ -4769,6 +4909,19 @@ function findParentById(nodes, childId, parent = null) {
 // so the dots can appear a moment after the folder on its first opening in a
 // session. Later openings find the statuses already in memory.
 function toggleFolder(folderId, folderElement) {
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: a click inside a view stays there (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  // This also fixes folders that a click could not close during a search.
+  const view = getActiveFolderView();
+  if (view) {
+    if (view.exceptions.has(folderId)) {
+      view.exceptions.delete(folderId);
+    } else {
+      view.exceptions.add(folderId);
+    }
+    renderBookmarks();
+    return;
+  }
+
   const isExpanded = expandedFolders.has(folderId);
 
   if (isExpanded) {
@@ -10078,6 +10231,28 @@ function setupEventListeners() {
     displayRecent.addEventListener('change', (e) => {
       displayOptions.recent = e.target.checked;
       safeLocalStorage.setItem('displayRecent', e.target.checked);
+      renderBookmarks();
+    });
+  }
+
+  /* [ZeroLabs] 2026-11-04 11:54 AM - added: expand setting toggles (see also: Chrome sidepanel.js, Firefox sidebar.js) */
+  const displayExpandAll = document.getElementById('displayExpandAll');
+  const displayExpandResults = document.getElementById('displayExpandResults');
+
+  if (displayExpandAll) {
+    displayExpandAll.addEventListener('change', (e) => {
+      displayOptions.expandAll = e.target.checked;
+      safeLocalStorage.setItem('displayExpandAll', e.target.checked);
+      renderBookmarks();
+    });
+  }
+
+  if (displayExpandResults) {
+    displayExpandResults.addEventListener('change', (e) => {
+      displayOptions.expandResults = e.target.checked;
+      safeLocalStorage.setItem('displayExpandResults', e.target.checked);
+      // Clearing the key makes the next render apply the new setting
+      searchFolderViewKey = '';
       renderBookmarks();
     });
   }
