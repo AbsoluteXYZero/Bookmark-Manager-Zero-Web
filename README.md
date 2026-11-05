@@ -7,7 +7,7 @@
 **A fully static web application for managing bookmarks with GitLab repository synchronization.**
 
 <!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
-![Version](https://img.shields.io/badge/version-6.5-blue)
+![Version](https://img.shields.io/badge/version-6.6-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -64,7 +64,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 ### Organization & Search
 
-- **Advanced Search** - Real-time search across titles and URLs
+- **Advanced Search** - Real-time search across titles, URLs, and folder names
 - **Folder Management** - Create, edit, move, and organize folders
 - **Smart Filters** - Filter by link status and safety with multi-select support
 - **Expand Results** - Search and filter results open their folders automatically, and clearing them restores your folders
@@ -135,7 +135,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 ### Advanced Features
 
 -️ **Website Previews** - Screenshot thumbnails with lazy loading and low-priority fetch
-- **URL Tooltips** - Hover over bookmark title/URL to see full URL
+- **URL Tooltips** - Hover over bookmark title/URL to see the full URL and the bookmark's folder path
 - **Import/Export** - HTML bookmark files (Netscape format with ADD_DATE)
 - **Undo System** - Toast notifications with 10-second countdown timer to restore deletions
 - **Event Log with Full Restore** - View complete operation history with restore buttons, plus any errors BMZ runs into:

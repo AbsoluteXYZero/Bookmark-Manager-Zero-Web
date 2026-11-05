@@ -53,5 +53,12 @@
     "version": "6.4",
     "targets": ["website"],
     "message": "Here is what is new in versions 6.4 and 6.5.\n\n• Filter results now open their folders automatically, the same as search results, including child folders. Clear the search or filter and your folders return to how you left them. You can turn this off with Expand Results in Display Options.\n• During a search, a click on a folder now closes it. Before, those folders stayed open.\n• A new Expand All / Collapse All button sits next to Quick Access and Recent. It opens or closes every folder, or only the results during a search or filter. You can hide it with Expand All in Display Options.\n• You can now sort the contents of your folders A-Z, Z-A, newest, or oldest from a Sort row in the Filter bar. Each option has its own chip, and Off is the default. The sort is view only, so your real bookmark order does not change. While a sort is on, you can still drop an item onto another folder. A drop that would change an item's position shows a message instead.\n• Date sort uses the date stored with each bookmark, so imported or synced bookmarks may not show the original date.\n• Import and export are now HTML only. JSON import and export are gone, and the HTML file can be imported into any browser. Export now asks you to confirm, and Cancel cancels it.\n• The Save a backup file first button now saves a file. It did nothing before.\n• Saving a backup before replacing your bookmarks now works, and the replace stops if the file was not saved.\n• Quick Access and Recent now show the same gap between each title and its count."
+  },
+  {
+    "id": 10,
+    "date": "November 5, 2026",
+    "version": "6.6",
+    "targets": ["chrome", "firefox", "website"],
+    "message": "Version 6.6 is here.\n\n• Search now matches the names of folders and child folders. A folder that matches shows everything inside it, and active filters still apply to those contents. The top-level root folders do not match by name.\n• Bookmark tooltips now show the folder path on the line under the link. To turn the folder path off, click the Display Options button (the eye icon) in the toolbar, then uncheck Tooltip Path.\n\nThe notes for versions 6.4 and 6.5 are in the earlier updates below."
   }
 ]
