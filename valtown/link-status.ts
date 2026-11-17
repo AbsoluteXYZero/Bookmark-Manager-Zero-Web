@@ -53,7 +53,7 @@ const cache = new Map<string, any>();
 /* [ZeroLabs] 2026-08-28 - added: reflect known origins instead of "*" */
 // BMZ is open source and the token ships in the page, so this endpoint is
 // effectively public. The realistic abuse is someone pointing their own site at
-// it and spending Zero's shared 1000/min quota through their visitors' browsers.
+// it and spending the BMZ account's shared 1000/min quota through their visitors' browsers.
 //
 // Reflecting only known origins stops exactly that: a browser will refuse to let
 // a page read a response whose Access-Control-Allow-Origin does not match it.

@@ -396,7 +396,7 @@ const BLOCKLIST_SOURCES = [
 // NOT dbManager's database. That one holds the bookmarks and carries real
 // migration logic in onupgradeneeded (a v1->v2 keyPath change); a second
 // connection from here with a mismatched version could trigger or block an
-// upgrade on the store holding Zero's data. A separate database removes that
+// upgrade on the store holding the user's bookmarks. A separate database removes that
 // entire risk by construction rather than by being careful.
 //
 // NEVER point this at the bookmarks database.

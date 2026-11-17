@@ -1,6 +1,17 @@
 ## Changelog
 
-### v6.6 (Current)
+### v6.7 (Current)
+
+**Changes:**
+- **One folder tree for adding bookmarks** - The add bookmark dialog now uses the same folder tree as the other dialogs, in the browser and in the Android share window. The drop-down list and the share window's tap-to-open tree are gone.
+- **Search for a folder in every folder picker** - The add bookmark, add folder, move, and bulk move dialogs have a search button next to the folder label. In search mode, type to find any folder or child folder by its name. Each result shows the full folder path. BMZ remembers whether you used the tree or the search last.
+- **Find a folder by the bookmarks inside it** - Turn on the Titles or URLs chip to also search bookmark titles or addresses. Each folder with a match shows open, and it lists only the matching bookmarks. BMZ remembers the chips you used last.
+- **Look inside a folder result** - The arrow on a folder result lists the bookmarks directly inside it. An Expand All / Collapse All button opens or closes every result at once. Long result lists show 200 rows at a time, with a Show more button at the end.
+- **Save waits for a folder** - The save button stays greyed out until a folder is picked. In search mode, no folder is picked until you choose a result or a Recently saved to chip.
+- **Recently saved to includes your last folder** - The most recent folder now has a chip too, so you can pick it in one click from search mode.
+- **The folder box keeps its height** - A switch between the tree and the search never moves the save button.
+
+### v6.6
 
 **Changes:**
 - **Search finds folders** - Search now matches the names of folders and child folders. A folder that matches shows everything inside it, and active filters still apply to those contents. Root folders such as Bookmarks Toolbar do not match by name.
