@@ -7,7 +7,7 @@
 **A fully static web application for managing bookmarks with GitLab repository synchronization.**
 
 <!-- [ZeroLabs] 2026-08-28 - edited: tracks the extensions' version -->
-![Version](https://img.shields.io/badge/version-6.7-blue)
+![Version](https://img.shields.io/badge/version-6.8-blue)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Website](https://img.shields.io/badge/live-website-orange)](https://bmzweb.absolutezero.fyi/)
 
@@ -66,7 +66,7 @@ Stop blindly clicking old bookmarks. Know which links are dead, parked, or poten
 
 - **Advanced Search** - Real-time search across titles, URLs, and folder names
 - **Folder Management** - Create, edit, move, and organize folders
-- **Folder Search in Pickers** - Find the destination folder by its name, or by the title or URL of a bookmark inside it, in every add and move dialog
+- **Folder Search in Pickers** - Find the destination folder by its name, or by the title or URL of a bookmark inside it, in every add and move dialog. Long folder paths show in full on hover
 - **Smart Filters** - Filter by link status and safety with multi-select support
 - **Expand Results** - Search and filter results open their folders automatically, and clearing them restores your folders
 - **Expand All / Collapse All** - One button opens or closes every folder, or only the results during a search or filter
