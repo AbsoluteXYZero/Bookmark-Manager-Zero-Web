@@ -177,6 +177,8 @@ cd BMZ
 # Deploy the entire directory to your static host
 ```
 
+**Link checking on your own copy:** the website itself is static, but the link checker is a Supabase Edge Function, and the hosted one only accepts requests from the official BMZ domains. To check links on your own copy, deploy [`supabase/functions/link-status/index.ts`](supabase/functions/link-status/index.ts) to your own free Supabase project. The deploy commands and the two settings to change in `workers/scanner-worker.js` are in the comments at the top of that file.
+
 ## Usage
 
 ### Getting Started
@@ -334,7 +336,7 @@ The website can optionally use external services for enhanced features. **All ca
 
 - **WordPress mshots** - Website screenshot previews via `https://s0.wp.com/mshots/v1/`
 - **Google Favicons** - Website icons via `https://www.google.com/s2/favicons`
-- **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/`, retrieved server-side and batched by domain (no API key required). A domain URLVoid has never examined returns *no verdict* rather than being recorded as clean.
+- **URLVoid Scanning** - Multi-engine reputation check via `https://www.urlvoid.com/`, retrieved server-side by the BMZ link checker (see [Link Status Checking Services](#link-status-checking-services)) and batched by domain (no API key required). A domain URLVoid has never examined returns *no verdict* rather than being recorded as clean.
 - **10 Free Blocklist Sources** - Community-maintained threat databases (~3.1M unique domains), downloaded, parsed and cached entirely inside the Web Worker:
   - URLhaus Active (abuse.ch) - ~107K actively distributing malware
   - URLhaus Historical (CDN mirror) - ~37K historical threats
@@ -346,6 +348,19 @@ The website can optionally use external services for enhanced features. **All ca
   - OISD Big - ~215K multi-source blocklist aggregator
   - FMHY Filterlist - ~282 curated unsafe sites (fake activators, malware distributors)
   - Dandelion Sprout Anti-Malware - ~5K curated malware, scam, and phishing domains
+
+### Link Status Checking Services
+
+A web page cannot read the status code of another site's response (see [Why this is harder on the web than in an extension](#why-this-is-harder-on-the-web-than-in-an-extension)), so link checking uses two outside services. You can turn link checking off with **Enable Link Checking** in Settings (the gear menu). URLVoid lookups are part of safety checking, which **Enable Safety Checking** in the same menu turns off.
+
+- **Cloudflare DNS-over-HTTPS** - `https://cloudflare-dns.com/dns-query` tells the scanner whether a bookmark's domain still exists. Only the hostname is sent, once per hostname.
+- **BMZ link checker (Supabase Edge Function)** - `https://zkwmxywegwgqcgssgfqv.supabase.co/functions/v1/link-status`
+  - **What it receives:** your bookmark URLs, in batches of up to 50, and for URLVoid checks, bookmark domains in batches of 10.
+  - **What it does:** it requests each URL from the server side and returns only the HTTP status code. It sends a `HEAD` request, or a `GET` when the site refuses `HEAD`, and it never downloads the page body.
+  - **What it keeps:** results stay in the function's memory for up to one hour, so it does not request the same URL again for every user. It writes nothing to a database or to disk.
+  - **Who sees what:** the checked sites see the request come from Supabase's servers, not from your IP address. The BMZ developer runs the function on Supabase's free plan. Supabase can keep request logs on its platform under the [Supabase Privacy Policy](https://supabase.com/privacy).
+  - **Source code:** [`supabase/functions/link-status/index.ts`](supabase/functions/link-status/index.ts)
+  - Until November 2026 this function ran on Val.town. It moved to Supabase because Val.town is shutting down.
 
 ### User-Configured Services (require API keys)
 
@@ -433,9 +448,10 @@ uses two checks a web page *is* allowed to read.
    there, so nothing further is checked. This runs once per *hostname* rather than
    per bookmark, so one lookup settles every bookmark on that domain.
 
-3. **HTTP status**, retrieved server-side. Domains that resolve are checked by a
-   small hosted endpoint that performs the request and returns only the status
-   code. Requests are batched, and the page body is never transferred.
+3. **HTTP status**, retrieved server-side. Domains that resolve are checked by the
+   BMZ link checker, a Supabase Edge Function that performs the request and returns
+   only the status code (see [Link Status Checking Services](#link-status-checking-services)).
+   Requests are batched, and the page body is never transferred.
 
 4. **Interpretation**:
 
@@ -611,6 +627,7 @@ Users can whitelist specific URLs to:
 - **Storage**: Dual-layer storage with the GitLab Projects API + IndexedDB
 - **Authentication**: Personal Access Token (PAT) with `glpat-` auto-detection
 - **Hosting**: 100% static - GitLab Pages, Cloudflare Pages, or any static host
+- **Link checker**: one Supabase Edge Function (Deno) for server-side status codes and URLVoid lookups
 - **Security**: AES-256-GCM encryption with Web Crypto API
 - **UI Framework**: Material Design 3 color system
 - **Layout**: CSS Grid & Flexbox with CSS custom properties
@@ -674,6 +691,10 @@ Bookmark-Manager-Zero-Website/
 │       └── qrcode-lib.js       # QR code generation
 ├── workers/
 │   └── scanner-worker.js        # Background scanning (26KB)
+├── supabase/
+│   └── functions/
+│       └── link-status/
+│           └── index.ts         # Link checker (Supabase Edge Function, not part of the static site)
 └── icons/                       # Favicon assets
 ```
 
@@ -811,6 +832,8 @@ MIT License - see [LICENSE](LICENSE) file for details.
 
 - **WordPress mShots** - Website screenshot preview service
 - **Google Favicons** - Website icon servicer
+- **[Supabase](https://supabase.com/)** - Edge Functions host for the link checker
+- **[Cloudflare DNS-over-HTTPS](https://developers.cloudflare.com/1.1.1.1/encryption/dns-over-https/)** - Domain existence checks
 
 Special thanks to the security research community for maintaining free, public malware databases that help keep users safe.
 
