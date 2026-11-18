@@ -1,9 +1,25 @@
+/* [ZeroLabs] 2026-11-18 2:19 PM - edited: moved from Val.town to a Supabase Edge Function */
 /**
- * BMZ link status checker - Val.town HTTP val
+ * BMZ link status checker - Supabase Edge Function
  *
- * Deployed at val.town, NOT part of the website build. The CI `pages:` job only
- * copies css/icons/js/workers/index.html, so this directory never ships - it
- * lives here for version control alongside the code that calls it.
+ * Deployed as a Supabase Edge Function, NOT part of the website build. The CI
+ * `pages:` job only copies css/icons/js/workers/index.html, so this directory
+ * never ships - it lives here for version control alongside the code that calls it.
+ *
+ * WHY SUPABASE (2026-11-18)
+ * This ran as a Val.town val until Val.town announced its shutdown (read-only
+ * 2026-12-10, end of life 2027-01-10). BMZ already has a Supabase project, and
+ * Edge Functions run Deno, so the val code moved with only the entry point and
+ * the path handling changed. Free plan: 500,000 invocations/month, 150s wall
+ * clock and 2s of CPU per invocation, 256MB. Waiting on the network does not
+ * count as CPU, which is almost all this function does.
+ *
+ * DEPLOY (no Docker needed):
+ *   npx supabase functions deploy link-status --project-ref zkwmxywegwgqcgssgfqv --no-verify-jwt --use-api
+ *   npx supabase secrets set BMZ_TOKEN=<token> --project-ref zkwmxywegwgqcgssgfqv
+ * --no-verify-jwt is required: the page calls this without a Supabase JWT, and
+ * the BMZ_TOKEN check below is the gate instead. A deploy without the flag
+ * makes every call fail with 401.
  *
  * WHY THIS EXISTS
  * A browser cannot read the HTTP status of a cross-origin response: CORS gives
@@ -21,15 +37,15 @@
  * the difference between ~14 and ~1700 full library scans per 10GB.
  *
  * BATCH MODE MATTERS
- * Val.town free tier allows 1000 requests/minute, shared across every BMZ user
- * because they all call this one val. Checking 2909 bookmarks one request at a
- * time would burn 2909 of those. POST a batch of 50 and it costs 59 instead.
+ * The free plan's 500,000 invocations/month are shared across every BMZ user
+ * because they all call this one function. Checking 2909 bookmarks one request
+ * at a time would burn 2909 of those. POST a batch of 50 and it costs 59 instead.
  */
 
-// Set with: POST /v2/vals/{val_id}/environment_variables/ {"key":"BMZ_TOKEN",...}
-// or through the val.town UI. Deliberately NOT hardcoded: free-tier vals are
-// public, so a literal here would be readable by anyone, but environment
-// variables are not source and stay secret even on a public val.
+// Set with: npx supabase secrets set BMZ_TOKEN=... (see DEPLOY above), or in the
+// Supabase dashboard under Edge Functions > Secrets. Deliberately NOT hardcoded:
+// this repo is public, so a literal here would be readable by anyone, but
+// function secrets are not source.
 //
 // It is still sent from browser JS, so anyone reading the deployed page's
 // network traffic can see it - it deters drive-by scanners, not a determined
@@ -53,7 +69,7 @@ const cache = new Map<string, any>();
 /* [ZeroLabs] 2026-08-28 - added: reflect known origins instead of "*" */
 // BMZ is open source and the token ships in the page, so this endpoint is
 // effectively public. The realistic abuse is someone pointing their own site at
-// it and spending the BMZ account's shared 1000/min quota through their visitors' browsers.
+// it and spending the BMZ project's shared invocation quota through their visitors' browsers.
 //
 // Reflecting only known origins stops exactly that: a browser will refuse to let
 // a page read a response whose Access-Control-Allow-Origin does not match it.
@@ -61,8 +77,8 @@ const cache = new Map<string, any>();
 // It does NOT stop curl or a server, which can send any Origin they like or none.
 // That is accepted rather than defended against: there is nothing user-specific
 // here to leak, the SSRF guard stops it being aimed at infrastructure, and the
-// worst case is quota burn - fixed in two minutes by rotating BMZ_TOKEN in the
-// val.town UI and the matching constant in workers/scanner-worker.js.
+// worst case is quota burn - fixed in two minutes by rotating the BMZ_TOKEN
+// secret and the matching constant in workers/scanner-worker.js.
 // ---------------------------------------------------------------------------
 // SELF-HOSTING: change these.
 //
@@ -72,12 +88,12 @@ const cache = new Map<string, any>();
 // simply means every browser request gets "null" and is refused, so do not leave
 // it empty by accident. To allow anything, return "*" from corsFor() instead.
 //
-// You will also need your OWN val rather than pointing at the author's, which
-// will refuse your origin anyway. Deploy this file as an HTTP val, set a
-// BMZ_TOKEN environment variable on it, then update these two constants near the
-// top of workers/scanner-worker.js to match:
+// You will also need your OWN function rather than pointing at the author's,
+// which will refuse your origin anyway. Deploy this file to your own Supabase
+// project (see DEPLOY above), set a BMZ_TOKEN secret on it, then update these
+// two constants near the top of workers/scanner-worker.js to match:
 //
-//     const LINK_VAL_URL   = 'https://<you>--<hash>.web.val.run';
+//     const LINK_VAL_URL   = 'https://<project-ref>.supabase.co/functions/v1/link-status';
 //     const LINK_VAL_TOKEN = '<your BMZ_TOKEN>';
 //
 // The localhost entries are for running the site from a local HTTP server during
@@ -136,7 +152,9 @@ function isFetchable(raw: string): boolean {
     host.endsWith(".localhost") ||
     host.endsWith(".internal") ||
     host.endsWith(".val.run") ||
-    host.endsWith(".val.town")
+    host.endsWith(".val.town") ||
+    host.endsWith(".supabase.co") ||
+    host.endsWith(".supabase.in")
   ) return false;
 
   // Literal private / loopback / link-local / metadata addresses
@@ -357,12 +375,22 @@ async function urlvoidAll(domains: string[]) {
   return results;
 }
 
-export default async function (req: Request): Promise<Response> {
+// Supabase passes the function name as the first path segment
+// (/link-status, /link-status/urlvoid, /link-status/health). Val.town did not,
+// so strip it and the routes below keep their old names.
+function routePath(url: URL): string {
+  const path = url.pathname.replace(/^\/link-status/, "");
+  if (path === "") return "/";
+  return path;
+}
+
+async function handler(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response(null, { headers: corsFor(req) });
 
   const url = new URL(req.url);
+  const path = routePath(url);
 
-  if (url.pathname === "/health") {
+  if (path === "/health") {
     return json({ status: "ok", cached: cache.size }, 200, req);
   }
 
@@ -374,7 +402,7 @@ export default async function (req: Request): Promise<Response> {
   if (key !== TOKEN) return json({ error: "bad key" }, 403, req);
 
   // URLVoid: GET ?domain=... or POST { domains: [...] }
-  if (url.pathname === "/urlvoid") {
+  if (path === "/urlvoid") {
     if (req.method === "POST") {
       let body: any;
       try {
@@ -421,3 +449,5 @@ export default async function (req: Request): Promise<Response> {
 
   return json(await fetchStatus(target), 200, req);
 }
+
+Deno.serve(handler);

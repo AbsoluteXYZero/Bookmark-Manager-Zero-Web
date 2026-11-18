@@ -144,8 +144,10 @@ function isPrivilegedUrl(url) {
 //           gone, so every path under it is dead. Free, unlimited, ~50ms, and
 //           cached per HOSTNAME - one lookup settles every bookmark on that host.
 //
-//   Tier 2  A val.town val does the fetch server-side and returns just the status
-//           code with permissive CORS, which the page IS allowed to read.
+//   Tier 2  A Supabase Edge Function (supabase/functions/link-status) does the
+//           fetch server-side and returns just the status code with CORS the
+//           page IS allowed to read. It was a val.town val until Val.town's
+//           shutdown was announced (end of life 2027-01-10).
 //
 // CRITICAL: a val error is NOT death. The val runs from a datacenter IP, so sites
 // with bot protection refuse it - www.ford.com resolves fine and is a real 404,
@@ -160,7 +162,8 @@ function isPrivilegedUrl(url) {
 //                       Transient, and correctly retried on the next scan.
 
 const DOH_ENDPOINT = 'https://cloudflare-dns.com/dns-query';
-const LINK_VAL_URL = 'https://testpilot--bf5f3b50a32d11f18be01607ee4eb77e.web.val.run';
+/* [ZeroLabs] 2026-11-18 2:19 PM - edited: val.town val -> Supabase Edge Function (same token, same routes) */
+const LINK_VAL_URL = 'https://zkwmxywegwgqcgssgfqv.supabase.co/functions/v1/link-status';
 // Sent from the client, so it deters scanners rather than being a real secret.
 // The val's own SSRF guard and result cache are what actually protect it.
 const LINK_VAL_TOKEN = 'UN_RMNOFQ9Jytbj7QT_kfyJFd07GCUu8';
